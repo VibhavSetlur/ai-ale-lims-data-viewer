@@ -2,8 +2,9 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import DataTable from './DataTable';
+import MutationExplorer from './MutationExplorer';
 import {
-  Database, Search, Sun, Moon, Table2,
+  Database, Search, Sun, Moon, Table2, Dna,
   Server, HardDrive, RefreshCw, AlertCircle, CheckCircle2, XCircle,
   ChevronLeft, ChevronRight, X,
 } from 'lucide-react';
@@ -27,6 +28,9 @@ type DbType = 'sqlite' | 'mysql';
 
 const ACTIVE_TABLE_KEY = 'lims:activeTable';
 const SIDEBAR_COLLAPSED_KEY = 'lims:sidebarCollapsed';
+const ACTIVE_VIEW_KEY = 'lims:activeView';
+
+type ActiveView = 'tables' | 'mutations';
 
 function formatCount(n: number): string {
   if (n >= 1_000_000) return (n / 1_000_000).toFixed(n >= 10_000_000 ? 0 : 1) + 'M';
@@ -61,14 +65,21 @@ export default function Dashboard({ initialTables }: DashboardProps) {
   const [switching, setSwitching] = useState(false);
   const [switchError, setSwitchError] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState(false);
+  const [activeView, setActiveView] = useState<ActiveView>('tables');
 
   // Restore persisted UI state
   useEffect(() => {
     try {
       const c = localStorage.getItem(SIDEBAR_COLLAPSED_KEY);
       if (c === '1') setCollapsed(true);
+      const v = localStorage.getItem(ACTIVE_VIEW_KEY);
+      if (v === 'mutations' || v === 'tables') setActiveView(v);
     } catch {}
   }, []);
+
+  useEffect(() => {
+    try { localStorage.setItem(ACTIVE_VIEW_KEY, activeView); } catch {}
+  }, [activeView]);
 
   // Persist sidebar state
   useEffect(() => {
@@ -295,10 +306,16 @@ export default function Dashboard({ initialTables }: DashboardProps) {
         </div>
 
         <div className="flex items-center gap-3">
-          {activeTable && (
+          {activeView === 'tables' && activeTable && (
             <div className="flex items-center gap-1.5 px-2.5 py-1 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded-md text-xs font-medium border border-blue-200 dark:border-blue-800">
               <Table2 className="w-3 h-3" />
               <span className="font-mono">{activeTable}</span>
+            </div>
+          )}
+          {activeView === 'mutations' && (
+            <div className="flex items-center gap-1.5 px-2.5 py-1 bg-purple-50 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 rounded-md text-xs font-medium border border-purple-200 dark:border-purple-800">
+              <Dna className="w-3 h-3" />
+              <span>Mutation Explorer</span>
             </div>
           )}
 
@@ -329,11 +346,10 @@ export default function Dashboard({ initialTables }: DashboardProps) {
         )}>
           {!collapsed ? (
             <>
-              <div className="p-3 border-b border-slate-200 dark:border-gray-700 bg-slate-50/80 dark:bg-gray-800/80">
-                <div className="flex items-center gap-2 mb-2">
-                  <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-gray-400 flex-1">
-                    Tables <span className="text-slate-400 dark:text-gray-500 font-normal normal-case">({tables.length})</span>
-                  </div>
+              {/* Top-level view switcher */}
+              <div className="p-2 border-b border-slate-200 dark:border-gray-700 bg-slate-50/80 dark:bg-gray-800/80">
+                <div className="flex items-center gap-1.5 mb-2">
+                  <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-gray-500 flex-1">Views</div>
                   <button
                     onClick={() => setCollapsed(true)}
                     className="p-1 rounded text-slate-400 dark:text-gray-500 hover:bg-slate-100 dark:hover:bg-gray-700"
@@ -342,64 +358,113 @@ export default function Dashboard({ initialTables }: DashboardProps) {
                     <ChevronLeft className="w-3.5 h-3.5" />
                   </button>
                 </div>
-                <div className="relative">
-                  <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 dark:text-gray-500" />
-                  <input
-                    type="text"
-                    placeholder="Filter tables..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="w-full pl-8 pr-7 py-1.5 text-[12px] border border-slate-300 dark:border-gray-600 rounded-md focus:ring-1 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-gray-100 outline-none placeholder:text-slate-400 dark:placeholder:text-gray-500"
-                  />
-                  {searchQuery && (
-                    <button
-                      onClick={() => setSearchQuery('')}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 dark:text-gray-500 hover:text-slate-600 dark:hover:text-gray-300"
-                    >
-                      <X className="w-3 h-3" />
-                    </button>
+                <button
+                  onClick={() => setActiveView('tables')}
+                  className={cn(
+                    "w-full flex items-center gap-2 px-2.5 py-1.5 rounded text-[12.5px] transition-colors text-left mb-1",
+                    activeView === 'tables'
+                      ? "bg-blue-50 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 font-semibold"
+                      : "text-slate-600 dark:text-gray-400 hover:bg-slate-100 dark:hover:bg-gray-700/60"
                   )}
-                </div>
+                >
+                  <Database className={cn("w-3.5 h-3.5 shrink-0", activeView === 'tables' ? "text-blue-600 dark:text-blue-400" : "text-slate-400 dark:text-gray-500")} />
+                  <span className="flex-1">Database Tables</span>
+                </button>
+                <button
+                  onClick={() => setActiveView('mutations')}
+                  className={cn(
+                    "w-full flex items-center gap-2 px-2.5 py-1.5 rounded text-[12.5px] transition-colors text-left",
+                    activeView === 'mutations'
+                      ? "bg-blue-50 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 font-semibold"
+                      : "text-slate-600 dark:text-gray-400 hover:bg-slate-100 dark:hover:bg-gray-700/60"
+                  )}
+                >
+                  <Dna className={cn("w-3.5 h-3.5 shrink-0", activeView === 'mutations' ? "text-blue-600 dark:text-blue-400" : "text-slate-400 dark:text-gray-500")} />
+                  <span className="flex-1">Mutation Explorer</span>
+                </button>
               </div>
-              <div className="flex-1 overflow-y-auto p-1">
-                {filteredTables.map((table) => {
-                  const isActive = activeTable === table.name;
-                  return (
-                    <button
-                      key={table.name}
-                      onClick={() => setActiveTable(table.name)}
-                      className={cn(
-                        "w-full flex items-center gap-2 px-2.5 py-1.5 rounded text-[12.5px] transition-colors text-left",
-                        isActive
-                          ? "bg-blue-50 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300"
-                          : "text-slate-600 dark:text-gray-400 hover:bg-slate-100 dark:hover:bg-gray-700/60 hover:text-slate-900 dark:hover:text-gray-200"
+
+              {activeView === 'tables' ? (
+                <>
+                  <div className="p-3 border-b border-slate-200 dark:border-gray-700 bg-slate-50/80 dark:bg-gray-800/80">
+                    <div className="flex items-center gap-2 mb-2">
+                      <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-gray-400 flex-1">
+                        Tables <span className="text-slate-400 dark:text-gray-500 font-normal normal-case">({tables.length})</span>
+                      </div>
+                    </div>
+                    <div className="relative">
+                      <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 dark:text-gray-500" />
+                      <input
+                        type="text"
+                        placeholder="Filter tables..."
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        className="w-full pl-8 pr-7 py-1.5 text-[12px] border border-slate-300 dark:border-gray-600 rounded-md focus:ring-1 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-gray-100 outline-none placeholder:text-slate-400 dark:placeholder:text-gray-500"
+                      />
+                      {searchQuery && (
+                        <button
+                          onClick={() => setSearchQuery('')}
+                          className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 dark:text-gray-500 hover:text-slate-600 dark:hover:text-gray-300"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
                       )}
-                      title={`${table.name} — ${table.rowCount.toLocaleString()} rows`}
-                    >
-                      <Database className={cn(
-                        "w-3.5 h-3.5 shrink-0",
-                        isActive ? "text-blue-600 dark:text-blue-400" : "text-slate-400 dark:text-gray-500"
-                      )} />
-                      <span className="truncate flex-1 font-mono">{table.name}</span>
-                      <span className={cn(
-                        "text-[10px] font-medium tabular-nums shrink-0",
-                        isActive ? "text-blue-500 dark:text-blue-400" : "text-slate-400 dark:text-gray-500"
-                      )}>
-                        {table.rowCount > 0 ? formatCount(table.rowCount) : ''}
-                      </span>
-                    </button>
-                  );
-                })}
-                {filteredTables.length === 0 && (
-                  <div className="text-center p-4 text-[12px] text-slate-500 dark:text-gray-400">
-                    {tables.length === 0 ? 'No tables in database.' : 'No tables match filter.'}
+                    </div>
                   </div>
-                )}
-              </div>
-              <div className="px-3 py-2 border-t border-slate-200 dark:border-gray-700 bg-slate-50/60 dark:bg-gray-800/60 text-[10.5px] text-slate-500 dark:text-gray-400 flex justify-between">
-                <span>{tables.length} tables</span>
-                <span className="tabular-nums">{totalRows > 0 ? `${formatCount(totalRows)} rows` : ''}</span>
-              </div>
+                  <div className="flex-1 overflow-y-auto p-1">
+                    {filteredTables.map((table) => {
+                      const isActive = activeTable === table.name;
+                      return (
+                        <button
+                          key={table.name}
+                          onClick={() => setActiveTable(table.name)}
+                          className={cn(
+                            "w-full flex items-center gap-2 px-2.5 py-1.5 rounded text-[12.5px] transition-colors text-left",
+                            isActive
+                              ? "bg-blue-50 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300"
+                              : "text-slate-600 dark:text-gray-400 hover:bg-slate-100 dark:hover:bg-gray-700/60 hover:text-slate-900 dark:hover:text-gray-200"
+                          )}
+                          title={`${table.name} — ${table.rowCount.toLocaleString()} rows`}
+                        >
+                          <Database className={cn(
+                            "w-3.5 h-3.5 shrink-0",
+                            isActive ? "text-blue-600 dark:text-blue-400" : "text-slate-400 dark:text-gray-500"
+                          )} />
+                          <span className="truncate flex-1 font-mono">{table.name}</span>
+                          <span className={cn(
+                            "text-[10px] font-medium tabular-nums shrink-0",
+                            isActive ? "text-blue-500 dark:text-blue-400" : "text-slate-400 dark:text-gray-500"
+                          )}>
+                            {table.rowCount > 0 ? formatCount(table.rowCount) : ''}
+                          </span>
+                        </button>
+                      );
+                    })}
+                    {filteredTables.length === 0 && (
+                      <div className="text-center p-4 text-[12px] text-slate-500 dark:text-gray-400">
+                        {tables.length === 0 ? 'No tables in database.' : 'No tables match filter.'}
+                      </div>
+                    )}
+                  </div>
+                  <div className="px-3 py-2 border-t border-slate-200 dark:border-gray-700 bg-slate-50/60 dark:bg-gray-800/60 text-[10.5px] text-slate-500 dark:text-gray-400 flex justify-between">
+                    <span>{tables.length} tables</span>
+                    <span className="tabular-nums">{totalRows > 0 ? `${formatCount(totalRows)} rows` : ''}</span>
+                  </div>
+                </>
+              ) : (
+                <div className="flex-1 overflow-y-auto p-3 text-[12px] text-slate-500 dark:text-gray-400 leading-relaxed">
+                  <div className="font-semibold text-slate-700 dark:text-gray-200 mb-1">Mutation Explorer</div>
+                  <p className="text-[11.5px]">
+                    Pick samples on the <span className="font-medium">Sample Selection</span> tab, then switch to <span className="font-medium">Comparative View</span> to see mutations side-by-side.
+                  </p>
+                  <p className="text-[11.5px] mt-2">
+                    Samples are grouped by experiment &gt; replicate &gt; donor DNA, and ALE samples are sorted by transfer count.
+                  </p>
+                  <p className="text-[11px] mt-3 text-slate-400 dark:text-gray-500">
+                    Source: <span className="font-mono">data/mutations.json</span>
+                  </p>
+                </div>
+              )}
             </>
           ) : (
             <div className="flex flex-col items-center pt-2 gap-2">
@@ -410,16 +475,29 @@ export default function Dashboard({ initialTables }: DashboardProps) {
               >
                 <ChevronRight className="w-4 h-4" />
               </button>
-              <div className="text-[10px] text-slate-400 dark:text-gray-500 [writing-mode:vertical-rl] rotate-180 mt-1">
-                {tables.length} tables
-              </div>
+              <button
+                onClick={() => setActiveView('tables')}
+                className={cn("p-1.5 rounded", activeView === 'tables' ? "text-blue-600 bg-blue-50 dark:bg-blue-900/40" : "text-slate-400 dark:text-gray-500 hover:bg-slate-100 dark:hover:bg-gray-700")}
+                title="Database Tables"
+              >
+                <Database className="w-4 h-4" />
+              </button>
+              <button
+                onClick={() => setActiveView('mutations')}
+                className={cn("p-1.5 rounded", activeView === 'mutations' ? "text-blue-600 bg-blue-50 dark:bg-blue-900/40" : "text-slate-400 dark:text-gray-500 hover:bg-slate-100 dark:hover:bg-gray-700")}
+                title="Mutation Explorer"
+              >
+                <Dna className="w-4 h-4" />
+              </button>
             </div>
           )}
         </aside>
 
         <div className="flex-1 min-w-0 p-3 flex flex-col overflow-hidden bg-slate-50 dark:bg-gray-900 relative">
           <div className="flex-1 min-h-0">
-            {activeTable ? (
+            {activeView === 'mutations' ? (
+              <MutationExplorer />
+            ) : activeTable ? (
               <DataTable tableName={activeTable} />
             ) : (
               <div className="flex flex-col items-center justify-center h-full bg-white dark:bg-gray-800 rounded-lg border border-slate-200 dark:border-gray-700 text-slate-500 dark:text-gray-400 shadow-sm text-sm gap-2">
