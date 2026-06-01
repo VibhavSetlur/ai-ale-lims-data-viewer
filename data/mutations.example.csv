@@ -1,0 +1,11 @@
+,,,,experiment,ALE1b,ALE1b,ALE1b,ALE1b,ALE1b
+,,,,experiment_type,robotic ALE,robotic ALE,robotic ALE,robotic ALE,robotic ALE
+,,,,replicate,A,A,A,A,A
+,,,,donor_dna,fba mutation,fba mutation,fba mutation,fba mutation,fba mutation
+,,,,condition,Pyruvate 20 mM,Pyruvate 20 mM,Pyruvate 20 mM,Pyruvate 20 mM,Pyruvate 20 mM
+,,,,strain,ACN3210,ACN3210,ACN3210,ACN3210,ACN3210
+,,,,transfer,0,1,5,10,25
+gene,variant,type,metric,sample,ACN3210 fba A t=0,ACN3210 fba A t=1,ACN3210 fba A t=5,ACN3210 fba A t=10,ACN3210 fba A t=25
+fba,P44L,SNP,frequency,,0.00,0.00,0.13,0.87,0.15
+fba,secondary,SNP,frequency,,0.00,0.00,0.49,0.13,0.88
+dgoA,copy number,amplification,copy_number,,0.8,0.8,1.3,1.4,0.9

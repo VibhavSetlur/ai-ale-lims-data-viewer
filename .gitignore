@@ -34,8 +34,10 @@ yarn-error.log*
 .env*
 !.env.example
 
-# local database files
-data/
+# local database files (keep the mutation-explorer seed + example shipped)
+data/*
+!data/mutations.json
+!data/mutations.example.csv
 archive/
 
 # local config overrides
