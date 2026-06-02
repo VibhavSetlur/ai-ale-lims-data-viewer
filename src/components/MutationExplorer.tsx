@@ -69,7 +69,8 @@ type CompareFilters = {
   minFreq: number;
   minPresence: number;
   hideEmpty: boolean;
-  sortKey: 'gene' | 'variant' | 'type' | 'maxFreq' | 'spread' | 'presence' | null;
+  hideEmptySamples: boolean;
+  sortKey: 'gene' | 'variant' | 'type' | 'position' | 'maxFreq' | 'spread' | 'presence' | null;
   sortDir: 'asc' | 'desc';
 };
 
@@ -850,7 +851,7 @@ function SampleSelectionPanel({
 
 /* ---------------- Comparative Panel ---------------- */
 
-type SortKey = 'gene' | 'variant' | 'type' | 'maxFreq' | 'spread' | 'presence' | null;
+type SortKey = 'gene' | 'variant' | 'type' | 'position' | 'maxFreq' | 'spread' | 'presence' | null;
 type SortDir = 'asc' | 'desc';
 
 function ComparativePanel({
@@ -867,6 +868,7 @@ function ComparativePanel({
   const [minFreq, setMinFreq] = useState(0);
   const [minPresence, setMinPresence] = useState(0);
   const [hideEmpty, setHideEmpty] = useState(true);
+  const [hideEmptySamples, setHideEmptySamples] = useState(false);
   const [sortKey, setSortKey] = useState<SortKey>('maxFreq');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
   const [filtersHydrated, setFiltersHydrated] = useState(false);
@@ -884,7 +886,8 @@ function ComparativePanel({
         if (typeof f.minFreq === 'number') setMinFreq(f.minFreq);
         if (typeof f.minPresence === 'number') setMinPresence(f.minPresence);
         if (typeof f.hideEmpty === 'boolean') setHideEmpty(f.hideEmpty);
-        if (f.sortKey === null || ['gene','variant','type','maxFreq','spread','presence'].includes(f.sortKey as string)) setSortKey(f.sortKey as SortKey);
+        if (typeof f.hideEmptySamples === 'boolean') setHideEmptySamples(f.hideEmptySamples);
+        if (f.sortKey === null || ['gene','variant','type','position','maxFreq','spread','presence'].includes(f.sortKey as string)) setSortKey(f.sortKey as SortKey);
         if (f.sortDir === 'asc' || f.sortDir === 'desc') setSortDir(f.sortDir);
       }
     } catch {}
@@ -896,11 +899,11 @@ function ComparativePanel({
     if (!filtersHydrated) return;
     try {
       const payload: CompareFilters = {
-        mutFilter, metricFilter, snpTypes: [...snpTypes], minFreq, minPresence, hideEmpty, sortKey, sortDir,
+        mutFilter, metricFilter, snpTypes: [...snpTypes], minFreq, minPresence, hideEmpty, hideEmptySamples, sortKey, sortDir,
       };
       localStorage.setItem(COMPARE_FILTERS_KEY, JSON.stringify(payload));
     } catch {}
-  }, [filtersHydrated, mutFilter, metricFilter, snpTypes, minFreq, minPresence, hideEmpty, sortKey, sortDir]);
+  }, [filtersHydrated, mutFilter, metricFilter, snpTypes, minFreq, minPresence, hideEmpty, hideEmptySamples, sortKey, sortDir]);
 
   const toggleSnpType = (t: string) => {
     const next = new Set(snpTypes);
@@ -925,6 +928,8 @@ function ComparativePanel({
   }, [samples, selected]);
 
   // shared y-max and x-extent so growth curves are visually comparable across columns.
+  // Uses visibleSamples (declared below) — JS hoisting handles the cycle since
+  // both are useMemo values referenced at render time. We re-derive when either changes.
   const curveScale = useMemo(() => {
     let yMax = 0;
     let xMin = Infinity, xMax = -Infinity;
@@ -974,6 +979,13 @@ function ComparativePanel({
       if (sortKey === 'gene') return dir * (a.gene.localeCompare(b.gene) || a.variant.localeCompare(b.variant));
       if (sortKey === 'variant') return dir * a.variant.localeCompare(b.variant);
       if (sortKey === 'type') return dir * a.type.localeCompare(b.type);
+      if (sortKey === 'position') {
+        // Genome position is a numeric coordinate; missing positions sort to the end regardless of direction.
+        const ap = typeof a.position === 'number' ? a.position : (dir === 1 ? Infinity : -Infinity);
+        const bp = typeof b.position === 'number' ? b.position : (dir === 1 ? Infinity : -Infinity);
+        if (ap !== bp) return dir * (ap - bp);
+        return a.gene.localeCompare(b.gene) || a.variant.localeCompare(b.variant);
+      }
       const aVals = selectedSamples.map(s => a.values[s.id]).filter(v => typeof v === 'number') as number[];
       const bVals = selectedSamples.map(s => b.values[s.id]).filter(v => typeof v === 'number') as number[];
       if (sortKey === 'maxFreq') {
@@ -995,12 +1007,27 @@ function ComparativePanel({
     });
   }, [filteredMutations, sortKey, sortDir, selectedSamples]);
 
-  // Column grouping for sticky header: (experiment + replicate) > donor_dna
+  // Hide empty columns: samples whose every visible mutation cell has no value.
+  // The "visible" set of mutations is sortedMutations (post-filter, post-sort).
+  // We only consult m.values, not styling — null cells are the ones to hide.
+  const visibleSamples = useMemo(() => {
+    if (!hideEmptySamples) return selectedSamples;
+    if (sortedMutations.length === 0) return selectedSamples;
+    return selectedSamples.filter(s =>
+      sortedMutations.some(m => typeof m.values[s.id] === 'number')
+    );
+  }, [selectedSamples, sortedMutations, hideEmptySamples]);
+
+  const hiddenSampleCount = selectedSamples.length - visibleSamples.length;
+
+  // Column grouping for sticky header: (experiment + replicate) > donor_dna.
+  // Built from visibleSamples so hidden columns drop out cleanly, including
+  // collapsing their parent group bands when every member is hidden.
   const columnGroups = useMemo(() => {
     interface SubGroup { key: string; label: string; cols: MutationSample[] }
     interface TopGroup { key: string; experiment: string; replicate: string; subs: SubGroup[]; colCount: number }
     const top: TopGroup[] = [];
-    for (const s of selectedSamples) {
+    for (const s of visibleSamples) {
       const tKey = `${s.experiment}||${s.replicate ?? ''}`;
       let group = top[top.length - 1];
       if (!group || group.key !== tKey) {
@@ -1017,15 +1044,22 @@ function ComparativePanel({
       group.colCount++;
     }
     return top;
-  }, [selectedSamples]);
+  }, [visibleSamples]);
 
   const toggleSort = (key: NonNullable<SortKey>) => {
     if (sortKey === key) setSortDir(sortDir === 'asc' ? 'desc' : 'asc');
-    else { setSortKey(key); setSortDir('desc'); }
+    else {
+      setSortKey(key);
+      // Ascending feels natural for labels / coordinates; descending for value-based keys.
+      const asc = key === 'gene' || key === 'variant' || key === 'type' || key === 'position';
+      setSortDir(asc ? 'asc' : 'desc');
+    }
   };
 
   const exportCsv = () => {
-    const cols = selectedSamples;
+    // Export the columns the user is actually looking at — if they hid empties,
+    // those samples aren't in the CSV either.
+    const cols = visibleSamples;
     const rows: string[][] = [];
     // metadata rows
     rows.push(['', '', '', '', 'experiment', ...cols.map(s => s.experiment)]);
@@ -1120,13 +1154,20 @@ function ComparativePanel({
             className="w-16 text-[12px] border border-slate-300 dark:border-gray-600 rounded px-1.5 py-0.5 bg-white dark:bg-gray-700 dark:text-gray-100 outline-none tabular-nums"
           />
         </label>
-        <label className="text-[11px] text-slate-600 dark:text-gray-300 flex items-center gap-1">
+        <label className="text-[11px] text-slate-600 dark:text-gray-300 flex items-center gap-1" title="Drop mutation rows whose visible cells are all empty">
           <input type="checkbox" checked={hideEmpty} onChange={e => setHideEmpty(e.target.checked)} className="accent-blue-600" />
-          hide mutations with no data in selection
+          hide empty rows
+        </label>
+        <label className="text-[11px] text-slate-600 dark:text-gray-300 flex items-center gap-1" title="Drop sample columns whose every visible mutation cell has no value (useful for screening for a mutation across the full DB)">
+          <input type="checkbox" checked={hideEmptySamples} onChange={e => setHideEmptySamples(e.target.checked)} className="accent-blue-600" />
+          hide empty columns
         </label>
 
         <div className="text-[11px] text-slate-500 dark:text-gray-400 ml-auto tabular-nums">
-          {selectedSamples.length} samples · {sortedMutations.length}/{mutations.length} mutations
+          {hiddenSampleCount > 0
+            ? <>{visibleSamples.length}/{selectedSamples.length} samples · {sortedMutations.length}/{mutations.length} mutations</>
+            : <>{selectedSamples.length} samples · {sortedMutations.length}/{mutations.length} mutations</>
+          }
         </div>
         <button
           onClick={exportCsv}
@@ -1176,6 +1217,7 @@ function ComparativePanel({
         <SortChip label="gene" active={sortKey === 'gene'} dir={sortDir} onClick={() => toggleSort('gene')} />
         <SortChip label="variant" active={sortKey === 'variant'} dir={sortDir} onClick={() => toggleSort('variant')} />
         <SortChip label="type" active={sortKey === 'type'} dir={sortDir} onClick={() => toggleSort('type')} />
+        <SortChip label="position" active={sortKey === 'position'} dir={sortDir} onClick={() => toggleSort('position')} />
         <SortChip label="max value" active={sortKey === 'maxFreq'} dir={sortDir} onClick={() => toggleSort('maxFreq')} />
         <SortChip label="spread" active={sortKey === 'spread'} dir={sortDir} onClick={() => toggleSort('spread')} />
         <SortChip label="# samples present" active={sortKey === 'presence'} dir={sortDir} onClick={() => toggleSort('presence')} />
@@ -1226,7 +1268,7 @@ function ComparativePanel({
               <th className="sticky left-0 z-40 bg-white dark:bg-gray-800 border-b border-r border-slate-200 dark:border-gray-700 px-2 py-1 text-left text-[10px] uppercase tracking-wider text-slate-500 dark:text-gray-400">
                 Sample
               </th>
-              {selectedSamples.map(s => (
+              {visibleSamples.map(s => (
                 <th key={s.id} className="border-b border-l border-slate-200 dark:border-gray-700 px-1.5 py-1 whitespace-nowrap min-w-[88px] bg-white dark:bg-gray-800">
                   <div className="flex items-start justify-between gap-1">
                     <div className="text-[11px] font-mono text-slate-800 dark:text-gray-100 leading-tight">{s.name}</div>
@@ -1250,7 +1292,7 @@ function ComparativePanel({
               <th className="sticky left-0 z-40 bg-white dark:bg-gray-800 border-b border-r border-slate-200 dark:border-gray-700 px-2 py-1 text-left text-[10px] uppercase tracking-wider text-slate-500 dark:text-gray-400">
                 Condition
               </th>
-              {selectedSamples.map(s => (
+              {visibleSamples.map(s => (
                 <th key={s.id} className="border-b border-l border-slate-200 dark:border-gray-700 px-1.5 py-1 text-[10.5px] font-normal text-slate-500 dark:text-gray-400 text-center bg-white dark:bg-gray-800 whitespace-nowrap">
                   {s.condition ?? ''}
                 </th>
@@ -1263,7 +1305,7 @@ function ComparativePanel({
                 OD growth
                 <span className="ml-1 text-slate-300 dark:text-gray-600 font-normal normal-case">(max {curveScale.yMax.toFixed(2)})</span>
               </th>
-              {selectedSamples.map(s => (
+              {visibleSamples.map(s => (
                 <th key={s.id} className="border-b-2 border-l border-slate-200 dark:border-gray-700 px-1 py-1 bg-white dark:bg-gray-800">
                   <div className="flex justify-center">
                     <GrowthCurveSparkline
@@ -1284,7 +1326,7 @@ function ComparativePanel({
           {/* Scrollable mutation rows */}
           <tbody>
             {sortedMutations.length === 0 && (
-              <tr><td colSpan={selectedSamples.length + 1} className="px-4 py-8 text-center text-slate-400 dark:text-gray-500">
+              <tr><td colSpan={visibleSamples.length + 1} className="px-4 py-8 text-center text-slate-400 dark:text-gray-500">
                 {mutations.length === 0
                   ? 'No mutations in the dataset.'
                   : 'No mutations match the current filters.'}
@@ -1310,7 +1352,7 @@ function ComparativePanel({
                     </div>
                   </div>
                 </th>
-                {selectedSamples.map(s => {
+                {visibleSamples.map(s => {
                   const v = m.values[s.id];
                   const hasVal = typeof v === 'number' && !Number.isNaN(v);
                   return (
