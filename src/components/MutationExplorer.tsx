@@ -4,6 +4,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import {
   CheckSquare, Square, Search, X, AlertCircle, FlaskConical, GitCompare, RefreshCw,
   ArrowUpDown, ArrowUp, ArrowDown, Filter, Download, Info,
+  ChevronDown, ChevronRight, Eye, EyeOff, FoldVertical, UnfoldVertical,
 } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -52,6 +53,14 @@ const SELECTED_KEY = 'lims:mutation:selected';
 const TAB_KEY = 'lims:mutation:tab';
 const EXPERIMENT_KEY = 'lims:mutation:experiment';
 const COMPARE_FILTERS_KEY = 'lims:mutation:compareFilters';
+const SAMPLE_FILTERS_KEY = 'lims:mutation:sampleFilters';
+const COLLAPSED_GROUPS_KEY = 'lims:mutation:collapsedGroups';
+
+// Tighter Comparative defaults: drop synonymous/intergenic/pseudogene noise on
+// first paint so the explorer opens to a useful view. Researchers can clear/
+// re-add classes via the pills. (Once they touch the filter, their override is
+// persisted to localStorage and these defaults stop applying.)
+const DEFAULT_SNP_TYPES = ['nonsynonymous', 'nonsense', 'small_indel', 'large_deletion'];
 
 type CompareFilters = {
   mutFilter: string;
@@ -355,6 +364,62 @@ function TabButton({ active, onClick, icon, children }: { active: boolean; onCli
 
 /* ---------------- Sample Selection panel ---------------- */
 
+type ChipKey = 'experiment' | 'replicate' | 'donor_dna' | 'strain' | 'condition';
+
+type SampleFilters = {
+  chips: Record<ChipKey, string[]>;
+  selectedOnly: boolean;
+  transferMin: number | null;
+  transferMax: number | null;
+};
+
+const EMPTY_SAMPLE_FILTERS: SampleFilters = {
+  chips: { experiment: [], replicate: [], donor_dna: [], strain: [], condition: [] },
+  selectedOnly: false,
+  transferMin: null,
+  transferMax: null,
+};
+
+function ChipRow({
+  label, options, active, onToggle, onClear,
+}: {
+  label: string;
+  options: { value: string; count: number }[];
+  active: Set<string>;
+  onToggle: (v: string) => void;
+  onClear: () => void;
+}) {
+  if (options.length === 0) return null;
+  return (
+    <div className="flex items-center gap-1.5 flex-wrap text-[11px]">
+      <span className="text-slate-500 dark:text-gray-400 font-medium uppercase tracking-wider text-[10px] w-20 shrink-0">{label}</span>
+      {options.map(o => {
+        const on = active.has(o.value);
+        return (
+          <button
+            key={o.value}
+            onClick={() => onToggle(o.value)}
+            className={cn(
+              'px-1.5 py-0.5 rounded border text-[11px] transition-colors max-w-[200px] truncate',
+              on
+                ? 'border-blue-300 dark:border-blue-700 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
+                : 'border-slate-200 dark:border-gray-600 hover:bg-slate-100 dark:hover:bg-gray-700 text-slate-600 dark:text-gray-300'
+            )}
+            title={`${o.value} (${o.count} samples)`}
+          >
+            {o.value} <span className="text-slate-400 dark:text-gray-500 tabular-nums">{o.count}</span>
+          </button>
+        );
+      })}
+      {active.size > 0 && (
+        <button onClick={onClear} className="text-slate-400 dark:text-gray-500 hover:text-slate-700 dark:hover:text-gray-200 text-[10.5px]">
+          clear
+        </button>
+      )}
+    </div>
+  );
+}
+
 function SampleSelectionPanel({
   samples, mutations, selected, setSelected, search, setSearch, loading,
 }: {
@@ -362,6 +427,45 @@ function SampleSelectionPanel({
   selected: Set<string>; setSelected: (s: Set<string>) => void;
   search: string; setSearch: (s: string) => void; loading: boolean;
 }) {
+  const [filters, setFilters] = useState<SampleFilters>(EMPTY_SAMPLE_FILTERS);
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [showFilters, setShowFilters] = useState(true);
+  const [hydrated, setHydrated] = useState(false);
+
+  // Rehydrate filter + collapse state from localStorage.
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(SAMPLE_FILTERS_KEY);
+      if (raw) {
+        const f = JSON.parse(raw) as Partial<SampleFilters>;
+        setFilters({
+          chips: {
+            experiment: f.chips?.experiment ?? [],
+            replicate: f.chips?.replicate ?? [],
+            donor_dna: f.chips?.donor_dna ?? [],
+            strain: f.chips?.strain ?? [],
+            condition: f.chips?.condition ?? [],
+          },
+          selectedOnly: !!f.selectedOnly,
+          transferMin: typeof f.transferMin === 'number' ? f.transferMin : null,
+          transferMax: typeof f.transferMax === 'number' ? f.transferMax : null,
+        });
+      }
+      const c = localStorage.getItem(COLLAPSED_GROUPS_KEY);
+      if (c) setCollapsed(new Set(JSON.parse(c) as string[]));
+    } catch {}
+    setHydrated(true);
+  }, []);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    try { localStorage.setItem(SAMPLE_FILTERS_KEY, JSON.stringify(filters)); } catch {}
+  }, [filters, hydrated]);
+  useEffect(() => {
+    if (!hydrated) return;
+    try { localStorage.setItem(COLLAPSED_GROUPS_KEY, JSON.stringify([...collapsed])); } catch {}
+  }, [collapsed, hydrated]);
+
   const mutationCountBySample = useMemo(() => {
     const m = new Map<string, number>();
     for (const row of mutations) {
@@ -372,19 +476,63 @@ function SampleSelectionPanel({
     return m;
   }, [mutations]);
 
+  // Chip options come from the full sample set (not the filtered set) so the
+  // option list doesn't disappear after a user picks one.
+  const chipOptions = useMemo(() => {
+    const counts: Record<ChipKey, Map<string, number>> = {
+      experiment: new Map(), replicate: new Map(), donor_dna: new Map(),
+      strain: new Map(), condition: new Map(),
+    };
+    for (const s of samples) {
+      const bump = (k: ChipKey, v: string | undefined | null) => {
+        if (!v) return;
+        counts[k].set(v, (counts[k].get(v) ?? 0) + 1);
+      };
+      bump('experiment', s.experiment);
+      bump('replicate', s.replicate);
+      bump('donor_dna', s.donor_dna);
+      bump('strain', s.strain);
+      bump('condition', s.condition);
+    }
+    const toList = (k: ChipKey) =>
+      [...counts[k].entries()]
+        .map(([value, count]) => ({ value, count }))
+        .sort((a, b) => b.count - a.count || a.value.localeCompare(b.value));
+    return {
+      experiment: toList('experiment'),
+      replicate: toList('replicate'),
+      donor_dna: toList('donor_dna'),
+      strain: toList('strain'),
+      condition: toList('condition'),
+    };
+  }, [samples]);
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     const sorted = sortSamples(samples);
-    if (!q) return sorted;
-    return sorted.filter(s =>
-      s.name.toLowerCase().includes(q) ||
-      (s.experiment ?? '').toLowerCase().includes(q) ||
-      (s.strain ?? '').toLowerCase().includes(q) ||
-      (s.donor_dna ?? '').toLowerCase().includes(q) ||
-      (s.condition ?? '').toLowerCase().includes(q) ||
-      (s.replicate ?? '').toLowerCase().includes(q)
-    );
-  }, [samples, search]);
+    const chipSet = {
+      experiment: new Set(filters.chips.experiment),
+      replicate: new Set(filters.chips.replicate),
+      donor_dna: new Set(filters.chips.donor_dna),
+      strain: new Set(filters.chips.strain),
+      condition: new Set(filters.chips.condition),
+    };
+    return sorted.filter(s => {
+      if (filters.selectedOnly && !selected.has(s.id)) return false;
+      if (chipSet.experiment.size > 0 && !chipSet.experiment.has(s.experiment)) return false;
+      if (chipSet.replicate.size > 0 && !chipSet.replicate.has(s.replicate ?? '')) return false;
+      if (chipSet.donor_dna.size > 0 && !chipSet.donor_dna.has(s.donor_dna ?? '')) return false;
+      if (chipSet.strain.size > 0 && !chipSet.strain.has(s.strain ?? '')) return false;
+      if (chipSet.condition.size > 0 && !chipSet.condition.has(s.condition ?? '')) return false;
+      if (filters.transferMin !== null && (s.transfer ?? -Infinity) < filters.transferMin) return false;
+      if (filters.transferMax !== null && (s.transfer ?? Infinity) > filters.transferMax) return false;
+      if (q) {
+        const hay = `${s.name} ${s.experiment} ${s.strain ?? ''} ${s.donor_dna ?? ''} ${s.condition ?? ''} ${s.replicate ?? ''}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [samples, search, filters, selected]);
 
   const allOnPageSelected = filtered.length > 0 && filtered.every(s => selected.has(s.id));
 
@@ -428,28 +576,165 @@ function SampleSelectionPanel({
     setSelected(next);
   };
 
+  const toggleCollapse = (key: string) => {
+    const next = new Set(collapsed);
+    if (next.has(key)) next.delete(key); else next.add(key);
+    setCollapsed(next);
+  };
+  const collapseAll = () => setCollapsed(new Set(grouped.map(g => g.key)));
+  const expandAll = () => setCollapsed(new Set());
+
+  // Select first + last transfer per group — useful for time-course experiments
+  // where you usually want the endpoints, not every intermediate.
+  const selectEndpoints = () => {
+    const next = new Set(selected);
+    for (const g of grouped) {
+      const withT = g.rows.filter(r => typeof r.transfer === 'number');
+      if (withT.length < 1) continue;
+      const minT = Math.min(...withT.map(r => r.transfer as number));
+      const maxT = Math.max(...withT.map(r => r.transfer as number));
+      for (const r of withT) {
+        if (r.transfer === minT || r.transfer === maxT) next.add(r.id);
+      }
+    }
+    setSelected(next);
+  };
+
+  const toggleChip = (k: ChipKey, v: string) => {
+    setFilters(prev => {
+      const arr = prev.chips[k];
+      const next = arr.includes(v) ? arr.filter(x => x !== v) : [...arr, v];
+      return { ...prev, chips: { ...prev.chips, [k]: next } };
+    });
+  };
+  const clearChip = (k: ChipKey) => {
+    setFilters(prev => ({ ...prev, chips: { ...prev.chips, [k]: [] } }));
+  };
+  const clearAllFilters = () => setFilters(EMPTY_SAMPLE_FILTERS);
+
+  const anyFilterActive =
+    !!search.trim() ||
+    filters.selectedOnly ||
+    filters.transferMin !== null ||
+    filters.transferMax !== null ||
+    (Object.values(filters.chips) as string[][]).some(arr => arr.length > 0);
+
   return (
     <div className="flex flex-col h-full min-h-0">
-      <div className="px-3 py-2 border-b border-slate-200 dark:border-gray-700 flex items-center gap-2 bg-white dark:bg-gray-800">
-        <div className="relative flex-1 max-w-md">
+      {/* Search + summary row */}
+      <div className="px-3 py-2 border-b border-slate-200 dark:border-gray-700 flex items-center gap-2 bg-white dark:bg-gray-800 flex-wrap">
+        <div className="relative flex-1 max-w-md min-w-[240px]">
           <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 dark:text-gray-500" />
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Filter samples by name, strain, experiment, replicate…"
+            placeholder="Search by name, strain, experiment, replicate, donor, condition…"
             className="w-full pl-8 pr-7 py-1.5 text-[12px] border border-slate-300 dark:border-gray-600 rounded-md focus:ring-1 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-gray-100 outline-none placeholder:text-slate-400 dark:placeholder:text-gray-500"
           />
           {search && (
-            <button onClick={() => setSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 dark:text-gray-500 hover:text-slate-700 dark:hover:text-gray-300">
+            <button onClick={() => setSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 dark:text-gray-500 hover:text-slate-700 dark:hover:text-gray-300" title="Clear search">
               <X className="w-3 h-3" />
             </button>
           )}
         </div>
-        <div className="text-[11px] text-slate-500 dark:text-gray-400 ml-auto tabular-nums">
-          {selected.size} selected · {filtered.length}/{samples.length} shown
+        <button
+          onClick={() => setShowFilters(v => !v)}
+          className={cn(
+            "flex items-center gap-1 text-[11px] px-2 py-1 rounded border",
+            showFilters
+              ? 'border-blue-300 dark:border-blue-700 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
+              : 'border-slate-200 dark:border-gray-600 text-slate-600 dark:text-gray-300 hover:bg-slate-100 dark:hover:bg-gray-700'
+          )}
+          title="Show or hide chip filters"
+        >
+          <Filter className="w-3 h-3" /> Filters
+        </button>
+        <button
+          onClick={() => setFilters(prev => ({ ...prev, selectedOnly: !prev.selectedOnly }))}
+          className={cn(
+            "flex items-center gap-1 text-[11px] px-2 py-1 rounded border",
+            filters.selectedOnly
+              ? 'border-blue-300 dark:border-blue-700 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
+              : 'border-slate-200 dark:border-gray-600 text-slate-600 dark:text-gray-300 hover:bg-slate-100 dark:hover:bg-gray-700'
+          )}
+          title="Show only samples you've selected"
+        >
+          {filters.selectedOnly ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
+          Selected only
+        </button>
+        <button
+          onClick={expandAll}
+          className="flex items-center gap-1 text-[11px] px-2 py-1 rounded border border-slate-200 dark:border-gray-600 text-slate-600 dark:text-gray-300 hover:bg-slate-100 dark:hover:bg-gray-700"
+          title="Expand every group"
+        >
+          <UnfoldVertical className="w-3 h-3" /> Expand
+        </button>
+        <button
+          onClick={collapseAll}
+          className="flex items-center gap-1 text-[11px] px-2 py-1 rounded border border-slate-200 dark:border-gray-600 text-slate-600 dark:text-gray-300 hover:bg-slate-100 dark:hover:bg-gray-700"
+          title="Collapse every group"
+        >
+          <FoldVertical className="w-3 h-3" /> Collapse
+        </button>
+        <button
+          onClick={selectEndpoints}
+          className="flex items-center gap-1 text-[11px] px-2 py-1 rounded border border-slate-200 dark:border-gray-600 text-slate-600 dark:text-gray-300 hover:bg-slate-100 dark:hover:bg-gray-700"
+          title="Select the first and last transfer per group (useful for time-course endpoints)"
+          disabled={grouped.length === 0}
+        >
+          Select endpoints
+        </button>
+        {anyFilterActive && (
+          <button
+            onClick={() => { clearAllFilters(); setSearch(''); }}
+            className="text-[11px] px-2 py-1 rounded text-slate-500 dark:text-gray-400 hover:bg-slate-100 dark:hover:bg-gray-700"
+            title="Clear search + all chip filters"
+          >
+            reset all filters
+          </button>
+        )}
+        <div className="text-[11px] text-slate-500 dark:text-gray-400 ml-auto tabular-nums whitespace-nowrap">
+          {selected.size} selected · {filtered.length}/{samples.length} shown · {grouped.length} group{grouped.length === 1 ? '' : 's'}
         </div>
       </div>
 
+      {/* Chip filter rows */}
+      {showFilters && (
+        <div className="px-3 py-2 border-b border-slate-200 dark:border-gray-700 bg-slate-50/60 dark:bg-gray-800/60 space-y-1.5">
+          <ChipRow label="Experiment" options={chipOptions.experiment} active={new Set(filters.chips.experiment)}
+                   onToggle={v => toggleChip('experiment', v)} onClear={() => clearChip('experiment')} />
+          <ChipRow label="Replicate" options={chipOptions.replicate} active={new Set(filters.chips.replicate)}
+                   onToggle={v => toggleChip('replicate', v)} onClear={() => clearChip('replicate')} />
+          <ChipRow label="Donor DNA" options={chipOptions.donor_dna} active={new Set(filters.chips.donor_dna)}
+                   onToggle={v => toggleChip('donor_dna', v)} onClear={() => clearChip('donor_dna')} />
+          <ChipRow label="Strain" options={chipOptions.strain} active={new Set(filters.chips.strain)}
+                   onToggle={v => toggleChip('strain', v)} onClear={() => clearChip('strain')} />
+          <ChipRow label="Condition" options={chipOptions.condition} active={new Set(filters.chips.condition)}
+                   onToggle={v => toggleChip('condition', v)} onClear={() => clearChip('condition')} />
+          <div className="flex items-center gap-1.5 text-[11px]">
+            <span className="text-slate-500 dark:text-gray-400 font-medium uppercase tracking-wider text-[10px] w-20 shrink-0">Transfer</span>
+            <input
+              type="number" placeholder="min"
+              value={filters.transferMin ?? ''}
+              onChange={e => setFilters(prev => ({ ...prev, transferMin: e.target.value === '' ? null : Number(e.target.value) }))}
+              className="w-16 text-[11px] border border-slate-300 dark:border-gray-600 rounded px-1.5 py-0.5 bg-white dark:bg-gray-700 dark:text-gray-100 outline-none tabular-nums"
+            />
+            <span className="text-slate-400 dark:text-gray-500">to</span>
+            <input
+              type="number" placeholder="max"
+              value={filters.transferMax ?? ''}
+              onChange={e => setFilters(prev => ({ ...prev, transferMax: e.target.value === '' ? null : Number(e.target.value) }))}
+              className="w-16 text-[11px] border border-slate-300 dark:border-gray-600 rounded px-1.5 py-0.5 bg-white dark:bg-gray-700 dark:text-gray-100 outline-none tabular-nums"
+            />
+            {(filters.transferMin !== null || filters.transferMax !== null) && (
+              <button onClick={() => setFilters(prev => ({ ...prev, transferMin: null, transferMax: null }))}
+                      className="text-slate-400 dark:text-gray-500 hover:text-slate-700 dark:hover:text-gray-200 text-[10.5px]">clear</button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Sample table */}
       <div className="flex-1 min-h-0 overflow-auto">
         <table className="w-full text-[12px] border-collapse">
           <thead className="sticky top-0 z-10 bg-slate-50 dark:bg-gray-800/95 backdrop-blur border-b border-slate-200 dark:border-gray-700">
@@ -476,11 +761,18 @@ function SampleSelectionPanel({
             )}
             {!loading && filtered.length === 0 && (
               <tr><td colSpan={10} className="px-4 py-8 text-center text-slate-400 dark:text-gray-500">
-                {samples.length === 0 ? 'No mutation samples available.' : 'No samples match your filter.'}
+                {samples.length === 0
+                  ? 'No mutation samples available.'
+                  : anyFilterActive
+                    ? 'No samples match the current filters. Try clearing some.'
+                    : 'No samples match your filter.'}
               </td></tr>
             )}
             {!loading && grouped.map(group => {
               const allSel = group.rows.every(r => selected.has(r.id));
+              const someSel = !allSel && group.rows.some(r => selected.has(r.id));
+              const selectedInGroup = group.rows.reduce((acc, r) => acc + (selected.has(r.id) ? 1 : 0), 0);
+              const isCollapsed = collapsed.has(group.key);
               return (
                 <React.Fragment key={group.key}>
                   <tr className="bg-slate-100/70 dark:bg-gray-800/40 text-[11px] uppercase tracking-wider text-slate-500 dark:text-gray-400">
@@ -490,12 +782,28 @@ function SampleSelectionPanel({
                         className="flex items-center justify-center w-6 h-6 hover:bg-slate-200 dark:hover:bg-gray-700 rounded"
                         title={allSel ? 'Deselect this group' : 'Select this group'}
                       >
-                        {allSel ? <CheckSquare className="w-3.5 h-3.5 text-blue-600" /> : <Square className="w-3.5 h-3.5 text-slate-400 dark:text-gray-500" />}
+                        {allSel
+                          ? <CheckSquare className="w-3.5 h-3.5 text-blue-600" />
+                          : someSel
+                            ? <CheckSquare className="w-3.5 h-3.5 text-blue-400 opacity-60" />
+                            : <Square className="w-3.5 h-3.5 text-slate-400 dark:text-gray-500" />}
                       </button>
                     </td>
-                    <td colSpan={9} className="px-1 py-1 font-semibold">{group.label} <span className="ml-1 normal-case text-slate-400 dark:text-gray-500 font-normal">({group.rows.length})</span></td>
+                    <td colSpan={9} className="px-1 py-1">
+                      <button
+                        onClick={() => toggleCollapse(group.key)}
+                        className="flex items-center gap-1 font-semibold hover:text-slate-700 dark:hover:text-gray-200"
+                        title={isCollapsed ? 'Expand group' : 'Collapse group'}
+                      >
+                        {isCollapsed ? <ChevronRight className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                        {group.label}
+                        <span className="ml-1 normal-case text-slate-400 dark:text-gray-500 font-normal tabular-nums">
+                          ({selectedInGroup > 0 ? `${selectedInGroup}/` : ''}{group.rows.length})
+                        </span>
+                      </button>
+                    </td>
                   </tr>
-                  {group.rows.map(s => {
+                  {!isCollapsed && group.rows.map(s => {
                     const isSel = selected.has(s.id);
                     const muts = mutationCountBySample.get(s.id) ?? 0;
                     return (
@@ -554,15 +862,17 @@ function ComparativePanel({
 }) {
   const [mutFilter, setMutFilter] = useState('');
   const [metricFilter, setMetricFilter] = useState<'all' | 'frequency' | 'copy_number'>('all');
-  const [snpTypes, setSnpTypes] = useState<Set<string>>(new Set()); // empty = no snp_type filter
-  const [minFreq, setMinFreq] = useState(0); // 0..1 — filter rows whose max value in selection is below this
+  // Default to the high-signal classes so first-paint isn't a wall of synonymous/intergenic noise.
+  const [snpTypes, setSnpTypes] = useState<Set<string>>(new Set(DEFAULT_SNP_TYPES));
+  const [minFreq, setMinFreq] = useState(0);
   const [minPresence, setMinPresence] = useState(0);
   const [hideEmpty, setHideEmpty] = useState(true);
   const [sortKey, setSortKey] = useState<SortKey>('maxFreq');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
   const [filtersHydrated, setFiltersHydrated] = useState(false);
 
-  // Rehydrate filters from localStorage on first mount.
+  // Rehydrate filters from localStorage on first mount. Once the user has
+  // touched the filters their persisted state takes precedence over defaults.
   useEffect(() => {
     try {
       const raw = localStorage.getItem(COMPARE_FILTERS_KEY);
