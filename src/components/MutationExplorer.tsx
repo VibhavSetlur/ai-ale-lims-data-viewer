@@ -31,11 +31,17 @@ interface MutationRow {
   type: string;
   metric: string;
   values: Record<string, number>;
+  snp_type?: string;
+  mutation_category?: string;
+  base_type?: string;
+  position?: number;
+  gene_product?: string;
 }
 
 interface MutationDataset {
   samples: MutationSample[];
   mutations: MutationRow[];
+  experiments?: string[];
   warnings?: string[];
 }
 
@@ -43,6 +49,13 @@ type Tab = 'samples' | 'compare';
 
 const SELECTED_KEY = 'lims:mutation:selected';
 const TAB_KEY = 'lims:mutation:tab';
+const EXPERIMENT_KEY = 'lims:mutation:experiment';
+
+// Types we want to surface as filter pills, in research-priority order.
+const SNP_TYPE_OPTIONS = [
+  'nonsynonymous', 'nonsense', 'small_indel', 'large_deletion',
+  'synonymous', 'intergenic', 'pseudogene', 'noncoding',
+] as const;
 
 function formatMetric(value: number | undefined, metric: string): string {
   if (value === undefined || value === null || Number.isNaN(value)) return '';
@@ -132,6 +145,7 @@ export default function MutationExplorer() {
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState('');
+  const [experiment, setExperiment] = useState<string>(''); // '' = all experiments
 
   useEffect(() => {
     try {
@@ -139,25 +153,29 @@ export default function MutationExplorer() {
       if (s) setSelected(new Set(JSON.parse(s)));
       const t = localStorage.getItem(TAB_KEY);
       if (t === 'compare' || t === 'samples') setTab(t);
+      const e = localStorage.getItem(EXPERIMENT_KEY);
+      if (e !== null) setExperiment(e);
     } catch {}
   }, []);
 
   useEffect(() => { try { localStorage.setItem(SELECTED_KEY, JSON.stringify([...selected])); } catch {} }, [selected]);
   useEffect(() => { try { localStorage.setItem(TAB_KEY, tab); } catch {} }, [tab]);
+  useEffect(() => { try { localStorage.setItem(EXPERIMENT_KEY, experiment); } catch {} }, [experiment]);
 
-  const load = async () => {
+  const load = async (expFilter: string) => {
     setLoading(true); setError(null);
     try {
-      const res = await fetch('/api/mutations');
+      const url = expFilter ? `/api/mutations?experiment=${encodeURIComponent(expFilter)}` : '/api/mutations';
+      const res = await fetch(url);
       const json = await res.json();
-      if (json.error) { setError(json.error); setData({ samples: [], mutations: [] }); }
+      if (json.error) { setError(json.error); setData({ samples: [], mutations: [], experiments: [] }); }
       else setData(json as MutationDataset);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load mutation dataset');
-      setData({ samples: [], mutations: [] });
+      setData({ samples: [], mutations: [], experiments: [] });
     } finally { setLoading(false); }
   };
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(experiment); }, [experiment]);
 
   // Prune selected IDs that no longer exist in the dataset.
   useEffect(() => {
@@ -190,6 +208,20 @@ export default function MutationExplorer() {
           </TabButton>
         </div>
         <div className="flex items-center gap-1.5 pr-1">
+          <label className="flex items-center gap-1 text-[11px] text-slate-500 dark:text-gray-400">
+            Experiment
+            <select
+              value={experiment}
+              onChange={e => setExperiment(e.target.value)}
+              className="text-[11.5px] border border-slate-300 dark:border-gray-600 rounded px-1.5 py-0.5 bg-white dark:bg-gray-700 dark:text-gray-100 outline-none"
+              title="Scope the loaded dataset to one experiment for faster queries"
+            >
+              <option value="">all ({data?.experiments?.length ?? '?'})</option>
+              {(data?.experiments ?? []).map(e => (
+                <option key={e} value={e}>{e}</option>
+              ))}
+            </select>
+          </label>
           {tab === 'samples' && selected.size > 0 && (
             <button
               onClick={() => setTab('compare')}
@@ -209,7 +241,7 @@ export default function MutationExplorer() {
             </button>
           )}
           <button
-            onClick={load}
+            onClick={() => load(experiment)}
             className="p-1.5 rounded text-slate-500 dark:text-gray-400 hover:bg-slate-100 dark:hover:bg-gray-700"
             title="Reload mutation dataset"
           >
@@ -486,10 +518,29 @@ function ComparativePanel({
 }) {
   const [mutFilter, setMutFilter] = useState('');
   const [metricFilter, setMetricFilter] = useState<'all' | 'frequency' | 'copy_number'>('all');
+  const [snpTypes, setSnpTypes] = useState<Set<string>>(new Set()); // empty = no snp_type filter
+  const [minFreq, setMinFreq] = useState(0); // 0..1 — filter rows whose max value in selection is below this
   const [minPresence, setMinPresence] = useState(0);
   const [hideEmpty, setHideEmpty] = useState(true);
   const [sortKey, setSortKey] = useState<SortKey>('maxFreq');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
+
+  const toggleSnpType = (t: string) => {
+    const next = new Set(snpTypes);
+    if (next.has(t)) next.delete(t); else next.add(t);
+    setSnpTypes(next);
+  };
+
+  // Distinct mutation classes present in this dataset (in research-priority order).
+  // We filter on the rendered `m.type` (which is snp_type || mutation_category || base_type),
+  // so indels labeled 'small_indel' / 'large_deletion' surface alongside SNP classes.
+  const availableSnpTypes = useMemo(() => {
+    const present = new Set<string>();
+    for (const m of mutations) if (m.type) present.add(m.type);
+    const ordered = SNP_TYPE_OPTIONS.filter(t => present.has(t));
+    const extras = [...present].filter(t => !SNP_TYPE_OPTIONS.includes(t as typeof SNP_TYPE_OPTIONS[number])).sort();
+    return [...ordered, ...extras];
+  }, [mutations]);
 
   const selectedSamples = useMemo(() => {
     const map = new Map(samples.map(s => [s.id, s]));
@@ -516,21 +567,28 @@ function ComparativePanel({
     const q = mutFilter.trim().toLowerCase();
     return mutations
       .filter(m => metricFilter === 'all' || m.metric === metricFilter)
+      .filter(m => snpTypes.size === 0 || snpTypes.has(m.type))
       .filter(m => {
         if (!q) return true;
-        return `${m.gene} ${m.variant} ${m.type} ${m.id}`.toLowerCase().includes(q);
+        return `${m.gene} ${m.variant} ${m.type} ${m.id} ${m.gene_product ?? ''}`.toLowerCase().includes(q);
       })
       .filter(m => {
         if (selectedSamples.length === 0) return true;
         if (hideEmpty) {
-          // require at least one value in the selected sample set
           const anyVal = selectedSamples.some(s => typeof m.values[s.id] === 'number');
           if (!anyVal) return false;
+        }
+        if (minFreq > 0) {
+          const maxInSel = selectedSamples.reduce((acc, s) => {
+            const v = m.values[s.id];
+            return typeof v === 'number' && v > acc ? v : acc;
+          }, 0);
+          if (maxInSel < minFreq) return false;
         }
         const present = selectedSamples.reduce((acc, s) => acc + (typeof m.values[s.id] === 'number' && m.values[s.id] > 0 ? 1 : 0), 0);
         return present >= minPresence;
       });
-  }, [mutations, mutFilter, metricFilter, minPresence, hideEmpty, selectedSamples]);
+  }, [mutations, mutFilter, metricFilter, snpTypes, minFreq, minPresence, hideEmpty, selectedSamples]);
 
   const sortedMutations = useMemo(() => {
     if (!sortKey) return filteredMutations;
@@ -676,6 +734,15 @@ function ComparativePanel({
             className="w-14 text-[12px] border border-slate-300 dark:border-gray-600 rounded px-1.5 py-0.5 bg-white dark:bg-gray-700 dark:text-gray-100 outline-none tabular-nums"
           />
         </label>
+        <label className="text-[11px] text-slate-600 dark:text-gray-300 flex items-center gap-1.5" title="Hide rows whose maximum frequency across selected samples is below this threshold">
+          min. frequency
+          <input
+            type="number" min={0} max={1} step={0.05}
+            value={minFreq}
+            onChange={e => setMinFreq(Math.max(0, Math.min(1, parseFloat(e.target.value || '0'))))}
+            className="w-16 text-[12px] border border-slate-300 dark:border-gray-600 rounded px-1.5 py-0.5 bg-white dark:bg-gray-700 dark:text-gray-100 outline-none tabular-nums"
+          />
+        </label>
         <label className="text-[11px] text-slate-600 dark:text-gray-300 flex items-center gap-1">
           <input type="checkbox" checked={hideEmpty} onChange={e => setHideEmpty(e.target.checked)} className="accent-blue-600" />
           hide mutations with no data in selection
@@ -694,6 +761,37 @@ function ComparativePanel({
           CSV
         </button>
       </div>
+
+      {/* SNP type filter pills */}
+      {availableSnpTypes.length > 0 && (
+        <div className="px-3 py-1.5 border-b border-slate-200 dark:border-gray-700 bg-slate-50/60 dark:bg-gray-800/60 flex items-center gap-1.5 text-[11px] text-slate-500 dark:text-gray-400 flex-wrap">
+          <span className="mr-1">Mutation class:</span>
+          {availableSnpTypes.map(t => {
+            const active = snpTypes.has(t);
+            return (
+              <button
+                key={t}
+                onClick={() => toggleSnpType(t)}
+                className={cn(
+                  'px-1.5 py-0.5 rounded border text-[11px] transition-colors',
+                  active
+                    ? 'border-blue-300 dark:border-blue-700 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
+                    : 'border-slate-200 dark:border-gray-600 hover:bg-slate-100 dark:hover:bg-gray-700 text-slate-600 dark:text-gray-300'
+                )}
+                title={`Filter to ${t} mutations`}
+              >
+                {t}
+              </button>
+            );
+          })}
+          {snpTypes.size > 0 && (
+            <button onClick={() => setSnpTypes(new Set())} className="ml-1 text-slate-400 dark:text-gray-500 hover:text-slate-700 dark:hover:text-gray-200">clear</button>
+          )}
+          <span className="ml-auto text-slate-400 dark:text-gray-500">
+            {snpTypes.size === 0 ? 'showing all classes' : `${snpTypes.size} class(es) selected`}
+          </span>
+        </div>
+      )}
 
       {/* Sort chips */}
       <div className="px-3 py-1.5 border-b border-slate-200 dark:border-gray-700 bg-slate-50/60 dark:bg-gray-800/60 flex items-center gap-1.5 text-[11px] text-slate-500 dark:text-gray-400 flex-wrap">
@@ -816,10 +914,22 @@ function ComparativePanel({
             )}
             {sortedMutations.map(m => (
               <tr key={m.id} className="border-b border-slate-100 dark:border-gray-700/60 hover:bg-slate-50/60 dark:hover:bg-gray-700/30">
-                <th className="sticky left-0 z-10 bg-white dark:bg-gray-800 border-r border-slate-200 dark:border-gray-700 px-2 py-1 text-left whitespace-nowrap min-w-[200px]">
+                <th
+                  className="sticky left-0 z-10 bg-white dark:bg-gray-800 border-r border-slate-200 dark:border-gray-700 px-2 py-1 text-left whitespace-nowrap min-w-[200px] max-w-[280px]"
+                  title={[
+                    `${m.gene} ${m.variant}`,
+                    m.gene_product ? `Product: ${m.gene_product}` : null,
+                    m.position ? `Position: ${m.position}` : null,
+                    m.snp_type ? `Class: ${m.snp_type}` : null,
+                    m.base_type ? `Breseq type: ${m.base_type}` : null,
+                  ].filter(Boolean).join('\n')}
+                >
                   <div className="leading-tight">
-                    <div className="text-[12px] font-medium text-slate-800 dark:text-gray-100">{m.gene} <span className="font-normal text-slate-500 dark:text-gray-400">/ {m.variant}</span></div>
-                    <div className="text-[10px] text-slate-400 dark:text-gray-500">{m.type} · {m.metric}</div>
+                    <div className="text-[12px] font-medium text-slate-800 dark:text-gray-100 truncate">{m.gene} <span className="font-normal text-slate-500 dark:text-gray-400">/ {m.variant}</span></div>
+                    <div className="text-[10px] text-slate-400 dark:text-gray-500 truncate">
+                      {m.type} · {m.metric}
+                      {m.gene_product ? <span className="ml-1 italic text-slate-500 dark:text-gray-400">— {m.gene_product}</span> : null}
+                    </div>
                   </div>
                 </th>
                 {selectedSamples.map(s => {
