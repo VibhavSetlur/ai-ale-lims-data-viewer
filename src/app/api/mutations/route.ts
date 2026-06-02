@@ -13,6 +13,11 @@ export interface MutationSample {
   donor_dna?: string;
   selection_note?: string;
   growth_curve?: { t: number; od: number }[];
+  // OD measurements tracked in the LIMS for this sample. We surface them even
+  // when the numeric time-series isn't in the mirror (the Data field is then
+  // a filename pointer, e.g. "TFMN1_roboticOD_final.pdf"). Researchers can
+  // see which samples have OD data captured and where to find the file.
+  od_sources?: { type: string; source: string }[];
 }
 
 export interface MutationRow {
@@ -213,6 +218,28 @@ const ALL_EXPERIMENTS_SQL = `
   ORDER BY Experiment
 `;
 
+// OD measurements tracked against each seq sample's parent sample. The
+// numeric series isn't in the mirror — the Data column carries a filename or
+// short reference. We still want to surface which samples have OD data
+// captured upstream and where to look for the file.
+const OD_MEASUREMENTS_SQL = `
+  SELECT DISTINCT
+    ss."Sequencing_sample" AS seq_sample,
+    m."Type"               AS od_type,
+    m."Data"               AS od_source
+  FROM Seq_samples ss
+  JOIN Measurements m
+    ON m."Sample_ID" = ss."Sample_Name"
+   AND m.deleted = 0
+   AND m."Type" IN ('OD_series_robot', 'OD_series_flask')
+   AND m."Data" IS NOT NULL
+   AND m."Data" != ''
+  WHERE ss.deleted = 0
+    AND ss."Sequencing_sample" IN (
+      SELECT DISTINCT "Seq_sample" FROM Mutations WHERE deleted = 0
+    )
+`;
+
 /* ---------- Route ---------- */
 
 export async function GET(req: NextRequest) {
@@ -229,17 +256,27 @@ export async function GET(req: NextRequest) {
       : MUTATIONS_SQL;
     const params: (string | number | null)[] = experimentFilter ? [experimentFilter] : [];
 
-    const [sampleRows, mutRows, allExperiments] = await Promise.all([
+    const [sampleRows, mutRows, allExperiments, odRows] = await Promise.all([
       runQuery<SeqSampleRow>(sampleSql, params),
       runQuery<MutationRawRow>(mutSql, params),
       runQuery<{ name: string }>(ALL_EXPERIMENTS_SQL),
+      runQuery<{ seq_sample: string; od_type: string; od_source: string }>(OD_MEASUREMENTS_SQL),
     ]);
+
+    // seq_sample → list of OD source references
+    const odBySample = new Map<string, { type: string; source: string }[]>();
+    for (const r of odRows) {
+      const list = odBySample.get(r.seq_sample) ?? [];
+      list.push({ type: r.od_type, source: r.od_source });
+      odBySample.set(r.seq_sample, list);
+    }
 
     const samples: MutationSample[] = sampleRows.map(r => {
       const { transfer, selection } = parseSeqSampleSuffix(r.seq_sample);
       const replicate = deriveReplicate(r.sample_name);
       const donor_dna = deriveDonorDna(r.sample_name, r.transforming_dna);
       const popOrColony = (r.pop_or_colony_raw && r.pop_or_colony_raw.trim()) || selection;
+      const od_sources = odBySample.get(r.seq_sample);
       return {
         id: r.seq_sample,
         name: r.seq_sample,
@@ -251,6 +288,7 @@ export async function GET(req: NextRequest) {
         strain: r.strain ?? undefined,
         donor_dna,
         selection_note: describeSelection(popOrColony ?? undefined, r.notes),
+        od_sources: od_sources && od_sources.length > 0 ? od_sources : undefined,
       };
     });
 

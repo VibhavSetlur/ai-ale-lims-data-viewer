@@ -494,10 +494,18 @@ export default function Dashboard({ initialTables }: DashboardProps) {
         </aside>
 
         <div className="flex-1 min-w-0 p-3 flex flex-col overflow-hidden bg-slate-50 dark:bg-gray-900 relative">
-          <div className="flex-1 min-h-0">
-            {activeView === 'mutations' ? (
-              <MutationExplorer />
-            ) : activeTable ? (
+          {/*
+            Always mount MutationExplorer so its dataset (~4.5 MB) preloads in
+            the background as soon as the app boots — by the time the user
+            clicks into the explorer, the data is already there. Keeping it
+            mounted also preserves selection/filter/tab state across view
+            switches; only a full page reload re-fetches.
+          */}
+          <div className={cn("flex-1 min-h-0", activeView === 'mutations' ? "block" : "hidden")}>
+            <MutationExplorer />
+          </div>
+          <div className={cn("flex-1 min-h-0", activeView === 'mutations' ? "hidden" : "block")}>
+            {activeTable ? (
               <DataTable tableName={activeTable} />
             ) : (
               <div className="flex flex-col items-center justify-center h-full bg-white dark:bg-gray-800 rounded-lg border border-slate-200 dark:border-gray-700 text-slate-500 dark:text-gray-400 shadow-sm text-sm gap-2">

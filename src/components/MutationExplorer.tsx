@@ -22,6 +22,7 @@ interface MutationSample {
   donor_dna?: string;
   selection_note?: string;
   growth_curve?: { t: number; od: number }[];
+  od_sources?: { type: string; source: string }[];
 }
 
 interface MutationRow {
@@ -50,6 +51,18 @@ type Tab = 'samples' | 'compare';
 const SELECTED_KEY = 'lims:mutation:selected';
 const TAB_KEY = 'lims:mutation:tab';
 const EXPERIMENT_KEY = 'lims:mutation:experiment';
+const COMPARE_FILTERS_KEY = 'lims:mutation:compareFilters';
+
+type CompareFilters = {
+  mutFilter: string;
+  metricFilter: 'all' | 'frequency' | 'copy_number';
+  snpTypes: string[]; // serialized Set
+  minFreq: number;
+  minPresence: number;
+  hideEmpty: boolean;
+  sortKey: 'gene' | 'variant' | 'type' | 'maxFreq' | 'spread' | 'presence' | null;
+  sortDir: 'asc' | 'desc';
+};
 
 // Types we want to surface as filter pills, in research-priority order.
 const SNP_TYPE_OPTIONS = [
@@ -85,12 +98,32 @@ function metricColor(value: number, metric: string): string {
 }
 
 function GrowthCurveSparkline({
-  data, width = 88, height = 38, yMaxOverride, xMinOverride, xMaxOverride,
+  data, odSources, width = 88, height = 38, yMaxOverride, xMinOverride, xMaxOverride,
 }: {
-  data?: { t: number; od: number }[]; width?: number; height?: number;
+  data?: { t: number; od: number }[];
+  odSources?: { type: string; source: string }[];
+  width?: number; height?: number;
   yMaxOverride?: number; xMinOverride?: number; xMaxOverride?: number;
 }) {
   if (!data || data.length < 2) {
+    // No numeric series in the DB. If the LIMS tracked an OD measurement
+    // upstream, show a small "OD" badge with the source filename in the
+    // tooltip — researchers can then track down the actual file.
+    if (odSources && odSources.length > 0) {
+      const tooltip = odSources
+        .map(s => `${s.type.replace('OD_series_', '')}: ${s.source}`)
+        .join('\n') + '\n(numeric series not in DB mirror)';
+      return (
+        <div
+          className="flex items-center justify-center text-[9px] font-semibold rounded bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800"
+          style={{ width, height }}
+          title={tooltip}
+          aria-label={tooltip}
+        >
+          OD ref
+        </div>
+      );
+    }
     return <div className="text-[9px] text-slate-300 dark:text-gray-600 italic flex items-center justify-center" style={{ width, height }}>no curve</div>;
   }
   const xs = data.map(d => d.t);
@@ -107,7 +140,6 @@ function GrowthCurveSparkline({
   return (
     <svg width={width} height={height} className="block" aria-label={tooltip}>
       <title>{tooltip}</title>
-      {/* baseline */}
       <line x1={pad} y1={height - pad} x2={width - pad} y2={height - pad} className="stroke-slate-200 dark:stroke-gray-700" strokeWidth="0.5" />
       <path d={path} fill="none" stroke="currentColor" className="text-blue-600 dark:text-blue-400" strokeWidth="1.4" />
       {data.map((d, i) => (
@@ -128,12 +160,16 @@ function sortSamples(samples: MutationSample[]): MutationSample[] {
     const ad = a.donor_dna || '';
     const bd = b.donor_dna || '';
     if (ad !== bd) return ad.localeCompare(bd);
-    const aIsAle = (a.experiment_type || '').toLowerCase().includes('ale');
-    const bIsAle = (b.experiment_type || '').toLowerCase().includes('ale');
-    if (aIsAle && bIsAle) {
-      const at = a.transfer ?? -1, bt = b.transfer ?? -1;
-      if (at !== bt) return at - bt;
+    // Sort by transfer NUMBER whenever both samples have one (not just ALE) —
+    // any time-course experiment benefits from T1 < T6 < T11 < T25 ordering
+    // instead of the lexicographic T1 < T11 < T18 < T25 < T6.
+    if (typeof a.transfer === 'number' && typeof b.transfer === 'number' && a.transfer !== b.transfer) {
+      return a.transfer - b.transfer;
     }
+    // Then by selection variant ('P' before 'S1','S2','L1','L2','C') so colonies group together.
+    const aSel = a.selection_note || '';
+    const bSel = b.selection_note || '';
+    if (aSel !== bSel) return aSel.localeCompare(bSel);
     return a.name.localeCompare(b.name);
   });
 }
@@ -488,7 +524,7 @@ function SampleSelectionPanel({
                         </td>
                         <td className="px-2 py-1">
                           <div className="flex justify-end">
-                            <GrowthCurveSparkline data={s.growth_curve} width={70} height={26} />
+                            <GrowthCurveSparkline data={s.growth_curve} odSources={s.od_sources} width={70} height={26} />
                           </div>
                         </td>
                       </tr>
@@ -524,6 +560,37 @@ function ComparativePanel({
   const [hideEmpty, setHideEmpty] = useState(true);
   const [sortKey, setSortKey] = useState<SortKey>('maxFreq');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
+  const [filtersHydrated, setFiltersHydrated] = useState(false);
+
+  // Rehydrate filters from localStorage on first mount.
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(COMPARE_FILTERS_KEY);
+      if (raw) {
+        const f = JSON.parse(raw) as Partial<CompareFilters>;
+        if (typeof f.mutFilter === 'string') setMutFilter(f.mutFilter);
+        if (f.metricFilter === 'all' || f.metricFilter === 'frequency' || f.metricFilter === 'copy_number') setMetricFilter(f.metricFilter);
+        if (Array.isArray(f.snpTypes)) setSnpTypes(new Set(f.snpTypes));
+        if (typeof f.minFreq === 'number') setMinFreq(f.minFreq);
+        if (typeof f.minPresence === 'number') setMinPresence(f.minPresence);
+        if (typeof f.hideEmpty === 'boolean') setHideEmpty(f.hideEmpty);
+        if (f.sortKey === null || ['gene','variant','type','maxFreq','spread','presence'].includes(f.sortKey as string)) setSortKey(f.sortKey as SortKey);
+        if (f.sortDir === 'asc' || f.sortDir === 'desc') setSortDir(f.sortDir);
+      }
+    } catch {}
+    setFiltersHydrated(true);
+  }, []);
+
+  // Persist filters back to localStorage on every change (after hydration).
+  useEffect(() => {
+    if (!filtersHydrated) return;
+    try {
+      const payload: CompareFilters = {
+        mutFilter, metricFilter, snpTypes: [...snpTypes], minFreq, minPresence, hideEmpty, sortKey, sortDir,
+      };
+      localStorage.setItem(COMPARE_FILTERS_KEY, JSON.stringify(payload));
+    } catch {}
+  }, [filtersHydrated, mutFilter, metricFilter, snpTypes, minFreq, minPresence, hideEmpty, sortKey, sortDir]);
 
   const toggleSnpType = (t: string) => {
     const next = new Set(snpTypes);
@@ -891,6 +958,7 @@ function ComparativePanel({
                   <div className="flex justify-center">
                     <GrowthCurveSparkline
                       data={s.growth_curve}
+                      odSources={s.od_sources}
                       width={84}
                       height={36}
                       yMaxOverride={curveScale.yMax}
