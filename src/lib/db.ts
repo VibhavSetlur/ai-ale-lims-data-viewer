@@ -388,6 +388,19 @@ function buildWhere(
   };
 }
 
+export async function runQuery<T = Record<string, unknown>>(
+  sql: string,
+  params: (string | number | null)[] = []
+): Promise<T[]> {
+  if (config.type === 'mysql') {
+    const pool = getMySqlPool();
+    const [rows] = await pool.query<MysqlDataRow[]>(sql, params);
+    return rows as unknown as T[];
+  }
+  const database = getSqliteDb();
+  return database.prepare(sql).all(...params) as T[];
+}
+
 export async function getTableData({
   tableName, page, pageSize, sortBy, sortDirection, filters, globalSearch, filterLogic, columns, limit,
 }: FetchDataOptions) {

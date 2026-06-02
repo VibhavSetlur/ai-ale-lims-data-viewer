@@ -461,7 +461,7 @@ export default function Dashboard({ initialTables }: DashboardProps) {
                     Samples are grouped by experiment &gt; replicate &gt; donor DNA, and ALE samples are sorted by transfer count.
                   </p>
                   <p className="text-[11px] mt-3 text-slate-400 dark:text-gray-500">
-                    Source: <span className="font-mono">data/mutations.json</span>
+                    Source: LIMS <span className="font-mono">Mutations</span> table
                   </p>
                 </div>
               )}

@@ -1,6 +1,5 @@
-import { NextResponse } from 'next/server';
-import fs from 'fs/promises';
-import path from 'path';
+import { NextResponse, type NextRequest } from 'next/server';
+import { runQuery, getDbType } from '@/lib/db';
 
 export interface MutationSample {
   id: string;
@@ -29,352 +28,237 @@ export interface MutationDataset {
   samples: MutationSample[];
   mutations: MutationRow[];
   warnings?: string[];
-  source?: { path: string; format: 'json' | 'csv' | 'tsv' };
+  source?: { driver: 'sqlite' | 'mysql'; table: string; rowsScanned: number };
 }
 
-const MUTATIONS_PATH = path.resolve(process.cwd(), process.env.MUTATIONS_PATH || 'data/mutations.json');
+/* ---------- Row shapes from the lims_mirror Mutations / Seq_samples join ---------- */
 
-function asString(v: unknown): string | undefined {
-  if (typeof v === 'string') return v;
-  if (typeof v === 'number' && Number.isFinite(v)) return String(v);
-  return undefined;
-}
-function asNumber(v: unknown): number | undefined {
-  if (typeof v === 'number' && Number.isFinite(v)) return v;
-  if (typeof v === 'string' && v.trim() !== '') {
-    const n = Number(v);
-    if (Number.isFinite(n)) return n;
-  }
-  return undefined;
-}
-function detectFormat(filePath: string, head: string): 'json' | 'csv' | 'tsv' {
-  const ext = path.extname(filePath).toLowerCase();
-  if (ext === '.json') return 'json';
-  if (ext === '.tsv' || ext === '.tab') return 'tsv';
-  if (ext === '.csv') return 'csv';
-  // Sniff: leading '{' or '[' → json; tab-rich first line → tsv; else csv.
-  const trimmed = head.trimStart();
-  if (trimmed.startsWith('{') || trimmed.startsWith('[')) return 'json';
-  const firstLine = head.split(/\r?\n/, 1)[0] ?? '';
-  const tabs = (firstLine.match(/\t/g) ?? []).length;
-  const commas = (firstLine.match(/,/g) ?? []).length;
-  return tabs > commas ? 'tsv' : 'csv';
+interface SeqSampleRow {
+  seq_sample: string;
+  experiment: string | null;
+  sample_name: string | null;
+  pop_or_colony: string | null;
+  experiment_type: string | null;
+  condition: string | null;
+  strain: string | null;
+  transforming_dna: string | null;
+  notes: string | null;
 }
 
-/* ---------- Delimited (CSV/TSV) parsing ---------- */
-
-function parseDelimited(text: string, delimiter: string): string[][] {
-  // RFC-4180-ish parser supporting quoted fields, embedded delimiters, doubled quotes, and \r\n.
-  const rows: string[][] = [];
-  let row: string[] = [];
-  let cur = '';
-  let inQuotes = false;
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i];
-    if (inQuotes) {
-      if (ch === '"') {
-        if (text[i + 1] === '"') { cur += '"'; i++; }
-        else { inQuotes = false; }
-      } else cur += ch;
-    } else {
-      if (ch === '"') inQuotes = true;
-      else if (ch === delimiter) { row.push(cur); cur = ''; }
-      else if (ch === '\n') { row.push(cur); rows.push(row); row = []; cur = ''; }
-      else if (ch === '\r') { /* swallow; \n handles row end */ }
-      else cur += ch;
-    }
-  }
-  row.push(cur);
-  rows.push(row);
-  // Drop trailing entirely-empty rows
-  while (rows.length > 0 && rows[rows.length - 1].every(c => c === '')) rows.pop();
-  return rows;
+interface MutationRawRow {
+  seq_sample: string;
+  experiment: string | null;
+  type: string | null;
+  snp_type: string | null;
+  mutation_category: string | null;
+  gene_name: string | null;
+  gene_product: string | null;
+  locus_tag: string | null;
+  position: number | null;
+  ref_seq: string | null;
+  new_seq: string | null;
+  aa_ref_seq: string | null;
+  aa_position: number | null;
+  aa_new_seq: string | null;
+  frequency: number | null;
+  size: string | null;
 }
 
-// Aliases for the optional metadata-row keys users may put above the gene header.
-const METADATA_KEYS: Record<string, keyof MutationSample> = {
-  'experiment': 'experiment',
-  'experiment_type': 'experiment_type',
-  'experiment type': 'experiment_type',
-  'replicate': 'replicate',
-  'rep': 'replicate',
-  'donor_dna': 'donor_dna',
-  'donor dna': 'donor_dna',
-  'donor': 'donor_dna',
-  'condition': 'condition',
-  'transfer': 'transfer',
-  'transfers': 'transfer',
-  't': 'transfer',
-  'strain': 'strain',
-  'name': 'name',
-  'sample name': 'name',
-  'sample_name': 'name',
-  'id': 'id',
-  'sample_id': 'id',
-  'selection_note': 'selection_note',
-  'selection note': 'selection_note',
-};
+/* ---------- Helpers ---------- */
 
-const DESCRIPTOR_KEYS: Record<string, 'gene' | 'variant' | 'type' | 'metric' | 'id'> = {
-  'gene': 'gene',
-  'variant': 'variant',
-  'mutation': 'variant',
-  'allele': 'variant',
-  'type': 'type',
-  'mutation_type': 'type',
-  'metric': 'metric',
-  'unit': 'metric',
-  'id': 'id',
-  'mutation_id': 'id',
-};
-
-function inferMetric(typeOrMetric: string): string {
-  const s = typeOrMetric.toLowerCase();
-  if (/copy[_ ]?number|amplification|cnv/.test(s)) return 'copy_number';
-  if (/freq|percent|%|allele/.test(s)) return 'frequency';
-  return 'frequency';
+// Parse "TFMN1.fba.1.T1.P" → {transfer: 1, pop_or_colony: 'P'}; also handles ".T10.P" etc.
+function parseSeqSample(seqSample: string): { transfer?: number; pop_or_colony?: string } {
+  const m = seqSample.match(/\.T(\d+)\.([PC])$/i);
+  if (!m) return {};
+  return { transfer: parseInt(m[1], 10), pop_or_colony: m[2].toUpperCase() };
 }
 
-function parseWideTable(rows: string[][]): { dataset: MutationDataset; warnings: string[] } {
-  const warnings: string[] = [];
-  if (rows.length === 0) return { dataset: { samples: [], mutations: [] }, warnings: ['Empty file.'] };
-
-  // Find the header row: first row containing a cell that matches a DESCRIPTOR_KEY (looking for "gene" specifically).
-  let headerIdx = -1;
-  let descriptorCols: { gene?: number; variant?: number; type?: number; metric?: number; id?: number } = {};
-  let sampleColStart = -1;
-  for (let r = 0; r < rows.length; r++) {
-    const cells = rows[r].map(c => c.trim());
-    const found: typeof descriptorCols = {};
-    cells.forEach((c, i) => {
-      const k = DESCRIPTOR_KEYS[c.toLowerCase()];
-      if (k && found[k] === undefined) found[k] = i;
-    });
-    if (found.gene !== undefined) {
-      headerIdx = r;
-      descriptorCols = found;
-      // sample columns start right of the rightmost recognized descriptor.
-      const maxDescriptor = Math.max(...Object.values(found).filter((v): v is number => v !== undefined));
-      // Skip an optional "sample" / "sample →" placeholder column.
-      let start = maxDescriptor + 1;
-      while (start < cells.length && /^(sample|sample →|sample\s*→)?$/i.test(cells[start])) start++;
-      sampleColStart = start;
-      break;
-    }
-  }
-  if (headerIdx === -1) {
-    return { dataset: { samples: [], mutations: [] }, warnings: ['No header row found (expected a "gene" column).'] };
-  }
-
-  const headerCells = rows[headerIdx].map(c => c.trim());
-  const sampleColumns = headerCells.slice(sampleColStart);
-  if (sampleColumns.length === 0) {
-    return { dataset: { samples: [], mutations: [] }, warnings: ['Header row has no sample columns.'] };
-  }
-  if (sampleColumns.some(c => c === '')) {
-    warnings.push('Some sample-column headers are empty; those columns will be ignored.');
-  }
-
-  // Build per-sample metadata from rows above the header.
-  const samplesByCol: MutationSample[] = sampleColumns.map((name, idx) => ({
-    id: name || `sample_${idx + 1}`,
-    name: name || `sample_${idx + 1}`,
-    experiment: '',
-  }));
-
-  for (let r = 0; r < headerIdx; r++) {
-    const cells = rows[r].map(c => c.trim());
-    if (cells.every(c => c === '')) continue;
-    // Find the metadata key: first non-empty cell that matches METADATA_KEYS (search columns 0..sampleColStart-1).
-    let keyName: keyof MutationSample | null = null;
-    for (let c = 0; c < Math.min(sampleColStart, cells.length); c++) {
-      const k = METADATA_KEYS[cells[c].toLowerCase()];
-      if (k) { keyName = k; break; }
-    }
-    if (!keyName) continue;
-    for (let c = 0; c < sampleColumns.length; c++) {
-      const colIdx = sampleColStart + c;
-      const raw = cells[colIdx] ?? '';
-      if (raw === '') continue;
-      const s = samplesByCol[c];
-      if (keyName === 'transfer') {
-        const n = asNumber(raw);
-        if (n !== undefined) s.transfer = n;
-      } else if (keyName === 'id') {
-        s.id = raw;
-      } else {
-        (s as unknown as Record<string, unknown>)[keyName] = raw;
-      }
-    }
-  }
-
-  // Mark robotic ALE if experiment_type isn't set but experiment looks like ALE.
-  for (const s of samplesByCol) {
-    if (!s.experiment_type && /^ale\b/i.test(s.experiment || '')) s.experiment_type = 'robotic ALE';
-  }
-
-  // De-duplicate sample IDs after metadata-driven id overrides.
-  const seenSampleIds = new Set<string>();
-  const samples: MutationSample[] = [];
-  const colToId: (string | null)[] = [];
-  for (let c = 0; c < samplesByCol.length; c++) {
-    const s = samplesByCol[c];
-    if (!sampleColumns[c]) { colToId.push(null); continue; }
-    if (seenSampleIds.has(s.id)) {
-      warnings.push(`Duplicate sample id "${s.id}" in column ${c + sampleColStart + 1} — column ignored.`);
-      colToId.push(null);
-      continue;
-    }
-    seenSampleIds.add(s.id);
-    samples.push(s);
-    colToId.push(s.id);
-  }
-
-  // Mutation rows: every row below the header.
-  const seenMutIds = new Set<string>();
-  const mutations: MutationRow[] = [];
-  for (let r = headerIdx + 1; r < rows.length; r++) {
-    const cells = rows[r].map(c => c.trim());
-    if (cells.every(c => c === '')) continue;
-    const gene = descriptorCols.gene !== undefined ? (cells[descriptorCols.gene] ?? '') : '';
-    if (!gene) continue;
-    const variant = descriptorCols.variant !== undefined ? (cells[descriptorCols.variant] ?? '') : '';
-    const type = descriptorCols.type !== undefined ? (cells[descriptorCols.type] ?? '') : '';
-    const metricCell = descriptorCols.metric !== undefined ? (cells[descriptorCols.metric] ?? '') : '';
-    const metric = metricCell || inferMetric(type);
-    const idCell = descriptorCols.id !== undefined ? (cells[descriptorCols.id] ?? '') : '';
-    const id = idCell || `${gene}.${variant || 'na'}.${type || metric}`.replace(/\s+/g, '_');
-    if (seenMutIds.has(id)) {
-      warnings.push(`Duplicate mutation id "${id}" — second occurrence ignored.`);
-      continue;
-    }
-    seenMutIds.add(id);
-    const values: Record<string, number> = {};
-    for (let c = 0; c < sampleColumns.length; c++) {
-      const sid = colToId[c];
-      if (!sid) continue;
-      const raw = cells[sampleColStart + c] ?? '';
-      if (raw === '') continue;
-      let n = asNumber(raw);
-      if (n === undefined && raw.endsWith('%')) {
-        const pn = Number(raw.slice(0, -1));
-        if (Number.isFinite(pn)) n = pn / 100;
-      }
-      if (n !== undefined) values[sid] = n;
-    }
-    mutations.push({ id, gene, variant, type, metric, values });
-  }
-
-  return { dataset: { samples, mutations }, warnings };
+// Replicate: the trailing ".\d+" of the Sample_Name (e.g. "TFMN1.fba.1" → "1").
+function deriveReplicate(sampleName: string | null): string | undefined {
+  if (!sampleName) return undefined;
+  const m = sampleName.match(/\.(\d+)$/);
+  return m ? m[1] : undefined;
 }
 
-/* ---------- JSON (wide format) ---------- */
+// Donor DNA: the middle tokens of a TFMN sample name (e.g. "TFMN1.fba.sohB.1" → "fba+sohB").
+// For everything else, fall back to whatever Transforming_DNA contains.
+function deriveDonorDna(sampleName: string | null, transformingDna: string | null): string | undefined {
+  if (transformingDna && transformingDna.trim()) return transformingDna.trim();
+  if (!sampleName) return undefined;
+  const parts = sampleName.split('.');
+  if (parts.length < 3) return undefined;
+  const middle = parts.slice(1, -1).filter(Boolean);
+  return middle.length > 0 ? middle.join('+') : undefined;
+}
 
-function normalizeJson(raw: unknown): { dataset: MutationDataset; warnings: string[] } {
-  const warnings: string[] = [];
-  if (!raw || typeof raw !== 'object') {
-    return { dataset: { samples: [], mutations: [] }, warnings: ['Top-level JSON is not an object.'] };
+function labelGene(r: MutationRawRow): string {
+  return (r.gene_name || r.locus_tag || r.gene_product || 'unknown').trim();
+}
+
+function labelVariant(r: MutationRawRow): string {
+  // Prefer AA change when we have one (e.g. "F33I").
+  if (r.aa_ref_seq && r.aa_new_seq && r.aa_position !== null && r.aa_position !== undefined) {
+    return `${r.aa_ref_seq}${r.aa_position}${r.aa_new_seq}`;
   }
-  const r = raw as Record<string, unknown>;
-  const samplesIn = Array.isArray(r.samples) ? r.samples : [];
-  const mutationsIn = Array.isArray(r.mutations) ? r.mutations : [];
-  if (!Array.isArray(r.samples)) warnings.push('Missing or invalid "samples" array.');
-  if (!Array.isArray(r.mutations)) warnings.push('Missing or invalid "mutations" array.');
-
-  const seenIds = new Set<string>();
-  const samples: MutationSample[] = [];
-  for (const item of samplesIn) {
-    if (!item || typeof item !== 'object') continue;
-    const s = item as Record<string, unknown>;
-    const id = asString(s.id);
-    const name = asString(s.name) ?? id;
-    const experiment = asString(s.experiment) ?? '';
-    if (!id || !name) { warnings.push(`Sample skipped: missing id or name (${JSON.stringify(s).slice(0, 80)}).`); continue; }
-    if (seenIds.has(id)) { warnings.push(`Duplicate sample id "${id}" — second occurrence ignored.`); continue; }
-    seenIds.add(id);
-    let growth_curve: { t: number; od: number }[] | undefined;
-    if (Array.isArray(s.growth_curve)) {
-      growth_curve = s.growth_curve
-        .map(p => (p && typeof p === 'object' ? p as Record<string, unknown> : null))
-        .filter((p): p is Record<string, unknown> => !!p)
-        .map(p => ({ t: Number(p.t), od: Number(p.od) }))
-        .filter(p => Number.isFinite(p.t) && Number.isFinite(p.od));
-      if (growth_curve.length === 0) growth_curve = undefined;
-    }
-    samples.push({
-      id,
-      name,
-      experiment,
-      experiment_type: asString(s.experiment_type),
-      replicate: asString(s.replicate),
-      transfer: asNumber(s.transfer),
-      condition: asString(s.condition),
-      strain: asString(s.strain),
-      donor_dna: asString(s.donor_dna),
-      selection_note: asString(s.selection_note),
-      growth_curve,
-    });
+  // Indels: show size where breseq stored it.
+  if ((r.type === 'INS' || r.type === 'DEL') && r.size && r.size.trim()) {
+    return `${r.type} ${r.size}bp @${r.position ?? '?'}`;
   }
-
-  const seenMutIds = new Set<string>();
-  const mutations: MutationRow[] = [];
-  for (const item of mutationsIn) {
-    if (!item || typeof item !== 'object') continue;
-    const m = item as Record<string, unknown>;
-    const id = asString(m.id);
-    const gene = asString(m.gene) ?? '';
-    const variant = asString(m.variant) ?? '';
-    const type = asString(m.type) ?? '';
-    const metric = asString(m.metric) ?? inferMetric(type);
-    if (!id) { warnings.push(`Mutation skipped: missing id (${gene} ${variant}).`); continue; }
-    if (seenMutIds.has(id)) { warnings.push(`Duplicate mutation id "${id}" — second occurrence ignored.`); continue; }
-    seenMutIds.add(id);
-    const values: Record<string, number> = {};
-    const valuesIn = (m.values && typeof m.values === 'object') ? m.values as Record<string, unknown> : {};
-    // Wide format: { [sampleId]: number }
-    // Long format: [{ sample_id, value } ...]
-    if (Array.isArray(m.values)) {
-      for (const entry of m.values as unknown[]) {
-        if (!entry || typeof entry !== 'object') continue;
-        const e = entry as Record<string, unknown>;
-        const sid = asString(e.sample_id) ?? asString(e.sampleId) ?? asString(e.id);
-        const n = asNumber(e.value);
-        if (sid && n !== undefined) values[sid] = n;
-      }
-    } else {
-      for (const [k, v] of Object.entries(valuesIn)) {
-        const n = asNumber(v);
-        if (n !== undefined) values[k] = n;
-      }
-    }
-    mutations.push({ id, gene, variant, type, metric, values });
+  // Nucleotide substitution at position.
+  if (r.ref_seq && r.new_seq && r.position !== null && r.position !== undefined) {
+    return `${r.ref_seq}${r.position}${r.new_seq}`;
   }
+  return r.position !== null && r.position !== undefined ? `pos ${r.position}` : '—';
+}
 
-  return { dataset: { samples, mutations }, warnings };
+function labelType(r: MutationRawRow): string {
+  // snp_type is the most specific (synonymous / nonsynonymous / nonsense / intergenic / noncoding).
+  if (r.snp_type && r.snp_type.trim()) return r.snp_type.trim();
+  if (r.mutation_category && r.mutation_category.trim()) return r.mutation_category.trim();
+  return (r.type || 'unknown').trim();
+}
+
+// A stable id per unique mutation site (so two samples carrying the same variant land on one row).
+function mutationKey(r: MutationRawRow): string {
+  return [
+    r.type ?? '',
+    r.gene_name ?? r.locus_tag ?? '',
+    r.position ?? '',
+    r.ref_seq ?? '',
+    r.new_seq ?? '',
+    r.aa_position ?? '',
+    r.aa_ref_seq ?? '',
+    r.aa_new_seq ?? '',
+  ].join('|');
 }
 
 /* ---------- Route ---------- */
 
-export async function GET() {
+const SAMPLES_SQL = `
+  SELECT
+    ss."Sequencing_sample"                    AS seq_sample,
+    ss."Experiment"                            AS experiment,
+    ss."Sample_Name"                           AS sample_name,
+    ss."Population_or_Single_colony?"          AS pop_or_colony,
+    e."Type"                                   AS experiment_type,
+    s."Condition"                              AS condition,
+    s."Strain_name"                            AS strain,
+    s."Transforming_DNA"                       AS transforming_dna,
+    s."Notes"                                  AS notes
+  FROM Seq_samples ss
+  LEFT JOIN Samples s
+    ON s."Name" = ss."Sample_Name" AND s.deleted = 0
+  LEFT JOIN Experiments e
+    ON e."Name" = ss."Experiment" AND e.deleted = 0
+  WHERE ss.deleted = 0
+    AND ss."Sequencing_sample" IN (
+      SELECT DISTINCT "Seq_sample" FROM Mutations WHERE deleted = 0
+    )
+`;
+
+const MUTATIONS_SQL = `
+  SELECT
+    "Seq_sample"        AS seq_sample,
+    "Experiment"        AS experiment,
+    "type"              AS type,
+    "snp_type"          AS snp_type,
+    "mutation_category" AS mutation_category,
+    "gene_name"         AS gene_name,
+    "gene_product"      AS gene_product,
+    "locus_tag"         AS locus_tag,
+    "position"          AS position,
+    "ref_seq"           AS ref_seq,
+    "new_seq"           AS new_seq,
+    "aa_ref_seq"        AS aa_ref_seq,
+    "aa_position"       AS aa_position,
+    "aa_new_seq"        AS aa_new_seq,
+    "frequency"         AS frequency,
+    "size"              AS size
+  FROM Mutations
+  WHERE deleted = 0
+`;
+
+export async function GET(req: NextRequest) {
+  const warnings: string[] = [];
+  const url = new URL(req.url);
+  const experimentFilter = url.searchParams.get('experiment')?.trim() || null;
+
   try {
-    const raw = await fs.readFile(MUTATIONS_PATH, 'utf-8');
-    const format = detectFormat(MUTATIONS_PATH, raw.slice(0, 2048));
-    let result: { dataset: MutationDataset; warnings: string[] };
-    if (format === 'json') {
-      const parsed = JSON.parse(raw) as unknown;
-      result = normalizeJson(parsed);
-    } else {
-      const delim = format === 'tsv' ? '\t' : ',';
-      const rows = parseDelimited(raw, delim);
-      result = parseWideTable(rows);
-    }
-    return NextResponse.json({
-      ...result.dataset,
-      warnings: result.warnings,
-      source: { path: MUTATIONS_PATH, format },
+    const sampleSql = experimentFilter
+      ? `${SAMPLES_SQL} AND ss."Experiment" = ?`
+      : SAMPLES_SQL;
+    const mutSql = experimentFilter
+      ? `${MUTATIONS_SQL} AND "Experiment" = ?`
+      : MUTATIONS_SQL;
+    const params: (string | number | null)[] = experimentFilter ? [experimentFilter] : [];
+
+    const [sampleRows, mutRows] = await Promise.all([
+      runQuery<SeqSampleRow>(sampleSql, params),
+      runQuery<MutationRawRow>(mutSql, params),
+    ]);
+
+    // Build samples
+    const samples: MutationSample[] = sampleRows.map(r => {
+      const { transfer, pop_or_colony } = parseSeqSample(r.seq_sample);
+      const replicate = deriveReplicate(r.sample_name);
+      const donor_dna = deriveDonorDna(r.sample_name, r.transforming_dna);
+      const selectionParts: string[] = [];
+      if (pop_or_colony === 'P') selectionParts.push('population');
+      else if (pop_or_colony === 'C') selectionParts.push('single colony');
+      if (r.notes && r.notes.trim()) selectionParts.push(r.notes.trim());
+      return {
+        id: r.seq_sample,
+        name: r.seq_sample,
+        experiment: r.experiment ?? '',
+        experiment_type: r.experiment_type ?? undefined,
+        replicate,
+        transfer,
+        condition: r.condition ?? undefined,
+        strain: r.strain ?? undefined,
+        donor_dna,
+        selection_note: selectionParts.length ? selectionParts.join(' · ') : undefined,
+      };
     });
+
+    // De-dupe samples by id (shouldn't happen given Seq_samples PK, but defend).
+    const sampleIds = new Set(samples.map(s => s.id));
+
+    // Build mutation rows: collapse to one row per unique site, populate values[sampleId] = frequency.
+    const byKey = new Map<string, MutationRow>();
+    let rowsScanned = 0;
+    for (const r of mutRows) {
+      rowsScanned++;
+      if (!sampleIds.has(r.seq_sample)) continue; // mutation references a seq_sample we don't have metadata for
+      const key = mutationKey(r);
+      let row = byKey.get(key);
+      if (!row) {
+        row = {
+          id: key.replace(/\|/g, '.').replace(/\s+/g, '_'),
+          gene: labelGene(r),
+          variant: labelVariant(r),
+          type: labelType(r),
+          metric: 'frequency',
+          values: {},
+        };
+        byKey.set(key, row);
+      }
+      const f = typeof r.frequency === 'number' && Number.isFinite(r.frequency) ? r.frequency : null;
+      if (f !== null) row.values[r.seq_sample] = f;
+    }
+
+    const mutations = [...byKey.values()];
+
+    if (samples.length === 0) warnings.push('No sequenced samples found in the database.');
+    if (mutations.length === 0) warnings.push('No mutation calls found in the database.');
+
+    return NextResponse.json({
+      samples,
+      mutations,
+      warnings,
+      source: { driver: getDbType(), table: 'Mutations', rowsScanned },
+    } satisfies MutationDataset);
   } catch (e) {
-    const msg = e instanceof Error ? e.message : 'Failed to read mutation dataset';
+    const msg = e instanceof Error ? e.message : 'Failed to query mutation dataset';
     return NextResponse.json({ error: msg, samples: [], mutations: [] }, { status: 500 });
   }
 }

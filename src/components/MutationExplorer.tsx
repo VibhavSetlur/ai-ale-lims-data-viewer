@@ -224,7 +224,7 @@ export default function MutationExplorer() {
           <div>
             <div className="font-medium">Could not load mutation dataset.</div>
             <div className="text-[11px] mt-0.5 opacity-80">{error}</div>
-            <div className="text-[11px] mt-1 opacity-80">Expected at <span className="font-mono">data/mutations.json</span>. Once Natascha&apos;s spreadsheets are imported into that file (or its location is set via <span className="font-mono">MUTATIONS_PATH</span>), this view will populate automatically.</div>
+            <div className="text-[11px] mt-1 opacity-80">Pulled from the <span className="font-mono">Mutations</span> table in the configured LIMS database. Check that <span className="font-mono">SQLITE_PATH</span> / <span className="font-mono">MYSQL_URL</span> points at the mirror that contains the breseq calls.</div>
           </div>
         </div>
       )}
