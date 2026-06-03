@@ -40,10 +40,20 @@ interface MutationRow {
   gene_product?: string;
 }
 
+interface RegistrySummary {
+  id: string;
+  count: number;
+  polymorphism_frequency_cutoff: number | null;
+  limit_fold_coverage: number | null;
+  reference: string | null;
+}
+
 interface MutationDataset {
   samples: MutationSample[];
   mutations: MutationRow[];
   experiments?: string[];
+  registries?: RegistrySummary[];
+  selectedRegistry?: string | null;
   warnings?: string[];
 }
 
@@ -52,6 +62,7 @@ type Tab = 'samples' | 'compare';
 const SELECTED_KEY = 'lims:mutation:selected';
 const TAB_KEY = 'lims:mutation:tab';
 const EXPERIMENT_KEY = 'lims:mutation:experiment';
+const REGISTRY_KEY = 'lims:mutation:registry';
 const COMPARE_FILTERS_KEY = 'lims:mutation:compareFilters';
 const SAMPLE_FILTERS_KEY = 'lims:mutation:sampleFilters';
 const COLLAPSED_GROUPS_KEY = 'lims:mutation:collapsedGroups';
@@ -192,6 +203,7 @@ export default function MutationExplorer() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState('');
   const [experiment, setExperiment] = useState<string>(''); // '' = all experiments
+  const [registry, setRegistry] = useState<string>('');     // '' = let the API pick the modal registry
 
   useEffect(() => {
     try {
@@ -201,17 +213,23 @@ export default function MutationExplorer() {
       if (t === 'compare' || t === 'samples') setTab(t);
       const e = localStorage.getItem(EXPERIMENT_KEY);
       if (e !== null) setExperiment(e);
+      const r = localStorage.getItem(REGISTRY_KEY);
+      if (r !== null) setRegistry(r);
     } catch {}
   }, []);
 
   useEffect(() => { try { localStorage.setItem(SELECTED_KEY, JSON.stringify([...selected])); } catch {} }, [selected]);
   useEffect(() => { try { localStorage.setItem(TAB_KEY, tab); } catch {} }, [tab]);
   useEffect(() => { try { localStorage.setItem(EXPERIMENT_KEY, experiment); } catch {} }, [experiment]);
+  useEffect(() => { try { localStorage.setItem(REGISTRY_KEY, registry); } catch {} }, [registry]);
 
-  const load = async (expFilter: string) => {
+  const load = async (expFilter: string, regFilter: string) => {
     setLoading(true); setError(null);
     try {
-      const url = expFilter ? `/api/mutations?experiment=${encodeURIComponent(expFilter)}` : '/api/mutations';
+      const qs = new URLSearchParams();
+      if (expFilter) qs.set('experiment', expFilter);
+      if (regFilter) qs.set('registry', regFilter);
+      const url = qs.toString() ? `/api/mutations?${qs.toString()}` : '/api/mutations';
       const res = await fetch(url);
       const json = await res.json();
       if (json.error) { setError(json.error); setData({ samples: [], mutations: [], experiments: [] }); }
@@ -221,7 +239,12 @@ export default function MutationExplorer() {
       setData({ samples: [], mutations: [], experiments: [] });
     } finally { setLoading(false); }
   };
-  useEffect(() => { load(experiment); }, [experiment]);
+  useEffect(() => { load(experiment, registry); }, [experiment, registry]);
+
+  // Changing the experiment also resets the registry — the set of available
+  // registries differs by experiment, so a stale pin would silently fall back
+  // to the modal-registry warning every time.
+  const onExperimentChange = (next: string) => { setRegistry(''); setExperiment(next); };
 
   // Prune selected IDs that no longer exist in the dataset.
   useEffect(() => {
@@ -258,7 +281,7 @@ export default function MutationExplorer() {
             Experiment
             <select
               value={experiment}
-              onChange={e => setExperiment(e.target.value)}
+              onChange={e => onExperimentChange(e.target.value)}
               className="text-[11.5px] border border-slate-300 dark:border-gray-600 rounded px-1.5 py-0.5 bg-white dark:bg-gray-700 dark:text-gray-100 outline-none"
               title="Scope the loaded dataset to one experiment for faster queries"
             >
@@ -266,6 +289,32 @@ export default function MutationExplorer() {
               {(data?.experiments ?? []).map(e => (
                 <option key={e} value={e}>{e}</option>
               ))}
+            </select>
+          </label>
+          <label className="flex items-center gap-1 text-[11px] text-slate-500 dark:text-gray-400" title="Breseq parameter set. Each registry is one breseq run; the dataset can contain calls from multiple runs. Pick one to view at a time.">
+            Registry
+            <select
+              value={registry}
+              onChange={e => setRegistry(e.target.value)}
+              disabled={!data?.registries || data.registries.length <= 1}
+              className="text-[11.5px] border border-slate-300 dark:border-gray-600 rounded px-1.5 py-0.5 bg-white dark:bg-gray-700 dark:text-gray-100 outline-none disabled:opacity-60 disabled:cursor-not-allowed font-mono"
+            >
+              <option value="">
+                {data?.selectedRegistry
+                  ? `auto · ${data.selectedRegistry.replace(/^breseq_/, '')}`
+                  : `auto (${data?.registries?.length ?? 0})`}
+              </option>
+              {(data?.registries ?? []).map(r => {
+                const shortId = r.id.replace(/^breseq_/, '');
+                const cutoff = r.polymorphism_frequency_cutoff !== null
+                  ? ` · poly≥${r.polymorphism_frequency_cutoff}`
+                  : '';
+                return (
+                  <option key={r.id} value={r.id}>
+                    {shortId}{cutoff} · {r.count.toLocaleString()} calls
+                  </option>
+                );
+              })}
             </select>
           </label>
           {tab === 'samples' && selected.size > 0 && (
@@ -287,7 +336,7 @@ export default function MutationExplorer() {
             </button>
           )}
           <button
-            onClick={() => load(experiment)}
+            onClick={() => load(experiment, registry)}
             className="p-1.5 rounded text-slate-500 dark:text-gray-400 hover:bg-slate-100 dark:hover:bg-gray-700"
             title="Reload mutation dataset"
           >

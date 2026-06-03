@@ -35,10 +35,20 @@ export interface MutationRow {
   gene_product?: string;
 }
 
+export interface RegistrySummary {
+  id: string;
+  count: number;                            // mutation rows attributed to this registry (post experiment-filter)
+  polymorphism_frequency_cutoff: number | null;
+  limit_fold_coverage: number | null;
+  reference: string | null;
+}
+
 export interface MutationDataset {
   samples: MutationSample[];
   mutations: MutationRow[];
   experiments: string[]; // distinct experiments present in this dataset (post-filter)
+  registries?: RegistrySummary[];           // breseq runs that produced calls in the (experiment-filtered) dataset, by row count desc
+  selectedRegistry?: string | null;         // which registry the returned samples/mutations are restricted to
   warnings?: string[];
   source?: { driver: 'sqlite' | 'mysql'; table: string; rowsScanned: number };
 }
@@ -162,32 +172,39 @@ function mutationKey(r: MutationRawRow): string {
    Mutations.Experiment per seq_sample.
 */
 
-const SAMPLES_SQL = `
-  SELECT
-    ms.seq_sample                              AS seq_sample,
-    ms.experiment                              AS experiment_from_mutations,
-    ss."Experiment"                            AS experiment_from_seq,
-    ss."Sample_Name"                           AS sample_name,
-    ss."Population_or_Single_colony?"          AS pop_or_colony_raw,
-    e."Type"                                   AS experiment_type,
-    s."Condition"                              AS condition,
-    s."Strain_name"                            AS strain,
-    s."Transforming_DNA"                       AS transforming_dna,
-    s."Notes"                                  AS notes
-  FROM (
-    SELECT "Seq_sample" AS seq_sample, MIN("Experiment") AS experiment
-    FROM Mutations
-    WHERE deleted = 0
-    GROUP BY "Seq_sample"
-  ) ms
-  LEFT JOIN Seq_samples ss
-    ON ss."Sequencing_sample" = ms.seq_sample AND ss.deleted = 0
-  LEFT JOIN Samples s
-    ON s."Name" = ss."Sample_Name" AND s.deleted = 0
-  LEFT JOIN Experiments e
-    ON e."Name" = ms.experiment AND e.deleted = 0
-  WHERE 1=1
-`;
+// Build SAMPLES SQL on demand so the registry/experiment filters can be pushed
+// inside the CTE — a sample only appears if it had calls under the selected
+// registry/experiment. Params are appended in (experiment?, registry?) order.
+function buildSamplesSql(opts: { experiment: boolean; registry: boolean }): string {
+  const inner: string[] = ['deleted = 0'];
+  if (opts.experiment) inner.push('"Experiment" = ?');
+  if (opts.registry)   inner.push('"Breseq_registry_ID" = ?');
+  return `
+    SELECT
+      ms.seq_sample                              AS seq_sample,
+      ms.experiment                              AS experiment_from_mutations,
+      ss."Experiment"                            AS experiment_from_seq,
+      ss."Sample_Name"                           AS sample_name,
+      ss."Population_or_Single_colony?"          AS pop_or_colony_raw,
+      e."Type"                                   AS experiment_type,
+      s."Condition"                              AS condition,
+      s."Strain_name"                            AS strain,
+      s."Transforming_DNA"                       AS transforming_dna,
+      s."Notes"                                  AS notes
+    FROM (
+      SELECT "Seq_sample" AS seq_sample, MIN("Experiment") AS experiment
+      FROM Mutations
+      WHERE ${inner.join(' AND ')}
+      GROUP BY "Seq_sample"
+    ) ms
+    LEFT JOIN Seq_samples ss
+      ON ss."Sequencing_sample" = ms.seq_sample AND ss.deleted = 0
+    LEFT JOIN Samples s
+      ON s."Name" = ss."Sample_Name" AND s.deleted = 0
+    LEFT JOIN Experiments e
+      ON e."Name" = ms.experiment AND e.deleted = 0
+  `;
+}
 
 const MUTATIONS_SQL = `
   SELECT
@@ -218,6 +235,24 @@ const ALL_EXPERIMENTS_SQL = `
   ORDER BY Experiment
 `;
 
+// Registry breakdown for the (optionally experiment-filtered) Mutations subset,
+// joined with Breseq_registry so the UI can show meaningful params alongside
+// the opaque ID. Ordered by row count desc so the modal registry is index 0.
+const REGISTRY_COUNTS_SQL = `
+  SELECT
+    m."Breseq_registry_ID"             AS id,
+    COUNT(*)                           AS count,
+    r."polymorphism_frequency_cutoff"  AS polymorphism_frequency_cutoff,
+    r."limit_fold_coverage"            AS limit_fold_coverage,
+    r."reference"                      AS reference
+  FROM Mutations m
+  LEFT JOIN Breseq_registry r
+    ON r."ID" = m."Breseq_registry_ID" AND r.deleted = 0
+  WHERE m.deleted = 0
+    AND m."Breseq_registry_ID" IS NOT NULL
+    AND m."Breseq_registry_ID" != ''
+`;
+
 // OD measurements tracked against each seq sample's parent sample. The
 // numeric series isn't in the mirror — the Data column carries a filename or
 // short reference. We still want to surface which samples have OD data
@@ -246,19 +281,64 @@ export async function GET(req: NextRequest) {
   const warnings: string[] = [];
   const url = new URL(req.url);
   const experimentFilter = url.searchParams.get('experiment')?.trim() || null;
+  const registryParam = url.searchParams.get('registry')?.trim() || null;
 
   try {
-    const sampleSql = experimentFilter
-      ? `${SAMPLES_SQL} AND ms.experiment = ?`
-      : SAMPLES_SQL;
-    const mutSql = experimentFilter
-      ? `${MUTATIONS_SQL} AND "Experiment" = ?`
-      : MUTATIONS_SQL;
-    const params: (string | number | null)[] = experimentFilter ? [experimentFilter] : [];
+    // First pass: enumerate the breseq registries present for this (experiment-filtered)
+    // dataset so we can validate the requested registry and pick a default when
+    // the caller doesn't specify one. The Mutations table currently has up to 4
+    // registries per Seq_sample (different breseq parameter runs); silently
+    // merging them — what the original API did — hides genuine call differences.
+    const regCountsSql = experimentFilter
+      ? `${REGISTRY_COUNTS_SQL} AND m."Experiment" = ? GROUP BY m."Breseq_registry_ID", r."polymorphism_frequency_cutoff", r."limit_fold_coverage", r."reference" ORDER BY count DESC`
+      : `${REGISTRY_COUNTS_SQL} GROUP BY m."Breseq_registry_ID", r."polymorphism_frequency_cutoff", r."limit_fold_coverage", r."reference" ORDER BY count DESC`;
+    const regParams: (string | number | null)[] = experimentFilter ? [experimentFilter] : [];
+    const registries = await runQuery<RegistrySummary>(regCountsSql, regParams);
+
+    // Resolve the registry to filter by:
+    //  - if caller passed ?registry=X and X is in the dataset, use it
+    //  - if caller passed ?registry=X but X isn't there (typo / wrong experiment), warn + fall back to modal
+    //  - if caller didn't pass one, default to the modal registry (registries[0])
+    let selectedRegistry: string | null = null;
+    if (registries.length > 0) {
+      if (registryParam) {
+        const match = registries.find(r => r.id === registryParam);
+        if (match) {
+          selectedRegistry = match.id;
+        } else {
+          warnings.push(
+            `Requested registry "${registryParam}" has no calls in this dataset — showing the most common registry (${registries[0].id}) instead.`
+          );
+          selectedRegistry = registries[0].id;
+        }
+      } else {
+        selectedRegistry = registries[0].id;
+        if (registries.length > 1) {
+          warnings.push(
+            `Showing breseq registry ${registries[0].id} (${registries[0].count.toLocaleString()} calls). ${registries.length - 1} other registry set${registries.length - 1 === 1 ? ' is' : 's are'} available — use the Registry selector to switch.`
+          );
+        }
+      }
+    }
+
+    // Same (experiment?, registry?) filters applied to both the sample CTE and
+    // the mutation pull so the two result sets are consistent. Param order is
+    // (experiment, registry) — both queries take the same params array.
+    const filterParams: (string | number | null)[] = [];
+    if (experimentFilter) filterParams.push(experimentFilter);
+    if (selectedRegistry) filterParams.push(selectedRegistry);
+
+    const sampleSql = buildSamplesSql({
+      experiment: !!experimentFilter,
+      registry: !!selectedRegistry,
+    });
+    const mutSql = MUTATIONS_SQL
+      + (experimentFilter ? ' AND "Experiment" = ?' : '')
+      + (selectedRegistry ? ' AND "Breseq_registry_ID" = ?' : '');
 
     const [sampleRows, mutRows, allExperiments, odRows] = await Promise.all([
-      runQuery<SeqSampleRow>(sampleSql, params),
-      runQuery<MutationRawRow>(mutSql, params),
+      runQuery<SeqSampleRow>(sampleSql, filterParams),
+      runQuery<MutationRawRow>(mutSql, filterParams),
       runQuery<{ name: string }>(ALL_EXPERIMENTS_SQL),
       runQuery<{ seq_sample: string; od_type: string; od_source: string }>(OD_MEASUREMENTS_SQL),
     ]);
@@ -350,6 +430,8 @@ export async function GET(req: NextRequest) {
       samples,
       mutations,
       experiments: allExperiments.map(e => e.name),
+      registries,
+      selectedRegistry,
       warnings,
       source: { driver: getDbType(), table: 'Mutations', rowsScanned },
     } satisfies MutationDataset);
