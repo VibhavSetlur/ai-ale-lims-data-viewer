@@ -167,16 +167,26 @@ function ChartCard({
     visibleCands.reduce((acc, c) => acc + (chart.candidates[c][ti] || 0), 0) + (otherCounts?.[ti] || 0)
   ), [chart, visibleCands, otherCounts]);
 
-  const W = 560;
-  const PAD_L = 44, PAD_R = 24, PAD_T = 22, PAD_B = 30;
+  // Bars shouldn't ever balloon into giant colored slabs. Cap the bar width
+  // in SVG units (the SVG is rendered with width: 100% so the bar stays a
+  // sensible fraction of the screen regardless of how few transfers exist).
+  // For 1 transfer: bar ~6% of inner width. For many transfers: bar fills
+  // most of its slot up to the cap.
+  const W = 600;
+  const PAD_L = 48, PAD_R = 28, PAD_T = 22, PAD_B = 32;
   const innerH = height;
   const H = innerH + PAD_T + PAD_B;
   const innerW = W - PAD_L - PAD_R;
 
   const maxRaw = Math.max(1, ...totals);
   const maxY = normalize === 'fraction' ? 1 : maxRaw;
-  const barW = Math.max(20, Math.min(80, innerW / Math.max(1, chart.transfers.length) - 12));
-  const xStep = innerW / Math.max(1, chart.transfers.length);
+  const slotW = innerW / Math.max(1, chart.transfers.length);
+  const BAR_CAP = 56;          // hard ceiling so 2-transfer charts don't bloat
+  const BAR_FILL = 0.62;       // bar uses 62% of its slot otherwise
+  const barW = Math.max(18, Math.min(BAR_CAP, slotW * BAR_FILL));
+  const xStep = slotW;
+  const LABEL_MIN_H = 14;      // only label segments tall enough to read
+  const LABEL_NAME_MIN_H = 22; // only show candidate name when even taller
 
   const getColor = (cand: string): string => {
     if (cand === '__OTHER__') return '#94a3b8'; // slate-400 for rollup
@@ -244,7 +254,7 @@ function ChartCard({
             if (otherCounts && otherCounts[ti] > 0) stack.push({ cand: '__OTHER__', v: otherCounts[ti] });
             return (
               <g key={ti}>
-                <text x={cx} y={H - PAD_B + 14} textAnchor="middle" fontSize={10} className="fill-slate-600 dark:fill-gray-300 tabular-nums">{t}</text>
+                <text x={cx} y={H - PAD_B + 14} textAnchor="middle" fontSize={11} className="fill-slate-600 dark:fill-gray-300 tabular-nums">T{t}</text>
                 {stack.map(({ cand, v }) => {
                   if (!v) return null;
                   const norm = normalize === 'fraction' ? (total ? v / total : 0) : v;
@@ -254,28 +264,49 @@ function ChartCard({
                   const color = getColor(cand);
                   const pinned = isPinned(cand);
                   const dim = isDimmed(cand);
+                  const pctStr = total ? `${(100 * v / total).toFixed(0)}%` : '';
+                  const showName = h >= LABEL_NAME_MIN_H && barW >= 38;
+                  const showCount = h >= LABEL_MIN_H;
+                  const midY = y + h / 2;
+                  const labelText = cand === '__OTHER__'
+                    ? `Other · ${v}`
+                    : (showName ? `${cand} · ${v}` : String(v));
                   return (
-                    <rect
-                      key={cand}
-                      x={x} y={y} width={barW} height={Math.max(0.5, h)}
-                      fill={color}
-                      stroke={pinned ? '#0f172a' : 'none'}
-                      strokeWidth={pinned ? 1.5 : 0}
-                      opacity={dim ? 0.18 : 1}
-                      style={{ cursor: cand !== '__OTHER__' && onPickCandidate ? 'pointer' : 'default' }}
-                      onClick={() => cand !== '__OTHER__' && onPickCandidate?.(cand)}
-                    >
-                      <title>
-                        {cand === '__OTHER__'
-                          ? `Other (${otherCands.length} candidates) · T${t}: ${v}${total ? ` (${(100 * v / total).toFixed(1)}%)` : ''}`
-                          : `${cand} · T${t}: ${v}${total ? ` (${(100 * v / total).toFixed(1)}%)` : ''}`}
-                      </title>
-                    </rect>
+                    <g key={cand}>
+                      <rect
+                        x={x} y={y} width={barW} height={Math.max(0.5, h)}
+                        fill={color}
+                        stroke={pinned ? '#0f172a' : 'rgba(255,255,255,0.4)'}
+                        strokeWidth={pinned ? 1.5 : 0.4}
+                        opacity={dim ? 0.18 : 1}
+                        style={{ cursor: cand !== '__OTHER__' && onPickCandidate ? 'pointer' : 'default' }}
+                        onClick={() => cand !== '__OTHER__' && onPickCandidate?.(cand)}
+                      >
+                        <title>
+                          {cand === '__OTHER__'
+                            ? `Other (${otherCands.length} candidates) · T${t}: ${v}${total ? ` (${(100 * v / total).toFixed(1)}%)` : ''}`
+                            : `${cand} · T${t}: ${v}${total ? ` (${(100 * v / total).toFixed(1)}%)` : ''}`}
+                        </title>
+                      </rect>
+                      {showCount && !dim && (
+                        <text
+                          x={cx} y={midY + 3.5} textAnchor="middle"
+                          fontSize={showName ? 11 : 10.5}
+                          className="pointer-events-none"
+                          style={{ fill: 'white', paintOrder: 'stroke', stroke: 'rgba(0,0,0,0.55)', strokeWidth: 2.5, strokeLinejoin: 'round', fontWeight: 600 }}
+                        >
+                          {showName ? labelText : `${v}${pctStr ? ` · ${pctStr}` : ''}`}
+                        </text>
+                      )}
+                    </g>
                   );
                 })}
-                <text x={cx} y={baseY - acc - 3} textAnchor="middle" fontSize={9} className="fill-slate-500 dark:fill-gray-400 tabular-nums">
-                  {total > 0 ? (normalize === 'fraction' ? '' : total) : ''}
-                </text>
+                {/* total label sits above the bar */}
+                {total > 0 && (
+                  <text x={cx} y={baseY - acc - 5} textAnchor="middle" fontSize={11} className="fill-slate-700 dark:fill-gray-200 tabular-nums" fontWeight={600}>
+                    {normalize === 'fraction' ? '100%' : total.toLocaleString()}
+                  </text>
+                )}
               </g>
             );
           })}
@@ -835,14 +866,16 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
           {view === 'focus' && focusedChart && (
             <div className="flex flex-col gap-2">
               <FocusNav charts={visibleCharts} focusKey={chartKey(focusedChart)} onPick={k => setFocusKey(k)} statsByKey={statsByKey} />
-              <ChartCard
-                chart={focusedChart} stats={statsByKey.get(chartKey(focusedChart))!}
-                colorMode={colorMode} normalize={normalize}
-                aColors={aColors} bColors={bColors} candColors={candColors}
-                candidateFilter={candidateFilter} topN={topN}
-                pinnedCand={pinnedCand} height={420}
-                onPickCandidate={(c) => setPinnedCand(p => p === c ? null : c)}
-              />
+              <div className="max-w-[1100px]">
+                <ChartCard
+                  chart={focusedChart} stats={statsByKey.get(chartKey(focusedChart))!}
+                  colorMode={colorMode} normalize={normalize}
+                  aColors={aColors} bColors={bColors} candColors={candColors}
+                  candidateFilter={candidateFilter} topN={topN}
+                  pinnedCand={pinnedCand} height={340}
+                  onPickCandidate={(c) => setPinnedCand(p => p === c ? null : c)}
+                />
+              </div>
               <FocusLegend chart={focusedChart} stats={statsByKey.get(chartKey(focusedChart))!} candColors={candColors} pinnedCand={pinnedCand} onPick={c => setPinnedCand(p => p === c ? null : c)} topN={topN} />
             </div>
           )}

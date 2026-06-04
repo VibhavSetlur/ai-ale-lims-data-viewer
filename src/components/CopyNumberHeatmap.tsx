@@ -44,6 +44,16 @@ function cellColor(value: number | null, max: number): string | undefined {
   return `hsl(${hue} ${sat}% ${light}%)`;
 }
 
+// Pick a readable text color (white or near-black) given the cell's
+// background lightness. Lightness threshold tuned so darker greens get
+// white text and the pale yellows stay black.
+function cellTextColor(value: number | null, max: number): string {
+  if (value === null || value === 0) return 'rgb(51 65 85)'; // slate-700
+  const t = Math.min(1, value / Math.max(1, max));
+  const light = 92 - Math.round(t * 55);
+  return light < 55 ? 'white' : 'rgb(15 23 42)'; // slate-900 on light, white on dark
+}
+
 function toCsv(d: CopyNumberDataset, samples: CopyNumberSample[]): string {
   const header = ['experiment','strain','replicate','transfer','condition','integrated', ...d.alleles];
   const lines = [header.join(',')];
@@ -203,8 +213,10 @@ export default function CopyNumberHeatmap() {
     return [...groups.entries()].map(([label, rows]) => ({ label, rows }));
   }, [filtered, groupBy]);
 
-  const cellPad = density === 'compact' ? 'px-1.5 py-0.5' : 'px-2.5 py-1';
-  const textSize = density === 'compact' ? 'text-[11px]' : 'text-[12px]';
+  const cellPad = density === 'compact' ? 'px-2 py-1' : 'px-3 py-1.5';
+  const textSize = density === 'compact' ? 'text-[12px]' : 'text-[13px]';
+  const cellNumSize = density === 'compact' ? 'text-[12.5px]' : 'text-[14px]';
+  const cellMinWidth = density === 'compact' ? 56 : 72;
 
   const setSort = (key: SortKey, allele: string | null = null) => {
     if (key === sortKey && (key !== 'allele' || alleleSort === allele)) {
@@ -340,19 +352,25 @@ export default function CopyNumberHeatmap() {
           <div className="mt-4 text-[10px] uppercase font-semibold tracking-wider text-slate-500 dark:text-gray-400 mb-1">Legend</div>
           <div className="space-y-1 text-[11px] text-slate-600 dark:text-gray-300">
             <div className="flex items-center gap-2">
-              <span className="inline-block w-4 h-3 rounded border border-slate-300" style={{ background: cellColor(0, maxCopyAll) }} /> 0 copies
+              <span className="inline-block w-5 h-4 rounded border border-slate-300" style={{ background: cellColor(0, maxCopyAll) }} /> 0 copies
             </div>
             <div className="flex items-center gap-2">
-              <span className="inline-block w-4 h-3 rounded border border-slate-300" style={{ background: cellColor(Math.max(1, Math.round(maxCopyAll / 2)), maxCopyAll) }} /> mid
+              <span className="inline-block w-5 h-4 rounded border border-slate-300" style={{ background: cellColor(Math.max(1, Math.round(maxCopyAll / 2)), maxCopyAll) }} /> mid
             </div>
             <div className="flex items-center gap-2">
-              <span className="inline-block w-4 h-3 rounded border border-slate-300" style={{ background: cellColor(maxCopyAll, maxCopyAll) }} /> {maxCopyAll}× (max)
+              <span className="inline-block w-5 h-4 rounded border border-slate-300" style={{ background: cellColor(maxCopyAll, maxCopyAll) }} /> {maxCopyAll}× (max)
             </div>
             <div className="flex items-center gap-2">
-              <span className="inline-block w-4 h-3 rounded border border-slate-300 bg-[repeating-linear-gradient(45deg,#cbd5e1,#cbd5e1_2px,transparent_2px,transparent_5px)]" /> not sequenced
+              <span className="inline-block w-5 h-4 rounded border border-slate-300 bg-[repeating-linear-gradient(45deg,#cbd5e1,#cbd5e1_2px,transparent_2px,transparent_5px)]" /> not sequenced
             </div>
             <div className="flex items-center gap-2">
-              <span className="inline-block w-4 h-3 rounded border border-red-300 bg-red-50 opacity-50" /> not integrated
+              <span className="inline-block w-5 h-4 rounded border border-red-300 bg-red-50 opacity-50" /> not integrated
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="relative inline-block w-5 h-4 rounded border border-slate-300" style={{ background: cellColor(Math.max(2, Math.round(maxCopyAll * 0.75)), maxCopyAll) }}>
+                <span className="absolute top-0 right-0 w-0 h-0 border-t-[6px] border-l-[6px] border-l-transparent" style={{ borderTopColor: 'rgba(255,255,255,0.85)' }} />
+              </span>
+              row dominant
             </div>
           </div>
         </div>
@@ -387,7 +405,8 @@ export default function CopyNumberHeatmap() {
                         onMouseEnter={() => setHoverCol(a)}
                         onMouseLeave={() => setHoverCol(c => c === a ? null : c)}
                         onClick={() => setSort('allele', a)}
-                        className={cn('text-center text-slate-600 dark:text-gray-300 border-b border-slate-200 dark:border-gray-700 font-mono whitespace-nowrap cursor-pointer select-none',
+                        style={{ minWidth: cellMinWidth }}
+                        className={cn('text-center text-slate-700 dark:text-gray-200 border-b border-slate-200 dark:border-gray-700 font-mono whitespace-nowrap cursor-pointer select-none font-semibold text-[12px]',
                           cellPad,
                           hoverCol === a && 'bg-fuchsia-50 dark:bg-fuchsia-900/20',
                           active && 'text-fuchsia-700 dark:text-fuchsia-300 font-bold')}>
@@ -416,6 +435,16 @@ export default function CopyNumberHeatmap() {
                       const trajs = trajectoriesByRow.get(trajKey) ?? [];
                       const showOnce = grp.rows.findIndex(x => `${x.experiment}|${x.strain}|${x.replicate}` === trajKey) === grp.rows.indexOf(s);
                       const isHover = hoverRow === s.id;
+                      // Per-row dominant allele (highest non-null copy count)
+                      let dominantAllele: string | null = null;
+                      let dominantVal = -Infinity;
+                      for (const a of data.alleles) {
+                        const v = s.copies[a];
+                        if (v !== null && v !== undefined && v > dominantVal) {
+                          dominantVal = v; dominantAllele = a;
+                        }
+                      }
+                      if (dominantVal <= 0) dominantAllele = null;
                       return (
                         <tr key={s.id}
                           onMouseEnter={() => setHoverRow(s.id)}
@@ -448,19 +477,37 @@ export default function CopyNumberHeatmap() {
                             const isNS = v === null || v === undefined;
                             const isNotIntegrated = s.integrated === false;
                             const bg = isNS ? undefined : cellColor(v ?? 0, maxCopyAll);
+                            const textCol = isNS ? undefined : cellTextColor(v ?? 0, maxCopyAll);
                             const colHover = hoverCol === a;
+                            const isDominant = a === dominantAllele && !isNS;
                             return (
                               <td key={a}
                                 onMouseEnter={() => setHoverCol(a)}
                                 onMouseLeave={() => setHoverCol(c => c === a ? null : c)}
-                                className={cn('text-center tabular-nums border-b border-slate-100 dark:border-gray-700/50 transition-colors', cellPad,
-                                  isNS && 'bg-[repeating-linear-gradient(45deg,#cbd5e1,#cbd5e1_2px,transparent_2px,transparent_5px)]',
-                                  isNotIntegrated && !isNS && 'opacity-40',
-                                  colHover && !isNS && 'ring-2 ring-inset ring-fuchsia-300 dark:ring-fuchsia-700',
+                                className={cn(
+                                  'relative text-center tabular-nums border-b border-slate-100 dark:border-gray-700/50 transition-colors font-semibold',
+                                  cellPad, cellNumSize,
+                                  isNS && 'bg-[repeating-linear-gradient(45deg,#cbd5e1,#cbd5e1_2px,transparent_2px,transparent_5px)] dark:bg-[repeating-linear-gradient(45deg,#475569,#475569_2px,transparent_2px,transparent_5px)]',
+                                  isNotIntegrated && !isNS && 'opacity-50',
+                                  colHover && !isNS && 'ring-2 ring-inset ring-fuchsia-400 dark:ring-fuchsia-500',
                                 )}
-                                style={!isNS ? { background: bg } : undefined}
-                                title={isNS ? `${a}: not sequenced` : `${s.experiment}/${s.strain} rep ${s.replicate} T${s.transfer}\n${a}: ${v} copies`}>
-                                {isNS ? <span className="text-slate-400">n.s.</span> : v}
+                                style={{
+                                  minWidth: cellMinWidth,
+                                  ...(!isNS ? { background: bg, color: textCol } : {}),
+                                }}
+                                title={isNS
+                                  ? `${s.experiment}/${s.strain} rep ${s.replicate} T${s.transfer}\n${a}: not sequenced`
+                                  : `${s.experiment}/${s.strain} rep ${s.replicate} T${s.transfer}\n${a}: ${v} copies${isDominant ? '  ← dominant in this sample' : ''}`}>
+                                {isDominant && (
+                                  <span
+                                    className="absolute top-0 right-0 w-0 h-0 border-t-[6px] border-l-[6px] border-l-transparent"
+                                    style={{ borderTopColor: textCol === 'white' ? 'rgba(255,255,255,0.85)' : 'rgba(15,23,42,0.7)' }}
+                                    title="dominant allele in this sample"
+                                  />
+                                )}
+                                {isNS
+                                  ? <span className="text-slate-500 dark:text-gray-400 text-[11px] uppercase tracking-wider font-bold">n.s.</span>
+                                  : v}
                               </td>
                             );
                           })}
