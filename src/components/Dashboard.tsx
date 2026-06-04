@@ -3,10 +3,8 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import DataTable from './DataTable';
 import MutationExplorer from './MutationExplorer';
-import BarcodeCharts from './BarcodeCharts';
-import CopyNumberHeatmap from './CopyNumberHeatmap';
 import {
-  Database, Search, Sun, Moon, Table2, Dna, BarChart3, Grid3X3,
+  Database, Search, Sun, Moon, Table2, Dna,
   Server, HardDrive, RefreshCw, AlertCircle, CheckCircle2, XCircle,
   ChevronLeft, ChevronRight, X, Clock,
 } from 'lucide-react';
@@ -32,7 +30,7 @@ const ACTIVE_TABLE_KEY = 'lims:activeTable';
 const SIDEBAR_COLLAPSED_KEY = 'lims:sidebarCollapsed';
 const ACTIVE_VIEW_KEY = 'lims:activeView';
 
-type ActiveView = 'tables' | 'mutations' | 'barcodes' | 'copyNumber';
+type ActiveView = 'tables' | 'mutations';
 
 interface MirrorInfo {
   driver: 'sqlite' | 'mysql';
@@ -93,7 +91,7 @@ export default function Dashboard({ initialTables }: DashboardProps) {
       const c = localStorage.getItem(SIDEBAR_COLLAPSED_KEY);
       if (c === '1') setCollapsed(true);
       const v = localStorage.getItem(ACTIVE_VIEW_KEY);
-      if (v === 'mutations' || v === 'tables' || v === 'barcodes' || v === 'copyNumber') setActiveView(v);
+      if (v === 'mutations' || v === 'tables') setActiveView(v);
     } catch {}
   }, []);
 
@@ -398,18 +396,6 @@ export default function Dashboard({ initialTables }: DashboardProps) {
               <span>Mutation Explorer</span>
             </div>
           )}
-          {activeView === 'barcodes' && (
-            <div className="flex items-center gap-1.5 px-2.5 py-1 bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 rounded-md text-xs font-medium border border-emerald-200 dark:border-emerald-800">
-              <BarChart3 className="w-3 h-3" />
-              <span>Barcode Charts</span>
-            </div>
-          )}
-          {activeView === 'copyNumber' && (
-            <div className="flex items-center gap-1.5 px-2.5 py-1 bg-fuchsia-50 dark:bg-fuchsia-900/30 text-fuchsia-700 dark:text-fuchsia-300 rounded-md text-xs font-medium border border-fuchsia-200 dark:border-fuchsia-800">
-              <Grid3X3 className="w-3 h-3" />
-              <span>Copy Number</span>
-            </div>
-          )}
 
           <button
             onClick={refreshTables}
@@ -465,7 +451,7 @@ export default function Dashboard({ initialTables }: DashboardProps) {
                 <button
                   onClick={() => setActiveView('mutations')}
                   className={cn(
-                    "w-full flex items-center gap-2 px-2.5 py-1.5 rounded text-[12.5px] transition-colors text-left mb-1",
+                    "w-full flex items-center gap-2 px-2.5 py-1.5 rounded text-[12.5px] transition-colors text-left",
                     activeView === 'mutations'
                       ? "bg-blue-50 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 font-semibold"
                       : "text-slate-600 dark:text-gray-400 hover:bg-slate-100 dark:hover:bg-gray-700/60"
@@ -473,30 +459,6 @@ export default function Dashboard({ initialTables }: DashboardProps) {
                 >
                   <Dna className={cn("w-3.5 h-3.5 shrink-0", activeView === 'mutations' ? "text-blue-600 dark:text-blue-400" : "text-slate-400 dark:text-gray-500")} />
                   <span className="flex-1">Mutation Explorer</span>
-                </button>
-                <button
-                  onClick={() => setActiveView('barcodes')}
-                  className={cn(
-                    "w-full flex items-center gap-2 px-2.5 py-1.5 rounded text-[12.5px] transition-colors text-left mb-1",
-                    activeView === 'barcodes'
-                      ? "bg-blue-50 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 font-semibold"
-                      : "text-slate-600 dark:text-gray-400 hover:bg-slate-100 dark:hover:bg-gray-700/60"
-                  )}
-                >
-                  <BarChart3 className={cn("w-3.5 h-3.5 shrink-0", activeView === 'barcodes' ? "text-blue-600 dark:text-blue-400" : "text-slate-400 dark:text-gray-500")} />
-                  <span className="flex-1">Barcode Charts</span>
-                </button>
-                <button
-                  onClick={() => setActiveView('copyNumber')}
-                  className={cn(
-                    "w-full flex items-center gap-2 px-2.5 py-1.5 rounded text-[12.5px] transition-colors text-left",
-                    activeView === 'copyNumber'
-                      ? "bg-blue-50 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 font-semibold"
-                      : "text-slate-600 dark:text-gray-400 hover:bg-slate-100 dark:hover:bg-gray-700/60"
-                  )}
-                >
-                  <Grid3X3 className={cn("w-3.5 h-3.5 shrink-0", activeView === 'copyNumber' ? "text-blue-600 dark:text-blue-400" : "text-slate-400 dark:text-gray-500")} />
-                  <span className="flex-1">Copy Number</span>
                 </button>
               </div>
 
@@ -567,36 +529,18 @@ export default function Dashboard({ initialTables }: DashboardProps) {
                     <span className="tabular-nums">{totalRows > 0 ? `${formatCount(totalRows)} rows` : ''}</span>
                   </div>
                 </>
-              ) : activeView === 'mutations' ? (
-                <div className="flex-1 overflow-y-auto p-3 text-[12px] text-slate-500 dark:text-gray-400 leading-relaxed">
-                  <div className="font-semibold text-slate-700 dark:text-gray-200 mb-1">Mutation Explorer</div>
-                  <p className="text-[11.5px]">
-                    Pick samples on the <span className="font-medium">Sample Selection</span> tab, then switch to <span className="font-medium">Comparative View</span> to see mutations side-by-side.
-                  </p>
-                  <p className="text-[11.5px] mt-2">
-                    Samples are grouped by experiment &gt; replicate &gt; donor DNA, and ALE samples are sorted by transfer count.
-                  </p>
-                  <p className="text-[11px] mt-3 text-slate-400 dark:text-gray-500">
-                    Source: LIMS <span className="font-mono">Mutations</span> table
-                  </p>
-                </div>
-              ) : activeView === 'barcodes' ? (
-                <div className="flex-1 overflow-y-auto p-3 text-[12px] text-slate-500 dark:text-gray-400 leading-relaxed">
-                  <div className="font-semibold text-slate-700 dark:text-gray-200 mb-1">Barcode Charts</div>
-                  <p className="text-[11.5px]">One stacked bar chart per (well · library · replicate), with VarA-VarB candidate counts across transfers — mirroring the SeqCenter QUO1022807 figure set.</p>
-                  <p className="text-[11.5px] mt-2">Toggle <span className="font-medium">Color by</span> to flip between VarA-only / VarB-only coloring (consistent across all charts) — Nidhi&apos;s split-perspective ask.</p>
-                  <p className="text-[11.5px] mt-2">Switch <span className="font-medium">Y axis</span> to <span className="font-medium">Fraction</span> when comparing replicates with very different totals.</p>
-                  <p className="text-[11px] mt-3 text-slate-400 dark:text-gray-500">
-                    Source: <span className="font-mono">/api/barcode-counts</span> — prefers real LIMS data, falls back to labelled mock until Natasha&apos;s construct column lands.
-                  </p>
-                </div>
               ) : (
                 <div className="flex-1 overflow-y-auto p-3 text-[12px] text-slate-500 dark:text-gray-400 leading-relaxed">
-                  <div className="font-semibold text-slate-700 dark:text-gray-200 mb-1">Copy-Number Heat Map</div>
-                  <p className="text-[11.5px]">DGA copy number across samples × alleles — analogous to the TFMN1 bioRxiv figure. Cells fade by copy count; <span className="font-mono">n.s.</span> = not sequenced.</p>
-                  <p className="text-[11.5px] mt-2">Un-integrated constructs are dimmed and tagged in the <span className="font-mono">Int</span> column.</p>
+                  <div className="font-semibold text-slate-700 dark:text-gray-200 mb-1">Mutation Explorer</div>
+                  <p className="text-[11.5px]">Four tabs inside:</p>
+                  <ul className="list-disc list-inside space-y-1 mt-1 text-[11.5px]">
+                    <li><span className="font-medium">Sample Selection</span> — pick samples to compare.</li>
+                    <li><span className="font-medium">Comparative View</span> — side-by-side mutation calls.</li>
+                    <li><span className="font-medium">Barcode Charts</span> — per (well · library · replicate) stacked bars.</li>
+                    <li><span className="font-medium">Copy Number</span> — sample × allele heat-map with sparklines.</li>
+                  </ul>
                   <p className="text-[11px] mt-3 text-slate-400 dark:text-gray-500">
-                    Source: <span className="font-mono">/api/copy-number</span> — prefers real LIMS data with <span className="font-mono">copy_number</span> column, falls back to labelled mock otherwise.
+                    All four tabs read from the LIMS <span className="font-mono">Mutations</span> table (Barcode + Copy fall back to mock until Natasha&apos;s construct / copy_number columns land).
                   </p>
                 </div>
               )}
@@ -624,20 +568,6 @@ export default function Dashboard({ initialTables }: DashboardProps) {
               >
                 <Dna className="w-4 h-4" />
               </button>
-              <button
-                onClick={() => setActiveView('barcodes')}
-                className={cn("p-1.5 rounded", activeView === 'barcodes' ? "text-blue-600 bg-blue-50 dark:bg-blue-900/40" : "text-slate-400 dark:text-gray-500 hover:bg-slate-100 dark:hover:bg-gray-700")}
-                title="Barcode Charts"
-              >
-                <BarChart3 className="w-4 h-4" />
-              </button>
-              <button
-                onClick={() => setActiveView('copyNumber')}
-                className={cn("p-1.5 rounded", activeView === 'copyNumber' ? "text-blue-600 bg-blue-50 dark:bg-blue-900/40" : "text-slate-400 dark:text-gray-500 hover:bg-slate-100 dark:hover:bg-gray-700")}
-                title="Copy-Number Heat Map"
-              >
-                <Grid3X3 className="w-4 h-4" />
-              </button>
             </div>
           )}
         </aside>
@@ -652,12 +582,6 @@ export default function Dashboard({ initialTables }: DashboardProps) {
           */}
           <div className={cn("flex-1 min-h-0", activeView === 'mutations' ? "block" : "hidden")}>
             <MutationExplorer />
-          </div>
-          <div className={cn("flex-1 min-h-0", activeView === 'barcodes' ? "block" : "hidden")}>
-            <BarcodeCharts />
-          </div>
-          <div className={cn("flex-1 min-h-0", activeView === 'copyNumber' ? "block" : "hidden")}>
-            <CopyNumberHeatmap />
           </div>
           <div className={cn("flex-1 min-h-0", activeView === 'tables' ? "block" : "hidden")}>
             {activeTable ? (

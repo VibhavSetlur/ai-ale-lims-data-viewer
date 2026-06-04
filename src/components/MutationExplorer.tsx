@@ -5,7 +5,10 @@ import {
   CheckSquare, Square, Search, X, AlertCircle, FlaskConical, GitCompare, RefreshCw,
   ArrowUpDown, ArrowUp, ArrowDown, Filter, Download, Info,
   ChevronDown, ChevronRight, Eye, EyeOff, FoldVertical, UnfoldVertical,
+  BarChart3, Grid3X3,
 } from 'lucide-react';
+import BarcodeCharts from './BarcodeCharts';
+import CopyNumberHeatmap from './CopyNumberHeatmap';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
@@ -57,7 +60,7 @@ interface MutationDataset {
   warnings?: string[];
 }
 
-type Tab = 'samples' | 'compare';
+type Tab = 'samples' | 'compare' | 'barcodes' | 'copy';
 
 const SELECTED_KEY = 'lims:mutation:selected';
 const TAB_KEY = 'lims:mutation:tab';
@@ -210,7 +213,7 @@ export default function MutationExplorer() {
       const s = localStorage.getItem(SELECTED_KEY);
       if (s) setSelected(new Set(JSON.parse(s)));
       const t = localStorage.getItem(TAB_KEY);
-      if (t === 'compare' || t === 'samples') setTab(t);
+      if (t === 'compare' || t === 'samples' || t === 'barcodes' || t === 'copy') setTab(t);
       const e = localStorage.getItem(EXPERIMENT_KEY);
       if (e !== null) setExperiment(e);
       const r = localStorage.getItem(REGISTRY_KEY);
@@ -274,6 +277,12 @@ export default function MutationExplorer() {
               "ml-1.5 px-1.5 py-0.5 rounded text-[10px] tabular-nums",
               selected.size > 0 ? "bg-blue-600 text-white" : "bg-slate-200 dark:bg-gray-700 text-slate-700 dark:text-gray-300"
             )}>{selected.size}</span>
+          </TabButton>
+          <TabButton active={tab === 'barcodes'} onClick={() => setTab('barcodes')} icon={<BarChart3 className="w-3.5 h-3.5" />}>
+            Barcode Charts
+          </TabButton>
+          <TabButton active={tab === 'copy'} onClick={() => setTab('copy')} icon={<Grid3X3 className="w-3.5 h-3.5" />}>
+            Copy Number
           </TabButton>
         </div>
         <div className="flex items-center gap-1.5 pr-1">
@@ -370,7 +379,9 @@ export default function MutationExplorer() {
       )}
 
       <div className="flex-1 min-h-0 flex flex-col">
-        {tab === 'samples' ? (
+        {/* Keep all four tabs mounted so their state (filters, scroll, selection)
+            persists when the user flips between them. Hidden via CSS only. */}
+        <div className={cn('flex-1 min-h-0 flex flex-col', tab === 'samples' ? '' : 'hidden')}>
           <SampleSelectionPanel
             samples={data?.samples ?? []}
             mutations={data?.mutations ?? []}
@@ -380,7 +391,8 @@ export default function MutationExplorer() {
             setSearch={setSearch}
             loading={loading}
           />
-        ) : (
+        </div>
+        <div className={cn('flex-1 min-h-0 flex flex-col', tab === 'compare' ? '' : 'hidden')}>
           <ComparativePanel
             samples={data?.samples ?? []}
             mutations={data?.mutations ?? []}
@@ -389,7 +401,13 @@ export default function MutationExplorer() {
             onJumpToSelection={() => setTab('samples')}
             loading={loading}
           />
-        )}
+        </div>
+        <div className={cn('flex-1 min-h-0 flex flex-col', tab === 'barcodes' ? '' : 'hidden')}>
+          <BarcodeCharts />
+        </div>
+        <div className={cn('flex-1 min-h-0 flex flex-col', tab === 'copy' ? '' : 'hidden')}>
+          <CopyNumberHeatmap />
+        </div>
       </div>
     </div>
   );
