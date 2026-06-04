@@ -3,10 +3,12 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import DataTable from './DataTable';
 import MutationExplorer from './MutationExplorer';
+import BarcodeCharts from './BarcodeCharts';
+import CopyNumberHeatmap from './CopyNumberHeatmap';
 import {
-  Database, Search, Sun, Moon, Table2, Dna,
+  Database, Search, Sun, Moon, Table2, Dna, BarChart3, Grid3X3,
   Server, HardDrive, RefreshCw, AlertCircle, CheckCircle2, XCircle,
-  ChevronLeft, ChevronRight, X,
+  ChevronLeft, ChevronRight, X, Clock,
 } from 'lucide-react';
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
@@ -30,7 +32,22 @@ const ACTIVE_TABLE_KEY = 'lims:activeTable';
 const SIDEBAR_COLLAPSED_KEY = 'lims:sidebarCollapsed';
 const ACTIVE_VIEW_KEY = 'lims:activeView';
 
-type ActiveView = 'tables' | 'mutations';
+type ActiveView = 'tables' | 'mutations' | 'barcodes' | 'copyNumber';
+
+interface MirrorInfo {
+  driver: 'sqlite' | 'mysql';
+  path?: string;
+  snapshot_at?: string;
+  mtime?: string;
+  table_counts: Record<string, number>;
+}
+
+function formatSnapshot(iso?: string): string {
+  if (!iso) return '—';
+  // Render YYYY-MM-DD HH:MM (UTC-agnostic — just show what's in the string).
+  const cleaned = iso.replace('T', ' ').replace(/\.\d+$/, '').replace(/Z$/, '');
+  return cleaned.length >= 16 ? cleaned.slice(0, 16) : cleaned;
+}
 
 function formatCount(n: number): string {
   if (n >= 1_000_000) return (n / 1_000_000).toFixed(n >= 10_000_000 ? 0 : 1) + 'M';
@@ -66,6 +83,9 @@ export default function Dashboard({ initialTables }: DashboardProps) {
   const [switchError, setSwitchError] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState(false);
   const [activeView, setActiveView] = useState<ActiveView>('tables');
+  const [mirrorInfo, setMirrorInfo] = useState<MirrorInfo | null>(null);
+  const [showMirror, setShowMirror] = useState(false);
+  const mirrorRef = useRef<HTMLDivElement>(null);
 
   // Restore persisted UI state
   useEffect(() => {
@@ -73,7 +93,7 @@ export default function Dashboard({ initialTables }: DashboardProps) {
       const c = localStorage.getItem(SIDEBAR_COLLAPSED_KEY);
       if (c === '1') setCollapsed(true);
       const v = localStorage.getItem(ACTIVE_VIEW_KEY);
-      if (v === 'mutations' || v === 'tables') setActiveView(v);
+      if (v === 'mutations' || v === 'tables' || v === 'barcodes' || v === 'copyNumber') setActiveView(v);
     } catch {}
   }, []);
 
@@ -135,6 +155,25 @@ export default function Dashboard({ initialTables }: DashboardProps) {
     refreshTables();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const refreshMirror = async () => {
+    try {
+      const r = await fetch('/api/mirror-info');
+      if (!r.ok) return;
+      const j: MirrorInfo = await r.json();
+      setMirrorInfo(j);
+    } catch {}
+  };
+  useEffect(() => { refreshMirror(); }, [dbType]);
+
+  useEffect(() => {
+    if (!showMirror) return;
+    const handler = (e: MouseEvent) => {
+      if (mirrorRef.current && !mirrorRef.current.contains(e.target as Node)) setShowMirror(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showMirror]);
 
   // Close db switcher on outside click
   useEffect(() => {
@@ -303,6 +342,47 @@ export default function Dashboard({ initialTables }: DashboardProps) {
               </div>
             )}
           </div>
+
+          {/* Mirror snapshot badge */}
+          <div className="relative" ref={mirrorRef}>
+            <button
+              onClick={() => setShowMirror(s => !s)}
+              className="flex items-center gap-1.5 px-2 py-1.5 rounded-md border border-slate-200 dark:border-gray-600 hover:bg-slate-50 dark:hover:bg-gray-700 transition-colors text-[11px]"
+              title={mirrorInfo?.path || 'LIMS mirror snapshot'}
+            >
+              <Clock className="w-3.5 h-3.5 text-slate-500 dark:text-gray-400" />
+              <span className="font-medium text-slate-600 dark:text-gray-300 tabular-nums">
+                {mirrorInfo?.snapshot_at ? formatSnapshot(mirrorInfo.snapshot_at) : 'snapshot —'}
+              </span>
+            </button>
+            {showMirror && mirrorInfo && (
+              <div className="absolute left-0 top-full mt-1 w-80 bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-slate-200 dark:border-gray-700 z-50 p-3 text-[11.5px] text-slate-700 dark:text-gray-200">
+                <h3 className="text-xs font-semibold text-slate-700 dark:text-gray-200 mb-2">LIMS Mirror Snapshot</h3>
+                <div className="space-y-1">
+                  <div><span className="text-slate-500 dark:text-gray-400">Driver:</span> <span className="font-mono">{mirrorInfo.driver}</span></div>
+                  <div className="break-all"><span className="text-slate-500 dark:text-gray-400">Source:</span> <span className="font-mono">{mirrorInfo.path}</span></div>
+                  <div><span className="text-slate-500 dark:text-gray-400">Latest sync:</span> <span className="font-mono tabular-nums">{mirrorInfo.snapshot_at ? formatSnapshot(mirrorInfo.snapshot_at) : '—'}</span></div>
+                  {mirrorInfo.mtime && (
+                    <div><span className="text-slate-500 dark:text-gray-400">File mtime:</span> <span className="font-mono tabular-nums">{formatSnapshot(mirrorInfo.mtime)}</span></div>
+                  )}
+                </div>
+                <div className="mt-2 pt-2 border-t border-slate-200 dark:border-gray-700">
+                  <div className="text-[10px] uppercase tracking-wider text-slate-500 dark:text-gray-400 mb-1">Row counts</div>
+                  <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 font-mono tabular-nums text-[11px]">
+                    {Object.entries(mirrorInfo.table_counts).map(([t, n]) => (
+                      <div key={t} className="flex justify-between">
+                        <span className="truncate text-slate-600 dark:text-gray-300">{t}</span>
+                        <span className="text-slate-500 dark:text-gray-400">{n.toLocaleString()}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <p className="mt-2 text-[10.5px] text-slate-500 dark:text-gray-400 leading-snug">
+                  This viewer reads a backup snapshot of the live LIMS mirror — visualizations reflect the source DB at the timestamp above. To refresh, restart the sync job or point <code className="font-mono text-[10px]">SQLITE_PATH</code> at a newer file.
+                </p>
+              </div>
+            )}
+          </div>
         </div>
 
         <div className="flex items-center gap-3">
@@ -316,6 +396,18 @@ export default function Dashboard({ initialTables }: DashboardProps) {
             <div className="flex items-center gap-1.5 px-2.5 py-1 bg-purple-50 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 rounded-md text-xs font-medium border border-purple-200 dark:border-purple-800">
               <Dna className="w-3 h-3" />
               <span>Mutation Explorer</span>
+            </div>
+          )}
+          {activeView === 'barcodes' && (
+            <div className="flex items-center gap-1.5 px-2.5 py-1 bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 rounded-md text-xs font-medium border border-emerald-200 dark:border-emerald-800">
+              <BarChart3 className="w-3 h-3" />
+              <span>Barcode Charts</span>
+            </div>
+          )}
+          {activeView === 'copyNumber' && (
+            <div className="flex items-center gap-1.5 px-2.5 py-1 bg-fuchsia-50 dark:bg-fuchsia-900/30 text-fuchsia-700 dark:text-fuchsia-300 rounded-md text-xs font-medium border border-fuchsia-200 dark:border-fuchsia-800">
+              <Grid3X3 className="w-3 h-3" />
+              <span>Copy Number</span>
             </div>
           )}
 
@@ -373,7 +465,7 @@ export default function Dashboard({ initialTables }: DashboardProps) {
                 <button
                   onClick={() => setActiveView('mutations')}
                   className={cn(
-                    "w-full flex items-center gap-2 px-2.5 py-1.5 rounded text-[12.5px] transition-colors text-left",
+                    "w-full flex items-center gap-2 px-2.5 py-1.5 rounded text-[12.5px] transition-colors text-left mb-1",
                     activeView === 'mutations'
                       ? "bg-blue-50 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 font-semibold"
                       : "text-slate-600 dark:text-gray-400 hover:bg-slate-100 dark:hover:bg-gray-700/60"
@@ -381,6 +473,30 @@ export default function Dashboard({ initialTables }: DashboardProps) {
                 >
                   <Dna className={cn("w-3.5 h-3.5 shrink-0", activeView === 'mutations' ? "text-blue-600 dark:text-blue-400" : "text-slate-400 dark:text-gray-500")} />
                   <span className="flex-1">Mutation Explorer</span>
+                </button>
+                <button
+                  onClick={() => setActiveView('barcodes')}
+                  className={cn(
+                    "w-full flex items-center gap-2 px-2.5 py-1.5 rounded text-[12.5px] transition-colors text-left mb-1",
+                    activeView === 'barcodes'
+                      ? "bg-blue-50 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 font-semibold"
+                      : "text-slate-600 dark:text-gray-400 hover:bg-slate-100 dark:hover:bg-gray-700/60"
+                  )}
+                >
+                  <BarChart3 className={cn("w-3.5 h-3.5 shrink-0", activeView === 'barcodes' ? "text-blue-600 dark:text-blue-400" : "text-slate-400 dark:text-gray-500")} />
+                  <span className="flex-1">Barcode Charts</span>
+                </button>
+                <button
+                  onClick={() => setActiveView('copyNumber')}
+                  className={cn(
+                    "w-full flex items-center gap-2 px-2.5 py-1.5 rounded text-[12.5px] transition-colors text-left",
+                    activeView === 'copyNumber'
+                      ? "bg-blue-50 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 font-semibold"
+                      : "text-slate-600 dark:text-gray-400 hover:bg-slate-100 dark:hover:bg-gray-700/60"
+                  )}
+                >
+                  <Grid3X3 className={cn("w-3.5 h-3.5 shrink-0", activeView === 'copyNumber' ? "text-blue-600 dark:text-blue-400" : "text-slate-400 dark:text-gray-500")} />
+                  <span className="flex-1">Copy Number</span>
                 </button>
               </div>
 
@@ -451,7 +567,7 @@ export default function Dashboard({ initialTables }: DashboardProps) {
                     <span className="tabular-nums">{totalRows > 0 ? `${formatCount(totalRows)} rows` : ''}</span>
                   </div>
                 </>
-              ) : (
+              ) : activeView === 'mutations' ? (
                 <div className="flex-1 overflow-y-auto p-3 text-[12px] text-slate-500 dark:text-gray-400 leading-relaxed">
                   <div className="font-semibold text-slate-700 dark:text-gray-200 mb-1">Mutation Explorer</div>
                   <p className="text-[11.5px]">
@@ -462,6 +578,25 @@ export default function Dashboard({ initialTables }: DashboardProps) {
                   </p>
                   <p className="text-[11px] mt-3 text-slate-400 dark:text-gray-500">
                     Source: LIMS <span className="font-mono">Mutations</span> table
+                  </p>
+                </div>
+              ) : activeView === 'barcodes' ? (
+                <div className="flex-1 overflow-y-auto p-3 text-[12px] text-slate-500 dark:text-gray-400 leading-relaxed">
+                  <div className="font-semibold text-slate-700 dark:text-gray-200 mb-1">Barcode Charts</div>
+                  <p className="text-[11.5px]">One stacked bar chart per (well · library · replicate), with VarA-VarB candidate counts across transfers — mirroring the SeqCenter QUO1022807 figure set.</p>
+                  <p className="text-[11.5px] mt-2">Toggle <span className="font-medium">Color by</span> to flip between VarA-only / VarB-only coloring (consistent across all charts) — Nidhi&apos;s split-perspective ask.</p>
+                  <p className="text-[11.5px] mt-2">Switch <span className="font-medium">Y axis</span> to <span className="font-medium">Fraction</span> when comparing replicates with very different totals.</p>
+                  <p className="text-[11px] mt-3 text-slate-400 dark:text-gray-500">
+                    Source: <span className="font-mono">/api/barcode-counts</span> — prefers real LIMS data, falls back to labelled mock until Natasha&apos;s construct column lands.
+                  </p>
+                </div>
+              ) : (
+                <div className="flex-1 overflow-y-auto p-3 text-[12px] text-slate-500 dark:text-gray-400 leading-relaxed">
+                  <div className="font-semibold text-slate-700 dark:text-gray-200 mb-1">Copy-Number Heat Map</div>
+                  <p className="text-[11.5px]">DGA copy number across samples × alleles — analogous to the TFMN1 bioRxiv figure. Cells fade by copy count; <span className="font-mono">n.s.</span> = not sequenced.</p>
+                  <p className="text-[11.5px] mt-2">Un-integrated constructs are dimmed and tagged in the <span className="font-mono">Int</span> column.</p>
+                  <p className="text-[11px] mt-3 text-slate-400 dark:text-gray-500">
+                    Source: <span className="font-mono">/api/copy-number</span> — prefers real LIMS data with <span className="font-mono">copy_number</span> column, falls back to labelled mock otherwise.
                   </p>
                 </div>
               )}
@@ -489,6 +624,20 @@ export default function Dashboard({ initialTables }: DashboardProps) {
               >
                 <Dna className="w-4 h-4" />
               </button>
+              <button
+                onClick={() => setActiveView('barcodes')}
+                className={cn("p-1.5 rounded", activeView === 'barcodes' ? "text-blue-600 bg-blue-50 dark:bg-blue-900/40" : "text-slate-400 dark:text-gray-500 hover:bg-slate-100 dark:hover:bg-gray-700")}
+                title="Barcode Charts"
+              >
+                <BarChart3 className="w-4 h-4" />
+              </button>
+              <button
+                onClick={() => setActiveView('copyNumber')}
+                className={cn("p-1.5 rounded", activeView === 'copyNumber' ? "text-blue-600 bg-blue-50 dark:bg-blue-900/40" : "text-slate-400 dark:text-gray-500 hover:bg-slate-100 dark:hover:bg-gray-700")}
+                title="Copy-Number Heat Map"
+              >
+                <Grid3X3 className="w-4 h-4" />
+              </button>
             </div>
           )}
         </aside>
@@ -504,7 +653,13 @@ export default function Dashboard({ initialTables }: DashboardProps) {
           <div className={cn("flex-1 min-h-0", activeView === 'mutations' ? "block" : "hidden")}>
             <MutationExplorer />
           </div>
-          <div className={cn("flex-1 min-h-0", activeView === 'mutations' ? "hidden" : "block")}>
+          <div className={cn("flex-1 min-h-0", activeView === 'barcodes' ? "block" : "hidden")}>
+            <BarcodeCharts />
+          </div>
+          <div className={cn("flex-1 min-h-0", activeView === 'copyNumber' ? "block" : "hidden")}>
+            <CopyNumberHeatmap />
+          </div>
+          <div className={cn("flex-1 min-h-0", activeView === 'tables' ? "block" : "hidden")}>
             {activeTable ? (
               <DataTable tableName={activeTable} />
             ) : (
