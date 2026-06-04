@@ -5,8 +5,8 @@ import React, {
 } from 'react';
 import {
   AlertTriangle, ArrowDown, ArrowUp, BarChart3, ChevronLeft, ChevronRight,
-  Download, Filter, Info, LayoutGrid, List, Loader2, Maximize2, Minimize2,
-  Pin, PinOff, RefreshCw, Rows3, Search, Sparkles, Target, X,
+  Columns3, Download, Filter, Info, LayoutGrid, List, Loader2, Maximize2,
+  Minimize2, Pin, PinOff, Plus, RefreshCw, Rows3, Search, Sparkles, Target, X,
 } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -35,7 +35,7 @@ interface BarcodeDataset {
   warnings: string[];
 }
 
-type ViewMode = 'grid' | 'list' | 'focus';
+type ViewMode = 'grid' | 'focus' | 'compare';
 type ColorMode = 'candidate' | 'partner-a' | 'partner-b';
 type Normalize = 'count' | 'fraction';
 type SortKey = 'natural' | 'totalReads' | 'transfers' | 'candidates' | 'flipped';
@@ -205,8 +205,8 @@ function ChartCard({
   const isDimmed = (cand: string) => pinnedCand !== null && pinnedCand !== cand;
 
   return (
-    <div className="rounded-lg border border-slate-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-sm overflow-hidden">
-      <div className="px-3 py-1.5 border-b border-slate-200 dark:border-gray-700 bg-slate-50/60 dark:bg-gray-800/60 flex items-center gap-2 text-[12px]">
+    <div className="rounded-lg border border-slate-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-sm overflow-hidden h-full flex flex-col">
+      <div className="px-3 py-1.5 border-b border-slate-200 dark:border-gray-700 bg-slate-50/60 dark:bg-gray-800/60 flex items-center gap-2 text-[12px] shrink-0">
         <span className="font-mono font-semibold text-slate-800 dark:text-gray-100">{chart.well}</span>
         <span className="text-slate-400">|</span>
         <span className="font-mono text-slate-700 dark:text-gray-200">{chart.strain}</span>
@@ -225,8 +225,8 @@ function ChartCard({
         </div>
       </div>
 
-      <div className="p-2 relative">
-        <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto" preserveAspectRatio="xMidYMid meet">
+      <div className="p-2 relative flex-1 min-h-0 flex">
+        <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-full" preserveAspectRatio="xMidYMid meet">
           {tickValues.map((v, i) => {
             const y = PAD_T + innerH - (v / maxY) * innerH;
             return (
@@ -384,6 +384,8 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
 
   // Rendering controls
   const [view, setView] = useState<ViewMode>('grid');
+  const [comparing, setComparing] = useState<string[]>([]); // up to 4 chart keys
+  const COMPARE_MAX = 4;
   const [colorMode, setColorMode] = useState<ColorMode>('candidate');
   const [normalize, setNormalize] = useState<Normalize>('count');
   const [topN, setTopN] = useState(10);
@@ -572,14 +574,20 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
         </span>
 
         <div className="flex items-center border border-slate-200 dark:border-gray-600 rounded overflow-hidden ml-2">
-          <button onClick={() => setView('grid')} className={cn('px-1.5 py-1 text-[11px]', view === 'grid' ? 'bg-emerald-600 text-white' : 'bg-white dark:bg-gray-700 text-slate-600 dark:text-gray-300')} title="Wall view: small thumbnails">
-            <LayoutGrid className="w-3.5 h-3.5" />
+          <button onClick={() => setView('grid')} className={cn('flex items-center gap-1 px-2 py-1 text-[11px]', view === 'grid' ? 'bg-emerald-600 text-white' : 'bg-white dark:bg-gray-700 text-slate-600 dark:text-gray-300')} title="Grid: all charts as thumbnails">
+            <LayoutGrid className="w-3.5 h-3.5" /> Grid
           </button>
-          <button onClick={() => setView('list')} className={cn('px-1.5 py-1 text-[11px] border-l border-slate-200 dark:border-gray-600', view === 'list' ? 'bg-emerald-600 text-white' : 'bg-white dark:bg-gray-700 text-slate-600 dark:text-gray-300')} title="List view: full-size charts">
-            <Rows3 className="w-3.5 h-3.5" />
+          <button onClick={() => setView('focus')} className={cn('flex items-center gap-1 px-2 py-1 text-[11px] border-l border-slate-200 dark:border-gray-600', view === 'focus' ? 'bg-emerald-600 text-white' : 'bg-white dark:bg-gray-700 text-slate-600 dark:text-gray-300')} title="Focus: one chart, full-detail">
+            <Target className="w-3.5 h-3.5" /> Focus
           </button>
-          <button onClick={() => setView('focus')} className={cn('px-1.5 py-1 text-[11px] border-l border-slate-200 dark:border-gray-600', view === 'focus' ? 'bg-emerald-600 text-white' : 'bg-white dark:bg-gray-700 text-slate-600 dark:text-gray-300')} title="Focus view: one chart at a time">
-            <Target className="w-3.5 h-3.5" />
+          <button
+            onClick={() => setView('compare')}
+            disabled={comparing.length === 0}
+            className={cn('flex items-center gap-1 px-2 py-1 text-[11px] border-l border-slate-200 dark:border-gray-600 disabled:opacity-50 disabled:cursor-not-allowed',
+              view === 'compare' ? 'bg-emerald-600 text-white' : 'bg-white dark:bg-gray-700 text-slate-600 dark:text-gray-300')}
+            title={comparing.length === 0 ? "Pick charts in Grid first (click the +)" : `Compare ${comparing.length} chart${comparing.length === 1 ? '' : 's'} side-by-side`}>
+            <Columns3 className="w-3.5 h-3.5" /> Compare
+            {comparing.length > 0 && <span className="ml-0.5 px-1 rounded bg-emerald-700/30 tabular-nums">{comparing.length}</span>}
           </button>
         </div>
 
@@ -794,90 +802,121 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
           </div>
         )}
 
-        {/* Chart area */}
-        <div className="flex-1 min-w-0 overflow-auto p-2 bg-slate-100/30 dark:bg-gray-900/30"
-          onScroll={(e) => {
-            const el = e.currentTarget;
-            if (view === 'grid' && el.scrollTop + el.clientHeight >= el.scrollHeight - 60 && gridLimit < visibleCharts.length) {
-              setGridLimit(g => Math.min(g + 60, visibleCharts.length));
-            }
-          }}>
-          {loading && <Centered><Loader2 className="w-4 h-4 animate-spin" /> Loading…</Centered>}
-          {error && <Centered><AlertTriangle className="w-4 h-4 text-red-500" /> {error}</Centered>}
+        {/* Chart area — internal scroll behavior depends on the view mode:
+            grid scrolls vertically (thumbnails); focus & compare fill the
+            viewport and only the candidate legend scrolls inside its column. */}
+        <div className="flex-1 min-w-0 flex flex-col bg-slate-100/30 dark:bg-gray-900/30 overflow-hidden">
+          {loading && <div className="flex-1 overflow-auto"><Centered><Loader2 className="w-4 h-4 animate-spin" /> Loading…</Centered></div>}
+          {error && <div className="flex-1 overflow-auto"><Centered><AlertTriangle className="w-4 h-4 text-red-500" /> {error}</Centered></div>}
           {!loading && !error && data && visibleCharts.length === 0 && (
-            <Centered>
+            <div className="flex-1 overflow-auto"><Centered>
               <span>No charts match the current filters.</span>
               <button onClick={resetFilters} className="text-xs text-emerald-600 dark:text-emerald-400 underline">Reset filters</button>
-            </Centered>
+            </Centered></div>
           )}
 
-          {view === 'grid' && visibleCharts.length > 0 && (
-            <div className="grid gap-2" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(170px, 1fr))' }}>
-              {visibleCharts.slice(0, gridLimit).map(c => {
-                const stats = statsByKey.get(chartKey(c))!;
-                return (
-                  <button
-                    key={chartKey(c)}
-                    onClick={() => { setFocusKey(chartKey(c)); setView('focus'); }}
-                    className="text-left rounded border border-slate-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:border-emerald-400 hover:shadow-md transition-shadow overflow-hidden"
-                    title="Open in focus view"
-                  >
-                    <div className="px-1.5 py-1 border-b border-slate-200/50 dark:border-gray-700/50 flex items-center gap-1 text-[10px]">
-                      <span className="font-mono font-bold text-slate-700 dark:text-gray-200">{c.well}</span>
-                      <span className="font-mono text-slate-500 dark:text-gray-400 truncate" title={c.library}>{c.library}</span>
-                      {stats.flipped && <span className="ml-auto text-[8.5px] font-bold uppercase text-amber-600">flip</span>}
-                    </div>
-                    <ThumbChart chart={c} stats={stats} candColors={candColors} pinnedCand={pinnedCand} />
-                    <div className="px-1.5 py-0.5 text-[9.5px] text-slate-500 dark:text-gray-400 tabular-nums flex justify-between border-t border-slate-200/50 dark:border-gray-700/50">
-                      <span>rep {c.replicate} · {c.transfers.length}T</span>
-                      <span>{stats.totalReads.toLocaleString()}</span>
-                    </div>
+          {!loading && !error && view === 'grid' && visibleCharts.length > 0 && (
+            <div className="flex-1 min-h-0 overflow-auto p-2"
+              onScroll={(e) => {
+                const el = e.currentTarget;
+                if (el.scrollTop + el.clientHeight >= el.scrollHeight - 60 && gridLimit < visibleCharts.length) {
+                  setGridLimit(g => Math.min(g + 60, visibleCharts.length));
+                }
+              }}>
+              {comparing.length > 0 && (
+                <div className="mb-2 px-2 py-1.5 rounded border border-emerald-300/60 dark:border-emerald-700/60 bg-emerald-50 dark:bg-emerald-900/20 text-[11.5px] flex items-center gap-2 sticky top-0 z-10 backdrop-blur">
+                  <Columns3 className="w-3.5 h-3.5 text-emerald-700 dark:text-emerald-300" />
+                  <span className="font-semibold text-emerald-800 dark:text-emerald-200">{comparing.length}</span>
+                  <span className="text-emerald-700 dark:text-emerald-300">queued for compare</span>
+                  <button onClick={() => setView('compare')} className="ml-auto px-2 py-0.5 text-[11px] font-medium bg-emerald-600 text-white rounded hover:bg-emerald-700">
+                    Compare →
                   </button>
-                );
-              })}
-              {gridLimit < visibleCharts.length && (
-                <div className="col-span-full text-center text-[11px] text-slate-400 py-3">
-                  Showing {gridLimit}/{visibleCharts.length}. Scroll to load more…
+                  <button onClick={() => setComparing([])} className="px-2 py-0.5 text-[11px] text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/40 rounded">Clear</button>
                 </div>
               )}
-            </div>
-          )}
-
-          {view === 'list' && visibleCharts.length > 0 && (
-            <div className="grid grid-cols-1 xl:grid-cols-2 gap-2">
-              {visibleCharts.slice(0, gridLimit).map(c => (
-                <ChartCard
-                  key={chartKey(c)} chart={c} stats={statsByKey.get(chartKey(c))!}
-                  colorMode={colorMode} normalize={normalize}
-                  aColors={aColors} bColors={bColors} candColors={candColors}
-                  candidateFilter={candidateFilter} topN={topN}
-                  pinnedCand={pinnedCand} height={240}
-                  onPickCandidate={(c) => setPinnedCand(p => p === c ? null : c)}
-                />
-              ))}
-              {gridLimit < visibleCharts.length && (
-                <div className="col-span-full text-center text-[11px] text-slate-400 py-3">
-                  Showing {gridLimit}/{visibleCharts.length}. Scroll to load more…
-                </div>
-              )}
-            </div>
-          )}
-
-          {view === 'focus' && focusedChart && (
-            <div className="flex flex-col gap-2">
-              <FocusNav charts={visibleCharts} focusKey={chartKey(focusedChart)} onPick={k => setFocusKey(k)} statsByKey={statsByKey} />
-              <div className="max-w-[1100px]">
-                <ChartCard
-                  chart={focusedChart} stats={statsByKey.get(chartKey(focusedChart))!}
-                  colorMode={colorMode} normalize={normalize}
-                  aColors={aColors} bColors={bColors} candColors={candColors}
-                  candidateFilter={candidateFilter} topN={topN}
-                  pinnedCand={pinnedCand} height={340}
-                  onPickCandidate={(c) => setPinnedCand(p => p === c ? null : c)}
-                />
+              <div className="grid gap-2" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))' }}>
+                {visibleCharts.slice(0, gridLimit).map(c => {
+                  const stats = statsByKey.get(chartKey(c))!;
+                  const k = chartKey(c);
+                  const inCompare = comparing.includes(k);
+                  return (
+                    <div
+                      key={k}
+                      className={cn(
+                        'group relative text-left rounded border bg-white dark:bg-gray-800 hover:shadow-md transition-all overflow-hidden cursor-pointer',
+                        inCompare ? 'border-emerald-500 ring-1 ring-emerald-400' : 'border-slate-200 dark:border-gray-700 hover:border-emerald-400'
+                      )}
+                      onClick={() => { setFocusKey(k); setView('focus'); }}
+                      title="Click to open in Focus"
+                    >
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setComparing(prev => {
+                            if (prev.includes(k)) return prev.filter(x => x !== k);
+                            if (prev.length >= COMPARE_MAX) return [...prev.slice(1), k];
+                            return [...prev, k];
+                          });
+                        }}
+                        className={cn(
+                          'absolute top-1 right-1 z-10 w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold transition-all',
+                          inCompare ? 'bg-emerald-600 text-white' : 'bg-white/80 dark:bg-gray-900/70 text-slate-500 dark:text-gray-300 opacity-0 group-hover:opacity-100 border border-slate-300 dark:border-gray-600'
+                        )}
+                        title={inCompare ? 'Remove from compare' : `Add to compare (max ${COMPARE_MAX})`}
+                      >
+                        {inCompare ? '✓' : '+'}
+                      </button>
+                      <div className="px-1.5 py-1 border-b border-slate-200/50 dark:border-gray-700/50 flex items-center gap-1 text-[10px] pr-7">
+                        <span className="font-mono font-bold text-slate-700 dark:text-gray-200">{c.well}</span>
+                        <span className="font-mono text-slate-500 dark:text-gray-400 truncate" title={c.library}>{c.library}</span>
+                        {stats.flipped && <span className="ml-auto text-[8.5px] font-bold uppercase text-amber-600">flip</span>}
+                      </div>
+                      <ThumbChart chart={c} stats={stats} candColors={candColors} pinnedCand={pinnedCand} />
+                      <div className="px-1.5 py-0.5 text-[9.5px] text-slate-500 dark:text-gray-400 tabular-nums flex justify-between border-t border-slate-200/50 dark:border-gray-700/50">
+                        <span>rep {c.replicate} · {c.transfers.length}T</span>
+                        <span>{stats.totalReads.toLocaleString()}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+                {gridLimit < visibleCharts.length && (
+                  <div className="col-span-full text-center text-[11px] text-slate-400 py-3">
+                    Showing {gridLimit}/{visibleCharts.length}. Scroll for more…
+                  </div>
+                )}
               </div>
-              <FocusLegend chart={focusedChart} stats={statsByKey.get(chartKey(focusedChart))!} candColors={candColors} pinnedCand={pinnedCand} onPick={c => setPinnedCand(p => p === c ? null : c)} topN={topN} />
             </div>
+          )}
+
+          {!loading && !error && view === 'focus' && focusedChart && (
+            <FocusView
+              charts={visibleCharts}
+              focusKey={chartKey(focusedChart)}
+              setFocusKey={k => setFocusKey(k)}
+              chart={focusedChart}
+              stats={statsByKey.get(chartKey(focusedChart))!}
+              colorMode={colorMode} normalize={normalize}
+              aColors={aColors} bColors={bColors} candColors={candColors}
+              candidateFilter={candidateFilter} topN={topN}
+              pinnedCand={pinnedCand} onPickCandidate={(c) => setPinnedCand(p => p === c ? null : c)}
+              onBack={() => setView('grid')}
+              onAddToCompare={(k) => setComparing(prev => prev.includes(k) ? prev : prev.length >= COMPARE_MAX ? [...prev.slice(1), k] : [...prev, k])}
+              isInCompare={comparing.includes(chartKey(focusedChart))}
+            />
+          )}
+
+          {!loading && !error && view === 'compare' && (
+            <CompareView
+              keys={comparing}
+              charts={data?.charts ?? []}
+              statsByKey={statsByKey}
+              colorMode={colorMode} normalize={normalize}
+              aColors={aColors} bColors={bColors} candColors={candColors}
+              candidateFilter={candidateFilter} topN={topN}
+              pinnedCand={pinnedCand} onPickCandidate={(c) => setPinnedCand(p => p === c ? null : c)}
+              onBack={() => setView('grid')}
+              onRemove={(k) => setComparing(prev => prev.filter(x => x !== k))}
+            />
           )}
         </div>
       </div>
@@ -893,92 +932,240 @@ function Centered({ children }: { children: React.ReactNode }) {
   );
 }
 
-function FocusNav({ charts, focusKey, onPick, statsByKey }: {
-  charts: BarcodeChart[]; focusKey: string; onPick: (k: string) => void; statsByKey: Map<string, ChartStats>;
-}) {
-  const idx = charts.findIndex(c => chartKey(c) === focusKey);
-  const prev = idx > 0 ? charts[idx - 1] : null;
-  const next = idx >= 0 && idx < charts.length - 1 ? charts[idx + 1] : null;
-  return (
-    <div className="flex items-center gap-2 text-[11.5px] bg-white dark:bg-gray-800 rounded-lg border border-slate-200 dark:border-gray-700 px-2 py-1.5">
-      <button onClick={() => prev && onPick(chartKey(prev))} disabled={!prev}
-        className="p-1 rounded hover:bg-slate-100 dark:hover:bg-gray-700 disabled:opacity-30">
-        <ChevronLeft className="w-4 h-4" />
-      </button>
-      <span className="text-slate-500 dark:text-gray-400 tabular-nums">{idx + 1}/{charts.length}</span>
-      <select value={focusKey} onChange={e => onPick(e.target.value)}
-        className="text-[11.5px] border border-slate-300 dark:border-gray-600 rounded px-2 py-1 bg-white dark:bg-gray-700 dark:text-gray-100 outline-none font-mono max-w-[480px]">
-        {charts.map(c => {
-          const s = statsByKey.get(chartKey(c));
-          return (
-            <option key={chartKey(c)} value={chartKey(c)}>
-              {c.well} · {c.library} · rep {c.replicate} {s?.flipped ? '· FLIP' : ''} · {s?.totalReads ?? 0} reads
-            </option>
-          );
-        })}
-      </select>
-      <button onClick={() => next && onPick(chartKey(next))} disabled={!next}
-        className="p-1 rounded hover:bg-slate-100 dark:hover:bg-gray-700 disabled:opacity-30">
-        <ChevronRight className="w-4 h-4" />
-      </button>
-      <span className="ml-auto text-[10.5px] text-slate-500 dark:text-gray-400">← / → and ↑ / ↓ work too</span>
-      <KeyboardNav charts={charts} focusKey={focusKey} onPick={onPick} />
-    </div>
-  );
-}
-
-function KeyboardNav({ charts, focusKey, onPick }: { charts: BarcodeChart[]; focusKey: string; onPick: (k: string) => void }) {
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if ((e.target as HTMLElement | null)?.tagName === 'INPUT' || (e.target as HTMLElement | null)?.tagName === 'SELECT') return;
-      const idx = charts.findIndex(c => chartKey(c) === focusKey);
-      if (idx === -1) return;
-      if ((e.key === 'ArrowRight' || e.key === 'ArrowDown') && idx < charts.length - 1) onPick(chartKey(charts[idx + 1]));
-      if ((e.key === 'ArrowLeft' || e.key === 'ArrowUp') && idx > 0) onPick(chartKey(charts[idx - 1]));
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, [charts, focusKey, onPick]);
-  return null;
-}
-
-function FocusLegend({ chart, stats, candColors, pinnedCand, onPick, topN }: {
+// Side-panel candidate legend used in Focus view — always-visible column
+// (the column itself scrolls if it overflows; the chart never does).
+function CandidateLegendPanel({ chart, stats, candColors, pinnedCand, onPick, topN }: {
   chart: BarcodeChart; stats: ChartStats; candColors: Record<string, string>; pinnedCand: string | null; onPick: (c: string) => void; topN: number;
 }) {
+  void chart;
   const sorted = stats.candidateTotals;
   const rolled = topN > 0 && sorted.length > topN;
-  const head = rolled ? sorted.slice(0, topN) : sorted;
   return (
-    <div className="rounded-lg border border-slate-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-2">
-      <div className="text-[10px] uppercase tracking-wider text-slate-500 dark:text-gray-400 mb-1">
-        Candidates (click to pin) {rolled && <span className="normal-case font-normal text-slate-400">— top {topN} of {sorted.length}</span>}
+    <div className="flex flex-col h-full">
+      <div className="px-2 py-1.5 border-b border-slate-200 dark:border-gray-700 text-[10px] uppercase tracking-wider text-slate-500 dark:text-gray-400 flex items-center justify-between bg-slate-50/60 dark:bg-gray-800/60">
+        <span>Candidates ({sorted.length})</span>
+        {rolled && <span className="normal-case font-normal text-slate-400">top {topN} bold</span>}
       </div>
-      <div className="flex flex-wrap gap-1.5">
-        {head.map(({ cand, total }) => {
+      <div className="flex-1 min-h-0 overflow-y-auto p-1">
+        {sorted.map(({ cand, total }, i) => {
           const dim = pinnedCand !== null && pinnedCand !== cand;
           const pin = pinnedCand === cand;
+          const isTop = topN > 0 && i < topN;
           const pct = stats.totalReads ? (100 * total / stats.totalReads).toFixed(1) : '0.0';
           return (
             <button key={cand} onClick={() => onPick(cand)}
               className={cn(
-                'inline-flex items-center gap-1.5 px-1.5 py-0.5 rounded border text-[11px] font-mono transition-opacity',
-                pin ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/40 text-blue-800 dark:text-blue-200' :
-                dim ? 'border-slate-200 dark:border-gray-700 opacity-40' :
-                'border-slate-200 dark:border-gray-700 hover:border-emerald-400'
+                'w-full flex items-center gap-1.5 px-1.5 py-0.5 rounded text-[11px] font-mono transition-opacity text-left',
+                pin ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-200 font-bold' :
+                dim ? 'opacity-40 hover:opacity-100' : 'hover:bg-slate-100 dark:hover:bg-gray-700',
+                isTop ? 'text-slate-800 dark:text-gray-100' : 'text-slate-500 dark:text-gray-400'
               )}
-              title={`${cand}: ${total} reads (${pct}%)`}
+              title={`${cand}: ${total.toLocaleString()} reads (${pct}%) — click to pin`}
             >
-              <span className="inline-block w-2.5 h-2.5 rounded-sm" style={{ background: candColors[cand] }} />
-              {cand}
-              <span className="text-[10px] text-slate-500 dark:text-gray-400 tabular-nums">{pct}%</span>
+              <span className="inline-block w-2.5 h-2.5 rounded-sm shrink-0" style={{ background: candColors[cand] }} />
+              <span className="flex-1 truncate">{cand}</span>
+              <span className="text-[9.5px] tabular-nums text-slate-400 dark:text-gray-500">{pct}%</span>
             </button>
           );
         })}
-        {rolled && (
-          <span className="inline-flex items-center gap-1.5 px-1.5 py-0.5 rounded border border-slate-200 dark:border-gray-700 text-[11px] text-slate-500 dark:text-gray-400">
-            <span className="inline-block w-2.5 h-2.5 rounded-sm bg-slate-400" />
-            Other ({sorted.length - topN})
-          </span>
+      </div>
+    </div>
+  );
+}
+
+interface FocusViewProps {
+  charts: BarcodeChart[];
+  focusKey: string;
+  setFocusKey: (k: string) => void;
+  chart: BarcodeChart;
+  stats: ChartStats;
+  colorMode: ColorMode;
+  normalize: Normalize;
+  aColors: Record<string, string>;
+  bColors: Record<string, string>;
+  candColors: Record<string, string>;
+  candidateFilter: Set<string>;
+  topN: number;
+  pinnedCand: string | null;
+  onPickCandidate: (c: string) => void;
+  onBack: () => void;
+  onAddToCompare: (k: string) => void;
+  isInCompare: boolean;
+}
+function FocusView(props: FocusViewProps) {
+  const { charts, focusKey, setFocusKey, chart, stats, colorMode, normalize,
+    aColors, bColors, candColors, candidateFilter, topN, pinnedCand, onPickCandidate,
+    onBack, onAddToCompare, isInCompare } = props;
+  const idx = charts.findIndex(c => chartKey(c) === focusKey);
+  const prev = idx > 0 ? charts[idx - 1] : null;
+  const next = idx >= 0 && idx < charts.length - 1 ? charts[idx + 1] : null;
+
+  // Keyboard nav: ←/→ ↑/↓ for prev/next, Esc to go back to grid.
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t?.tagName === 'INPUT' || t?.tagName === 'SELECT' || t?.tagName === 'TEXTAREA') return;
+      if (e.key === 'Escape') { onBack(); return; }
+      const i = charts.findIndex(c => chartKey(c) === focusKey);
+      if (i === -1) return;
+      if ((e.key === 'ArrowRight' || e.key === 'ArrowDown') && i < charts.length - 1) {
+        e.preventDefault(); setFocusKey(chartKey(charts[i + 1]));
+      }
+      if ((e.key === 'ArrowLeft' || e.key === 'ArrowUp') && i > 0) {
+        e.preventDefault(); setFocusKey(chartKey(charts[i - 1]));
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [charts, focusKey, setFocusKey, onBack]);
+
+  // Height of the inner chart sized to fill the available container.
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const [chartHeight, setChartHeight] = useState(320);
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const update = () => {
+      const h = el.clientHeight - 56; // leave room for the card title bar + padding
+      setChartHeight(Math.max(220, Math.min(640, h)));
+    };
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [focusKey]);
+
+  return (
+    <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+      {/* In-view nav bar */}
+      <div className="flex items-center gap-2 px-2 py-1.5 border-b border-slate-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-[11.5px] shrink-0">
+        <button onClick={onBack} title="Back to Grid (Esc)"
+          className="flex items-center gap-1 px-2 py-1 rounded border border-slate-200 dark:border-gray-600 hover:bg-slate-100 dark:hover:bg-gray-700 text-slate-700 dark:text-gray-200 font-medium">
+          <ChevronLeft className="w-3.5 h-3.5" /> Grid
+        </button>
+        <div className="flex items-center gap-0.5">
+          <button onClick={() => prev && setFocusKey(chartKey(prev))} disabled={!prev}
+            className="p-1 rounded hover:bg-slate-100 dark:hover:bg-gray-700 disabled:opacity-30" title="Previous (←)">
+            <ChevronLeft className="w-4 h-4" />
+          </button>
+          <span className="text-slate-500 dark:text-gray-400 tabular-nums px-1">{idx + 1}/{charts.length}</span>
+          <button onClick={() => next && setFocusKey(chartKey(next))} disabled={!next}
+            className="p-1 rounded hover:bg-slate-100 dark:hover:bg-gray-700 disabled:opacity-30" title="Next (→)">
+            <ChevronRight className="w-4 h-4" />
+          </button>
+        </div>
+        <select value={focusKey} onChange={e => setFocusKey(e.target.value)}
+          className="text-[11.5px] border border-slate-300 dark:border-gray-600 rounded px-2 py-1 bg-white dark:bg-gray-700 dark:text-gray-100 outline-none font-mono min-w-[260px] max-w-[560px]">
+          {charts.map(c => (
+            <option key={chartKey(c)} value={chartKey(c)}>
+              {c.well} · {c.library} · rep {c.replicate}
+            </option>
+          ))}
+        </select>
+        <button onClick={() => onAddToCompare(chartKey(chart))}
+          className={cn('flex items-center gap-1 px-2 py-1 rounded border text-[11px] font-medium',
+            isInCompare ? 'bg-emerald-600 text-white border-emerald-700' : 'border-slate-200 dark:border-gray-600 text-slate-700 dark:text-gray-200 hover:bg-slate-100 dark:hover:bg-gray-700')}
+          title="Queue this chart for the Compare view">
+          <Plus className="w-3.5 h-3.5" /> {isInCompare ? 'Queued' : 'Compare'}
+        </button>
+        <span className="ml-auto text-[10.5px] text-slate-400 dark:text-gray-500 hidden md:inline">← / → navigate · Esc back to grid</span>
+      </div>
+
+      {/* Body: chart fills left, legend column on right (legend scrolls, chart doesn't) */}
+      <div className="flex-1 min-h-0 flex overflow-hidden">
+        <div ref={containerRef} className="flex-1 min-w-0 min-h-0 p-2 flex">
+          <div className="flex-1 min-w-0 min-h-0">
+            <ChartCard
+              chart={chart} stats={stats}
+              colorMode={colorMode} normalize={normalize}
+              aColors={aColors} bColors={bColors} candColors={candColors}
+              candidateFilter={candidateFilter} topN={topN}
+              pinnedCand={pinnedCand} height={chartHeight}
+              onPickCandidate={onPickCandidate}
+            />
+          </div>
+        </div>
+        <div className="w-56 shrink-0 border-l border-slate-200 dark:border-gray-700 bg-white dark:bg-gray-800 flex flex-col overflow-hidden">
+          <CandidateLegendPanel
+            chart={chart} stats={stats} candColors={candColors}
+            pinnedCand={pinnedCand} onPick={onPickCandidate} topN={topN}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+interface CompareViewProps {
+  keys: string[];
+  charts: BarcodeChart[];
+  statsByKey: Map<string, ChartStats>;
+  colorMode: ColorMode;
+  normalize: Normalize;
+  aColors: Record<string, string>;
+  bColors: Record<string, string>;
+  candColors: Record<string, string>;
+  candidateFilter: Set<string>;
+  topN: number;
+  pinnedCand: string | null;
+  onPickCandidate: (c: string) => void;
+  onBack: () => void;
+  onRemove: (k: string) => void;
+}
+function CompareView(props: CompareViewProps) {
+  const { keys, charts, statsByKey, colorMode, normalize, aColors, bColors,
+    candColors, candidateFilter, topN, pinnedCand, onPickCandidate, onBack, onRemove } = props;
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onBack(); };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [onBack]);
+
+  const resolved = keys
+    .map(k => charts.find(c => chartKey(c) === k))
+    .filter((c): c is BarcodeChart => !!c);
+  // Pick a grid layout that fits the count nicely (1, 2-col, 2x2, 3x2).
+  const cols = resolved.length <= 1 ? 1 : resolved.length === 2 ? 2 : 2;
+  return (
+    <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+      <div className="flex items-center gap-2 px-2 py-1.5 border-b border-slate-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-[11.5px] shrink-0">
+        <button onClick={onBack} title="Back to Grid (Esc)"
+          className="flex items-center gap-1 px-2 py-1 rounded border border-slate-200 dark:border-gray-600 hover:bg-slate-100 dark:hover:bg-gray-700 text-slate-700 dark:text-gray-200 font-medium">
+          <ChevronLeft className="w-3.5 h-3.5" /> Grid
+        </button>
+        <span className="font-semibold text-slate-700 dark:text-gray-200">Compare</span>
+        <span className="text-slate-500 dark:text-gray-400">{resolved.length} chart{resolved.length === 1 ? '' : 's'} side-by-side</span>
+        <span className="ml-auto text-[10.5px] text-slate-400 dark:text-gray-500 hidden md:inline">All charts share the same color / Y-axis / pin · click ✕ to drop</span>
+      </div>
+      <div className="flex-1 min-h-0 overflow-auto p-2">
+        {resolved.length === 0 ? (
+          <Centered>
+            <span>No charts queued for comparison.</span>
+            <button onClick={onBack} className="text-xs text-emerald-600 dark:text-emerald-400 underline">Back to Grid to pick some</button>
+          </Centered>
+        ) : (
+          <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}>
+            {resolved.map(c => {
+              const stats = statsByKey.get(chartKey(c))!;
+              return (
+                <div key={chartKey(c)} className="relative">
+                  <button onClick={() => onRemove(chartKey(c))} title="Remove from compare"
+                    className="absolute top-1 right-1 z-10 w-5 h-5 rounded-full bg-white/90 dark:bg-gray-900/80 border border-slate-300 dark:border-gray-600 flex items-center justify-center text-slate-500 hover:text-red-500 hover:border-red-400">
+                    <X className="w-3 h-3" />
+                  </button>
+                  <ChartCard
+                    chart={c} stats={stats}
+                    colorMode={colorMode} normalize={normalize}
+                    aColors={aColors} bColors={bColors} candColors={candColors}
+                    candidateFilter={candidateFilter} topN={topN}
+                    pinnedCand={pinnedCand} height={resolved.length <= 2 ? 320 : 240}
+                    onPickCandidate={onPickCandidate}
+                  />
+                </div>
+              );
+            })}
+          </div>
         )}
       </div>
     </div>
@@ -986,4 +1173,4 @@ function FocusLegend({ chart, stats, candColors, pinnedCand, onPick, topN }: {
 }
 
 // keep imports referenced even if not used in some builds
-void Maximize2; void Minimize2; void ArrowDown; void ArrowUp; void X; void List;
+void Maximize2; void Minimize2; void ArrowDown; void ArrowUp; void List; void Rows3; void Target;
