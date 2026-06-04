@@ -39,6 +39,8 @@ type ViewMode = 'grid' | 'focus' | 'compare';
 type ColorMode = 'candidate' | 'partner-a' | 'partner-b';
 type Normalize = 'count' | 'fraction';
 type SortKey = 'natural' | 'totalReads' | 'transfers' | 'candidates' | 'flipped';
+type CandSortKey = 'reads' | 'charts' | 'name' | 'varA' | 'varB';
+type CandGroupKey = 'none' | 'varA' | 'varB';
 
 // Deterministic, color-blind-aware palette (golden-angle hue rotation).
 const GOLDEN = 137.508;
@@ -386,6 +388,11 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
   const [view, setView] = useState<ViewMode>('grid');
   const [comparing, setComparing] = useState<string[]>([]); // up to 4 chart keys
   const COMPARE_MAX = 4;
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const filtersBtnRef = useRef<HTMLButtonElement | null>(null);
+  const filtersPopRef = useRef<HTMLDivElement | null>(null);
+  const [candSort, setCandSort] = useState<CandSortKey>('reads');
+  const [candGroup, setCandGroup] = useState<CandGroupKey>('none');
   const [colorMode, setColorMode] = useState<ColorMode>('candidate');
   const [normalize, setNormalize] = useState<Normalize>('count');
   const [topN, setTopN] = useState(10);
@@ -394,6 +401,20 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
   const [pinnedCand, setPinnedCand] = useState<string | null>(null);
   const [focusKey, setFocusKey] = useState<string | null>(null);
   const [showSidebar, setShowSidebar] = useState(true);
+  // Compare view defaults to no sidebar — the chart area needs the room.
+  useEffect(() => { setShowSidebar(view !== 'compare'); }, [view]);
+  // Close filter popover on outside click.
+  useEffect(() => {
+    if (!filtersOpen) return;
+    const handler = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (filtersPopRef.current?.contains(t)) return;
+      if (filtersBtnRef.current?.contains(t)) return;
+      setFiltersOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [filtersOpen]);
 
   const load = useCallback(async () => {
     setLoading(true); setError(null);
@@ -546,14 +567,53 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
   const [gridLimit, setGridLimit] = useState(60);
   useEffect(() => { setGridLimit(60); }, [visibleCharts.length]);
 
+  // Active-filter count for the toolbar Filters button badge.
+  const activeFilterCount = useMemo(() => {
+    let n = 0;
+    if (data) {
+      if (selectedLibs.size > 0 && selectedLibs.size < data.libraries.length) n++;
+      if (selectedWells.size > 0 && selectedWells.size < data.wells.length) n++;
+    }
+    if (transferRange && allTransferValues.length > 1) {
+      const lo0 = allTransferValues[0], hi0 = allTransferValues[allTransferValues.length - 1];
+      if (transferRange[0] > lo0 || transferRange[1] < hi0) n++;
+    }
+    if (minTotal > 0) n++;
+    if (candidateFilter.size > 0) n++;
+    if (onlyFlipped) n++;
+    if (search.trim()) n++;
+    return n;
+  }, [data, selectedLibs, selectedWells, transferRange, allTransferValues, minTotal, candidateFilter, onlyFlipped, search]);
+
+  // Sorted + (optionally) grouped candidate list for the sidebar browser.
+  const candidateRows = useMemo(() => {
+    if (!data) return [] as { cand: string; charts: number; total: number }[];
+    const q = candidateQuery.trim().toLowerCase();
+    const base = allCandidates
+      .filter(c => !q || c.toLowerCase().includes(q))
+      .map(c => {
+        const idx = candidateIndex.get(c);
+        return { cand: c, charts: idx?.charts ?? 0, total: idx?.total ?? 0 };
+      });
+    const numFromA = (c: string) => { const m = c.match(/^A(\d+)/); return m ? parseInt(m[1]) : 0; };
+    const numFromB = (c: string) => { const m = c.match(/-B(\d+)/); return m ? parseInt(m[1]) : 0; };
+    if (candSort === 'reads') base.sort((a, b) => b.total - a.total || a.cand.localeCompare(b.cand));
+    else if (candSort === 'charts') base.sort((a, b) => b.charts - a.charts || b.total - a.total);
+    else if (candSort === 'name') base.sort((a, b) => a.cand.localeCompare(b.cand));
+    else if (candSort === 'varA') base.sort((a, b) => numFromA(a.cand) - numFromA(b.cand) || a.cand.localeCompare(b.cand));
+    else if (candSort === 'varB') base.sort((a, b) => numFromB(a.cand) - numFromB(b.cand) || a.cand.localeCompare(b.cand));
+    return base;
+  }, [data, allCandidates, candidateIndex, candidateQuery, candSort]);
+
   return (
     <div className="flex flex-col h-full w-full overflow-hidden">
-      {/* Toolbar */}
-      <div className="px-3 py-1.5 border-b border-slate-200 dark:border-gray-700 bg-slate-50/80 dark:bg-gray-800/60 flex flex-wrap items-center gap-2 shrink-0">
+      {/* Compact, single-row toolbar. Heavy filters live behind the Filters
+          popover so the candidate sidebar isn't squeezed. */}
+      <div className="px-2 py-1.5 border-b border-slate-200 dark:border-gray-700 bg-slate-50/80 dark:bg-gray-800/60 flex items-center gap-2 shrink-0">
         <button
           onClick={() => setShowSidebar(s => !s)}
           className="p-1 rounded text-slate-500 dark:text-gray-400 hover:bg-slate-200 dark:hover:bg-gray-700"
-          title={showSidebar ? 'Hide filters' : 'Show filters'}
+          title={showSidebar ? 'Hide candidates sidebar' : 'Show candidates sidebar'}
         >
           {showSidebar ? <ChevronLeft className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
         </button>
@@ -570,10 +630,11 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
           </span>
         )}
         <span className="text-[11px] text-slate-500 dark:text-gray-400 tabular-nums">
-          {visibleCharts.length}/{data?.charts.length ?? 0} charts
+          {visibleCharts.length}/{data?.charts.length ?? 0}
         </span>
 
-        <div className="flex items-center border border-slate-200 dark:border-gray-600 rounded overflow-hidden ml-2">
+        {/* View mode */}
+        <div className="flex items-center border border-slate-200 dark:border-gray-600 rounded overflow-hidden ml-1">
           <button onClick={() => setView('grid')} className={cn('flex items-center gap-1 px-2 py-1 text-[11px]', view === 'grid' ? 'bg-emerald-600 text-white' : 'bg-white dark:bg-gray-700 text-slate-600 dark:text-gray-300')} title="Grid: all charts as thumbnails">
             <LayoutGrid className="w-3.5 h-3.5" /> Grid
           </button>
@@ -591,63 +652,172 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
           </button>
         </div>
 
-        <div className="flex items-center gap-1 ml-2">
-          <span className="text-[10px] uppercase tracking-wider text-slate-500 dark:text-gray-400">Color</span>
-          {(['candidate','partner-a','partner-b'] as ColorMode[]).map(m => (
+        {/* Color */}
+        <div className="flex items-center border border-slate-200 dark:border-gray-600 rounded overflow-hidden">
+          {(['candidate','partner-a','partner-b'] as ColorMode[]).map((m, i) => (
             <button key={m} onClick={() => setColorMode(m)}
-              className={cn('px-1.5 py-0.5 text-[10.5px] font-medium rounded border', colorMode === m ? 'bg-emerald-600 text-white border-emerald-700' : 'bg-white dark:bg-gray-700 border-slate-200 dark:border-gray-600 text-slate-600 dark:text-gray-300')}
+              className={cn('px-1.5 py-1 text-[10.5px] font-medium', i > 0 && 'border-l border-slate-200 dark:border-gray-600',
+                colorMode === m ? 'bg-emerald-600 text-white' : 'bg-white dark:bg-gray-700 text-slate-600 dark:text-gray-300')}
               title={m === 'partner-a' ? "Color by VarA partner" : m === 'partner-b' ? 'Color by VarB partner' : 'Color by full A-B candidate'}>
               {m === 'candidate' ? 'A-B' : m === 'partner-a' ? 'VarA' : 'VarB'}
             </button>
           ))}
         </div>
 
-        <div className="flex items-center gap-1">
-          <span className="text-[10px] uppercase tracking-wider text-slate-500 dark:text-gray-400">Y</span>
-          {(['count','fraction'] as Normalize[]).map(n => (
+        {/* Y axis */}
+        <div className="flex items-center border border-slate-200 dark:border-gray-600 rounded overflow-hidden">
+          {(['count','fraction'] as Normalize[]).map((n, i) => (
             <button key={n} onClick={() => setNormalize(n)}
-              className={cn('px-1.5 py-0.5 text-[10.5px] font-medium rounded border', normalize === n ? 'bg-emerald-600 text-white border-emerald-700' : 'bg-white dark:bg-gray-700 border-slate-200 dark:border-gray-600 text-slate-600 dark:text-gray-300')}>
+              className={cn('px-1.5 py-1 text-[10.5px] font-medium', i > 0 && 'border-l border-slate-200 dark:border-gray-600',
+                normalize === n ? 'bg-emerald-600 text-white' : 'bg-white dark:bg-gray-700 text-slate-600 dark:text-gray-300')}>
               {n === 'count' ? 'Count' : 'Fraction'}
             </button>
           ))}
         </div>
 
-        <label className="flex items-center gap-1 text-[11px] text-slate-600 dark:text-gray-300 ml-1" title="Roll up everything past the top-N candidates into a single grey 'Other' segment, so the chart legend stays readable when libraries are large.">
-          Top-N
-          <input type="number" min={0} max={50} value={topN} onChange={e => setTopN(parseInt(e.target.value || '0'))}
-            className="w-12 px-1 py-0.5 text-[11px] border border-slate-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 dark:text-gray-100 outline-none tabular-nums" />
-        </label>
+        {/* Filters popover trigger */}
+        <div className="relative">
+          <button
+            ref={filtersBtnRef}
+            onClick={() => setFiltersOpen(o => !o)}
+            className={cn('flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded border',
+              activeFilterCount > 0
+                ? 'bg-blue-50 dark:bg-blue-900/30 border-blue-300 dark:border-blue-700 text-blue-800 dark:text-blue-200'
+                : 'bg-white dark:bg-gray-700 border-slate-200 dark:border-gray-600 text-slate-700 dark:text-gray-200 hover:bg-slate-50 dark:hover:bg-gray-600')}
+            title="Open filters (transfers, libraries, wells, …)"
+          >
+            <Filter className="w-3.5 h-3.5" /> Filters
+            {activeFilterCount > 0 && <span className="ml-0.5 px-1 rounded-full bg-blue-600 text-white text-[10px] tabular-nums font-bold">{activeFilterCount}</span>}
+          </button>
+          {filtersOpen && data && (
+            <div ref={filtersPopRef} className="absolute left-0 top-full mt-1 w-80 z-30 bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-slate-200 dark:border-gray-700 p-2.5 text-[11.5px] text-slate-700 dark:text-gray-200 max-h-[80vh] overflow-y-auto">
+              <div className="flex items-center justify-between mb-2">
+                <span className="font-semibold text-slate-800 dark:text-gray-100">Filters</span>
+                <button onClick={resetFilters}
+                  className="text-[11px] text-slate-500 dark:text-gray-400 hover:text-slate-700 dark:hover:text-gray-200 underline">
+                  Reset all
+                </button>
+              </div>
 
-        <label className="flex items-center gap-1 text-[11px] text-slate-600 dark:text-gray-300">
-          <input type="checkbox" checked={onlyFlipped} onChange={e => setOnlyFlipped(e.target.checked)} />
-          only flipped
-        </label>
+              {/* search */}
+              <div className="mb-2">
+                <label className="block text-[10px] uppercase font-semibold tracking-wider text-slate-500 dark:text-gray-400 mb-1">Search</label>
+                <div className="relative">
+                  <Search className="w-3 h-3 absolute left-2 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <input value={search} onChange={e => setSearch(e.target.value)}
+                    placeholder="well / library / strain"
+                    className="w-full pl-7 pr-2 py-1 text-[11.5px] border border-slate-200 dark:border-gray-600 rounded bg-white dark:bg-gray-700 dark:text-gray-100 outline-none" />
+                </div>
+              </div>
+
+              {/* sort */}
+              <div className="mb-2">
+                <label className="block text-[10px] uppercase font-semibold tracking-wider text-slate-500 dark:text-gray-400 mb-1">Sort charts</label>
+                <select value={`${sortKey}:${sortDir}`} onChange={e => { const [k, d] = e.target.value.split(':'); setSortKey(k as SortKey); setSortDir(d as 'asc' | 'desc'); }}
+                  className="w-full text-[11.5px] border border-slate-200 dark:border-gray-600 rounded px-2 py-1 bg-white dark:bg-gray-700 dark:text-gray-100 outline-none">
+                  <option value="natural:asc">default (experiment · library · well)</option>
+                  <option value="totalReads:desc">total reads ↓</option>
+                  <option value="totalReads:asc">total reads ↑</option>
+                  <option value="candidates:desc"># candidates ↓</option>
+                  <option value="candidates:asc"># candidates ↑</option>
+                  <option value="transfers:desc"># transfers ↓</option>
+                  <option value="flipped:desc">flipped first</option>
+                </select>
+              </div>
+
+              {/* Top-N + flipped */}
+              <div className="grid grid-cols-2 gap-2 mb-2">
+                <label className="flex items-center gap-1.5 text-[11.5px]" title="Roll up everything past the top-N candidates into a single grey 'Other' segment.">
+                  <span className="text-[10px] uppercase font-semibold tracking-wider text-slate-500 dark:text-gray-400">Top-N</span>
+                  <input type="number" min={0} max={50} value={topN} onChange={e => setTopN(parseInt(e.target.value || '0'))}
+                    className="w-14 px-1 py-0.5 text-[11.5px] border border-slate-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 dark:text-gray-100 outline-none tabular-nums" />
+                </label>
+                <label className="flex items-center gap-1.5 text-[11.5px]">
+                  <input type="checkbox" checked={onlyFlipped} onChange={e => setOnlyFlipped(e.target.checked)} />
+                  <span>only flipped</span>
+                </label>
+              </div>
+
+              {/* Transfers */}
+              {transferRange && allTransferValues.length > 1 && (
+                <div className="mb-2 border-t border-slate-100 dark:border-gray-700 pt-2">
+                  <label className="block text-[10px] uppercase font-semibold tracking-wider text-slate-500 dark:text-gray-400 mb-1">
+                    Transfers <span className="font-normal normal-case text-slate-400">T{transferRange[0]}–T{transferRange[1]}</span>
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <input type="range" min={allTransferValues[0]} max={allTransferValues[allTransferValues.length - 1]}
+                      value={transferRange[0]}
+                      onChange={e => setTransferRange([Math.min(parseInt(e.target.value), transferRange[1]), transferRange[1]])}
+                      className="flex-1" />
+                    <input type="range" min={allTransferValues[0]} max={allTransferValues[allTransferValues.length - 1]}
+                      value={transferRange[1]}
+                      onChange={e => setTransferRange([transferRange[0], Math.max(parseInt(e.target.value), transferRange[0])])}
+                      className="flex-1" />
+                  </div>
+                </div>
+              )}
+
+              {/* Min total */}
+              <div className="mb-2 border-t border-slate-100 dark:border-gray-700 pt-2">
+                <label className="flex items-center justify-between text-[10px] uppercase font-semibold tracking-wider text-slate-500 dark:text-gray-400 mb-1">
+                  <span>Min total / transfer</span>
+                  <span className="font-normal normal-case tabular-nums text-slate-400">{minTotal}</span>
+                </label>
+                <input type="range" min={0} max={100} step={1} value={minTotal}
+                  onChange={e => setMinTotal(parseInt(e.target.value))} className="w-full" />
+              </div>
+
+              {/* Libraries */}
+              <div className="mb-2 border-t border-slate-100 dark:border-gray-700 pt-2">
+                <div className="flex items-center justify-between text-[10px] uppercase font-semibold tracking-wider text-slate-500 dark:text-gray-400 mb-1">
+                  <span>Libraries <span className="font-normal normal-case text-slate-400">({selectedLibs.size}/{data.libraries.length})</span></span>
+                  <button onClick={() => setSelectedLibs(prev => prev.size === data.libraries.length ? new Set() : new Set(data.libraries))}
+                    className="text-emerald-600 dark:text-emerald-400 normal-case font-medium hover:underline">
+                    {selectedLibs.size === data.libraries.length ? 'Clear' : 'All'}
+                  </button>
+                </div>
+                <div className="max-h-32 overflow-y-auto -mr-1 pr-1">
+                  {data.libraries.map(lib => (
+                    <label key={lib} className="flex items-center gap-2 text-[11.5px] px-1 py-1 rounded hover:bg-slate-100 dark:hover:bg-gray-700 cursor-pointer">
+                      <input type="checkbox" checked={selectedLibs.has(lib)} onChange={() => setSelectedLibs(prev => toggle(prev, lib))} />
+                      <span className="font-mono truncate" title={lib}>{lib}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              {/* Wells */}
+              <div className="mb-1 border-t border-slate-100 dark:border-gray-700 pt-2">
+                <div className="flex items-center justify-between text-[10px] uppercase font-semibold tracking-wider text-slate-500 dark:text-gray-400 mb-1">
+                  <span>Wells <span className="font-normal normal-case text-slate-400">({selectedWells.size}/{data.wells.length})</span></span>
+                  <button onClick={() => setSelectedWells(prev => prev.size === data.wells.length ? new Set() : new Set(data.wells))}
+                    className="text-emerald-600 dark:text-emerald-400 normal-case font-medium hover:underline">
+                    {selectedWells.size === data.wells.length ? 'Clear' : 'All'}
+                  </button>
+                </div>
+                <div className="flex flex-wrap gap-1 max-h-28 overflow-y-auto">
+                  {data.wells.map(w => (
+                    <button key={w} onClick={() => setSelectedWells(prev => toggle(prev, w))}
+                      className={cn('px-2 py-0.5 text-[11px] font-mono rounded border', selectedWells.has(w)
+                        ? 'bg-emerald-600 text-white border-emerald-700'
+                        : 'bg-white dark:bg-gray-700 border-slate-200 dark:border-gray-600 text-slate-600 dark:text-gray-300')}>
+                      {w}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
 
         <div className="ml-auto flex items-center gap-1">
-          <div className="relative">
-            <Search className="w-3 h-3 absolute left-2 top-1/2 -translate-y-1/2 text-slate-400" />
-            <input
-              value={search} onChange={e => setSearch(e.target.value)}
-              placeholder="search charts (well / library / strain)"
-              className="pl-7 pr-2 py-1 text-[11px] border border-slate-200 dark:border-gray-600 rounded bg-white dark:bg-gray-700 dark:text-gray-100 outline-none w-56"
-            />
-          </div>
-          <select value={`${sortKey}:${sortDir}`} onChange={e => { const [k, d] = e.target.value.split(':'); setSortKey(k as SortKey); setSortDir(d as 'asc' | 'desc'); }}
-            className="text-[11px] border border-slate-300 dark:border-gray-600 rounded px-1 py-1 bg-white dark:bg-gray-700 dark:text-gray-100 outline-none">
-            <option value="natural:asc">sort: default</option>
-            <option value="totalReads:desc">total reads ↓</option>
-            <option value="totalReads:asc">total reads ↑</option>
-            <option value="candidates:desc"># candidates ↓</option>
-            <option value="candidates:asc"># candidates ↑</option>
-            <option value="transfers:desc"># transfers ↓</option>
-            <option value="flipped:desc">flipped first</option>
-          </select>
           <button onClick={() => data && downloadBlob('barcode-counts.csv', toCsv(visibleCharts))}
             disabled={!data || visibleCharts.length === 0}
-            className="flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded border border-slate-200 dark:border-gray-600 text-slate-600 dark:text-gray-300 hover:bg-slate-100 dark:hover:bg-gray-700 disabled:opacity-50">
+            className="flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded border border-slate-200 dark:border-gray-600 text-slate-600 dark:text-gray-300 hover:bg-slate-100 dark:hover:bg-gray-700 disabled:opacity-50"
+            title="Download visible charts as CSV">
             <Download className="w-3 h-3" /> CSV
           </button>
-          <button onClick={load} className="p-1 rounded text-slate-500 dark:text-gray-400 hover:bg-slate-100 dark:hover:bg-gray-700">
+          <button onClick={load} className="p-1 rounded text-slate-500 dark:text-gray-400 hover:bg-slate-100 dark:hover:bg-gray-700" title="Reload">
             <RefreshCw className={cn('w-3.5 h-3.5', loading && 'animate-spin')} />
           </button>
         </div>
@@ -655,151 +825,31 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
 
       {/* Mock-data banner */}
       {data?.reason && (
-        <div className="mx-3 mt-2 px-2.5 py-1.5 rounded border border-amber-300/60 dark:border-amber-700/60 bg-amber-50 dark:bg-amber-900/20 text-[11.5px] text-amber-800 dark:text-amber-200 flex items-start gap-1.5 leading-snug">
+        <div className="mx-2 mt-2 px-2.5 py-1.5 rounded border border-amber-300/60 dark:border-amber-700/60 bg-amber-50 dark:bg-amber-900/20 text-[11.5px] text-amber-800 dark:text-amber-200 flex items-start gap-1.5 leading-snug">
           <Info className="w-3.5 h-3.5 mt-0.5 shrink-0" />
           <span>{data.reason}</span>
         </div>
       )}
 
-      {/* Pinned candidate bar */}
-      {pinnedCand && (
-        <div className="mx-3 mt-2 px-2.5 py-1.5 rounded border border-blue-300/60 dark:border-blue-700/60 bg-blue-50 dark:bg-blue-900/20 text-[12px] text-blue-800 dark:text-blue-200 flex items-center gap-2">
-          <Pin className="w-3.5 h-3.5" />
-          <span>Pinned candidate: <span className="font-mono font-semibold">{pinnedCand}</span></span>
-          <span className="text-blue-700 dark:text-blue-300/80 text-[11px]">
-            ({candidateIndex.get(pinnedCand)?.charts ?? 0} charts · {candidateIndex.get(pinnedCand)?.total.toLocaleString() ?? 0} reads)
-          </span>
-          <button onClick={() => setPinnedCand(null)} className="ml-auto p-0.5 rounded hover:bg-blue-100 dark:hover:bg-blue-900/50">
-            <PinOff className="w-3.5 h-3.5" />
-          </button>
-        </div>
-      )}
-
-      {/* Main split: filter rail + chart area */}
+      {/* Main split: candidates rail + chart area */}
       <div className="flex flex-1 min-h-0">
-        {showSidebar && (
-          <div className="w-72 shrink-0 border-r border-slate-200 dark:border-gray-700 flex flex-col overflow-hidden bg-slate-50/40 dark:bg-gray-800/40">
-            {/* Transfer range */}
-            {transferRange && allTransferValues.length > 1 && (
-              <div className="p-2 border-b border-slate-200 dark:border-gray-700">
-                <label className="block text-[10px] uppercase font-semibold tracking-wider text-slate-500 dark:text-gray-400 mb-1">
-                  Transfers <span className="text-slate-400 dark:text-gray-500 font-normal normal-case">T{transferRange[0]}–T{transferRange[1]}</span>
-                </label>
-                <div className="flex items-center gap-2">
-                  <input type="range" min={allTransferValues[0]} max={allTransferValues[allTransferValues.length - 1]}
-                    value={transferRange[0]}
-                    onChange={e => setTransferRange([Math.min(parseInt(e.target.value), transferRange[1]), transferRange[1]])}
-                    className="flex-1" />
-                  <input type="range" min={allTransferValues[0]} max={allTransferValues[allTransferValues.length - 1]}
-                    value={transferRange[1]}
-                    onChange={e => setTransferRange([transferRange[0], Math.max(parseInt(e.target.value), transferRange[0])])}
-                    className="flex-1" />
-                </div>
-              </div>
-            )}
-
-            <div className="p-2 border-b border-slate-200 dark:border-gray-700">
-              <label className="flex items-center justify-between text-[10px] uppercase font-semibold tracking-wider text-slate-500 dark:text-gray-400 mb-1">
-                <span>Min total / transfer</span>
-                <span className="text-slate-400 dark:text-gray-500 font-normal normal-case tabular-nums">{minTotal}</span>
-              </label>
-              <input type="range" min={0} max={100} step={1} value={minTotal}
-                onChange={e => setMinTotal(parseInt(e.target.value))} className="w-full" />
-            </div>
-
-            {data && (
-              <>
-                {/* Libraries */}
-                <div className="p-2 border-b border-slate-200 dark:border-gray-700">
-                  <div className="flex items-center justify-between text-[10px] uppercase font-semibold tracking-wider text-slate-500 dark:text-gray-400 mb-1">
-                    <span>Libraries <span className="text-slate-400 dark:text-gray-500 font-normal normal-case">({selectedLibs.size}/{data.libraries.length})</span></span>
-                    <button onClick={() => setSelectedLibs(prev => prev.size === data.libraries.length ? new Set() : new Set(data.libraries))}
-                      className="text-emerald-600 dark:text-emerald-400 normal-case font-medium hover:underline">
-                      {selectedLibs.size === data.libraries.length ? 'Clear' : 'All'}
-                    </button>
-                  </div>
-                  <div className="max-h-44 overflow-y-auto -mr-1 pr-1">
-                    {data.libraries.map(lib => (
-                      <label key={lib} className="flex items-center gap-1.5 text-[11px] px-1 py-0.5 rounded hover:bg-slate-100 dark:hover:bg-gray-700 cursor-pointer">
-                        <input type="checkbox" checked={selectedLibs.has(lib)} onChange={() => setSelectedLibs(prev => toggle(prev, lib))} />
-                        <span className="font-mono truncate text-slate-700 dark:text-gray-200" title={lib}>{lib}</span>
-                      </label>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Wells */}
-                <div className="p-2 border-b border-slate-200 dark:border-gray-700">
-                  <div className="flex items-center justify-between text-[10px] uppercase font-semibold tracking-wider text-slate-500 dark:text-gray-400 mb-1">
-                    <span>Wells <span className="text-slate-400 dark:text-gray-500 font-normal normal-case">({selectedWells.size}/{data.wells.length})</span></span>
-                    <button onClick={() => setSelectedWells(prev => prev.size === data.wells.length ? new Set() : new Set(data.wells))}
-                      className="text-emerald-600 dark:text-emerald-400 normal-case font-medium hover:underline">
-                      {selectedWells.size === data.wells.length ? 'Clear' : 'All'}
-                    </button>
-                  </div>
-                  <div className="flex flex-wrap gap-1 max-h-32 overflow-y-auto">
-                    {data.wells.map(w => (
-                      <button key={w} onClick={() => setSelectedWells(prev => toggle(prev, w))}
-                        className={cn('px-1.5 py-0.5 text-[10.5px] font-mono rounded border', selectedWells.has(w)
-                          ? 'bg-emerald-600 text-white border-emerald-700'
-                          : 'bg-white dark:bg-gray-700 border-slate-200 dark:border-gray-600 text-slate-600 dark:text-gray-300')}>
-                        {w}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Candidate index — clickable */}
-                <div className="p-2 flex-1 min-h-0 flex flex-col">
-                  <div className="flex items-center justify-between text-[10px] uppercase font-semibold tracking-wider text-slate-500 dark:text-gray-400 mb-1">
-                    <span>Candidates <span className="text-slate-400 dark:text-gray-500 font-normal normal-case">({candidateFilter.size > 0 ? `${candidateFilter.size} kept` : `${allCandidates.length} total`})</span></span>
-                    {candidateFilter.size > 0 && (
-                      <button onClick={() => setCandidateFilter(new Set())}
-                        className="text-emerald-600 dark:text-emerald-400 normal-case font-medium hover:underline">Clear</button>
-                    )}
-                  </div>
-                  <div className="relative mb-1">
-                    <Filter className="w-3 h-3 absolute left-2 top-1/2 -translate-y-1/2 text-slate-400" />
-                    <input value={candidateQuery} onChange={e => setCandidateQuery(e.target.value)}
-                      placeholder="e.g. A153 or B151"
-                      className="w-full pl-7 pr-2 py-1 text-[11px] border border-slate-200 dark:border-gray-600 rounded bg-white dark:bg-gray-700 dark:text-gray-100 outline-none" />
-                  </div>
-                  <div className="flex-1 min-h-0 overflow-y-auto -mr-1 pr-1">
-                    {filteredCandidates.slice(0, 500).map(c => {
-                      const idx = candidateIndex.get(c);
-                      const isFilter = candidateFilter.has(c);
-                      const isPinned = pinnedCand === c;
-                      return (
-                        <div key={c} className={cn(
-                          'flex items-center gap-1.5 text-[11px] px-1 py-0.5 rounded',
-                          isPinned ? 'bg-blue-100 dark:bg-blue-900/40' : 'hover:bg-slate-100 dark:hover:bg-gray-700'
-                        )}>
-                          <input type="checkbox" checked={isFilter} onChange={() => setCandidateFilter(prev => toggle(prev, c))} title="Restrict charts to this candidate set" />
-                          <button
-                            onClick={() => setPinnedCand(p => p === c ? null : c)}
-                            className={cn('flex-1 text-left flex items-center justify-between gap-1 truncate', isPinned ? 'text-blue-700 dark:text-blue-300 font-semibold' : 'text-slate-700 dark:text-gray-200')}
-                            title="Pin this candidate — dims all others across every chart and filters charts to those containing it"
-                          >
-                            <span className="font-mono inline-flex items-center gap-1">
-                              <span className="inline-block w-2 h-2 rounded-sm" style={{ background: candColors[c] }} />
-                              {c}
-                            </span>
-                            <span className="text-[10px] tabular-nums text-slate-400 dark:text-gray-500">{idx ? `${idx.charts}× · ${idx.total}` : ''}</span>
-                          </button>
-                        </div>
-                      );
-                    })}
-                    {filteredCandidates.length > 500 && (
-                      <p className="text-[10.5px] text-slate-400 px-1 py-1">+ {filteredCandidates.length - 500} more — narrow the search</p>
-                    )}
-                  </div>
-                  <p className="mt-1 text-[10.5px] text-slate-500 dark:text-gray-400 leading-snug">
-                    Checkbox = restrict the chart to a subset. Click the name = pin (dim everything else, focus charts containing it).
-                  </p>
-                </div>
-              </>
-            )}
-          </div>
+        {showSidebar && data && (
+          <CandidatesSidebar
+            rows={candidateRows}
+            allCount={allCandidates.length}
+            candColors={candColors}
+            pinnedCand={pinnedCand}
+            setPinnedCand={setPinnedCand}
+            candidateFilter={candidateFilter}
+            setCandidateFilter={setCandidateFilter}
+            candidateIndex={candidateIndex}
+            candidateQuery={candidateQuery}
+            setCandidateQuery={setCandidateQuery}
+            candSort={candSort}
+            setCandSort={setCandSort}
+            candGroup={candGroup}
+            setCandGroup={setCandGroup}
+          />
         )}
 
         {/* Chart area — internal scroll behavior depends on the view mode:
@@ -919,6 +969,209 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
             />
           )}
         </div>
+      </div>
+    </div>
+  );
+}
+
+// Dedicated Candidates browser sidebar. Replaces the old multi-section
+// sidebar; everything other than candidate manipulation now lives in the
+// Filters popover, so this panel gets the full vertical space for its
+// scrollable list and its rows are tall enough to click comfortably.
+interface CandidatesSidebarProps {
+  rows: { cand: string; charts: number; total: number }[];
+  allCount: number;
+  candColors: Record<string, string>;
+  pinnedCand: string | null;
+  setPinnedCand: React.Dispatch<React.SetStateAction<string | null>>;
+  candidateFilter: Set<string>;
+  setCandidateFilter: React.Dispatch<React.SetStateAction<Set<string>>>;
+  candidateIndex: Map<string, { charts: number; total: number }>;
+  candidateQuery: string;
+  setCandidateQuery: (s: string) => void;
+  candSort: CandSortKey;
+  setCandSort: (s: CandSortKey) => void;
+  candGroup: CandGroupKey;
+  setCandGroup: (g: CandGroupKey) => void;
+}
+function CandidatesSidebar(p: CandidatesSidebarProps) {
+  const grouped = useMemo(() => {
+    if (p.candGroup === 'none') return [{ label: null as string | null, rows: p.rows }];
+    const buckets = new Map<string, typeof p.rows>();
+    for (const r of p.rows) {
+      const m = r.cand.match(/^(A\d+)-(B\d+)$/);
+      const key = p.candGroup === 'varA' ? (m?.[1] ?? '—') : (m?.[2] ?? '—');
+      if (!buckets.has(key)) buckets.set(key, []);
+      buckets.get(key)!.push(r);
+    }
+    const ord = [...buckets.keys()].sort((a, b) => {
+      const na = parseInt(a.slice(1)) || 0, nb = parseInt(b.slice(1)) || 0;
+      return na - nb;
+    });
+    return ord.map(k => ({ label: k, rows: buckets.get(k)! }));
+  }, [p.rows, p.candGroup]);
+
+  const RENDER_CAP = 800;
+  let rendered = 0;
+
+  return (
+    <div className="w-72 shrink-0 border-r border-slate-200 dark:border-gray-700 flex flex-col overflow-hidden bg-white dark:bg-gray-800">
+      {/* Header — title + search */}
+      <div className="px-2.5 py-2 border-b border-slate-200 dark:border-gray-700 bg-slate-50/60 dark:bg-gray-800/60">
+        <div className="flex items-center justify-between mb-1.5">
+          <div className="flex items-center gap-1.5 text-[12px] font-semibold text-slate-800 dark:text-gray-100">
+            <Pin className="w-3.5 h-3.5 text-blue-500" /> Candidates
+            <span className="text-[10.5px] text-slate-500 dark:text-gray-400 font-normal tabular-nums">
+              {p.candidateQuery ? `${p.rows.length}/${p.allCount}` : p.allCount.toLocaleString()}
+            </span>
+          </div>
+          {(p.candidateFilter.size > 0 || p.pinnedCand) && (
+            <button
+              onClick={() => { p.setCandidateFilter(new Set()); p.setPinnedCand(null); }}
+              className="text-[10.5px] text-emerald-600 dark:text-emerald-400 hover:underline font-medium"
+              title="Clear filter + unpin"
+            >
+              Reset
+            </button>
+          )}
+        </div>
+        <div className="relative">
+          <Search className="w-3 h-3 absolute left-2 top-1/2 -translate-y-1/2 text-slate-400" />
+          <input
+            value={p.candidateQuery}
+            onChange={e => p.setCandidateQuery(e.target.value)}
+            placeholder="A153, B151, A153-B30…"
+            className="w-full pl-7 pr-2 py-1.5 text-[12px] border border-slate-200 dark:border-gray-600 rounded bg-white dark:bg-gray-700 dark:text-gray-100 outline-none"
+          />
+        </div>
+      </div>
+
+      {/* Sort + group controls */}
+      <div className="px-2.5 py-1.5 border-b border-slate-200 dark:border-gray-700 flex items-center gap-2 text-[10.5px] text-slate-600 dark:text-gray-300">
+        <span className="text-[10px] uppercase tracking-wider text-slate-500 dark:text-gray-400">Sort</span>
+        <select value={p.candSort} onChange={e => p.setCandSort(e.target.value as CandSortKey)}
+          className="text-[11px] border border-slate-200 dark:border-gray-600 rounded px-1.5 py-0.5 bg-white dark:bg-gray-700 dark:text-gray-100 outline-none">
+          <option value="reads">reads ↓</option>
+          <option value="charts">in N charts ↓</option>
+          <option value="name">name A→Z</option>
+          <option value="varA">VarA #</option>
+          <option value="varB">VarB #</option>
+        </select>
+        <span className="text-[10px] uppercase tracking-wider text-slate-500 dark:text-gray-400">Group</span>
+        <select value={p.candGroup} onChange={e => p.setCandGroup(e.target.value as CandGroupKey)}
+          className="text-[11px] border border-slate-200 dark:border-gray-600 rounded px-1.5 py-0.5 bg-white dark:bg-gray-700 dark:text-gray-100 outline-none">
+          <option value="none">none</option>
+          <option value="varA">by VarA</option>
+          <option value="varB">by VarB</option>
+        </select>
+      </div>
+
+      {/* Pinned row */}
+      {p.pinnedCand && (
+        <div className="px-2.5 py-1.5 border-b border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/30 text-[11px] flex items-center gap-1.5">
+          <Pin className="w-3 h-3 text-blue-600 dark:text-blue-300 shrink-0" />
+          <span className="text-blue-700 dark:text-blue-200 truncate font-mono font-semibold">{p.pinnedCand}</span>
+          <span className="text-[10px] text-blue-600 dark:text-blue-300 tabular-nums shrink-0">
+            {p.candidateIndex.get(p.pinnedCand)?.charts ?? 0}× · {(p.candidateIndex.get(p.pinnedCand)?.total ?? 0).toLocaleString()}
+          </span>
+          <button onClick={() => p.setPinnedCand(null)}
+            className="ml-auto p-0.5 rounded hover:bg-blue-100 dark:hover:bg-blue-900/60 text-blue-700 dark:text-blue-200"
+            title="Unpin">
+            <PinOff className="w-3 h-3" />
+          </button>
+        </div>
+      )}
+
+      {/* Filter chip status */}
+      {p.candidateFilter.size > 0 && (
+        <div className="px-2.5 py-1.5 border-b border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/30 text-[11px] flex items-center gap-1.5">
+          <Filter className="w-3 h-3 text-emerald-700 dark:text-emerald-300 shrink-0" />
+          <span className="text-emerald-700 dark:text-emerald-200">
+            Charts restricted to {p.candidateFilter.size} candidate{p.candidateFilter.size === 1 ? '' : 's'}
+          </span>
+          <button onClick={() => p.setCandidateFilter(new Set())}
+            className="ml-auto p-0.5 rounded hover:bg-emerald-100 dark:hover:bg-emerald-900/60 text-emerald-700 dark:text-emerald-200"
+            title="Clear restriction">
+            <X className="w-3 h-3" />
+          </button>
+        </div>
+      )}
+
+      {/* Body — scrolling list */}
+      <div className="flex-1 min-h-0 overflow-y-auto">
+        {grouped.map((grp, gi) => (
+          <div key={grp.label ?? `g-${gi}`}>
+            {grp.label !== null && (
+              <div className="px-2.5 py-1 text-[10px] uppercase tracking-wider font-semibold text-slate-600 dark:text-gray-300 bg-slate-100/80 dark:bg-gray-800/80 sticky top-0 z-10 border-y border-slate-200 dark:border-gray-700">
+                {grp.label} <span className="text-slate-400 font-normal normal-case">({grp.rows.length})</span>
+              </div>
+            )}
+            {grp.rows.map(({ cand, charts, total }) => {
+              if (rendered >= RENDER_CAP) return null;
+              rendered++;
+              const isFilter = p.candidateFilter.has(cand);
+              const isPinned = p.pinnedCand === cand;
+              return (
+                <div
+                  key={cand}
+                  className={cn(
+                    'group flex items-center gap-2 px-2.5 py-1.5 text-[12px] border-b border-slate-100/70 dark:border-gray-700/40 transition-colors',
+                    isPinned ? 'bg-blue-100 dark:bg-blue-900/40' : 'hover:bg-slate-100 dark:hover:bg-gray-700/60'
+                  )}
+                  title={`${cand} — appears in ${charts} chart${charts === 1 ? '' : 's'}, ${total.toLocaleString()} total reads`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={isFilter}
+                    onChange={() => p.setCandidateFilter(prev => {
+                      const next = new Set(prev);
+                      if (next.has(cand)) next.delete(cand); else next.add(cand);
+                      return next;
+                    })}
+                    className="w-3.5 h-3.5 shrink-0 cursor-pointer"
+                    title="Restrict charts to this candidate (keep ticking to allow more)"
+                    onClick={e => e.stopPropagation()}
+                  />
+                  <button
+                    onClick={() => p.setPinnedCand(prev => prev === cand ? null : cand)}
+                    className="flex-1 min-w-0 flex items-center gap-2 text-left"
+                  >
+                    <span className="inline-block w-3 h-3 rounded shrink-0" style={{ background: p.candColors[cand] }} />
+                    <span className={cn('flex-1 truncate font-mono', isPinned ? 'text-blue-800 dark:text-blue-100 font-semibold' : 'text-slate-700 dark:text-gray-200')}>
+                      {cand}
+                    </span>
+                    <span className="text-[10.5px] tabular-nums text-slate-400 dark:text-gray-500 shrink-0">
+                      {charts}× · {total >= 1000 ? `${(total / 1000).toFixed(1)}k` : total}
+                    </span>
+                    <span className={cn('shrink-0 transition-opacity p-0.5 rounded',
+                      isPinned
+                        ? 'text-blue-600 dark:text-blue-300 opacity-100'
+                        : 'text-slate-400 dark:text-gray-500 opacity-0 group-hover:opacity-100')}
+                      title={isPinned ? 'Pinned — click to unpin' : 'Click to pin'}>
+                      {isPinned ? <Pin className="w-3.5 h-3.5" fill="currentColor" /> : <Pin className="w-3.5 h-3.5" />}
+                    </span>
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        ))}
+        {p.rows.length > RENDER_CAP && (
+          <p className="text-[10.5px] text-slate-400 px-2.5 py-2">
+            Showing first {RENDER_CAP} of {p.rows.length} — narrow the search to see more.
+          </p>
+        )}
+        {p.rows.length === 0 && (
+          <p className="text-[11px] text-slate-400 px-2.5 py-4 text-center">
+            No candidates match the search.
+          </p>
+        )}
+      </div>
+
+      {/* Footer legend */}
+      <div className="px-2.5 py-1.5 border-t border-slate-200 dark:border-gray-700 bg-slate-50/60 dark:bg-gray-800/60 text-[10.5px] text-slate-500 dark:text-gray-400 leading-snug">
+        <div className="flex items-center gap-1.5"><input type="checkbox" disabled checked readOnly className="w-3 h-3" /> = restrict charts</div>
+        <div className="flex items-center gap-1.5 mt-0.5"><Pin className="w-3 h-3" /> = pin (highlight across all charts)</div>
       </div>
     </div>
   );
