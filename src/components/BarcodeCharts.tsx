@@ -145,6 +145,10 @@ function ChartCard({
   chart, stats, colorMode, normalize, aColors, bColors, candColors,
   candidateFilter, topN, pinnedCand, height, onPickCandidate,
 }: ChartProps) {
+  // Hover tooltip state — managed in React so we get instant feedback
+  // and rich content (multi-line, color swatch). SVG <title> stays as a
+  // fallback for accessibility / native tools.
+  const [hover, setHover] = useState<{ x: number; y: number; text: string; flipX?: boolean } | null>(null);
   // Visible candidates after filter + Top-N rollup.
   const { visibleCands, otherCands } = useMemo(() => {
     let all = Object.keys(chart.candidates);
@@ -227,8 +231,28 @@ function ChartCard({
         </div>
       </div>
 
-      <div className="p-2 relative flex-1 min-h-0 flex">
-        <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-full" preserveAspectRatio="xMidYMid meet">
+      <div className="p-2 relative flex-1 min-h-0 flex" onMouseLeave={() => setHover(null)}>
+        {hover && (
+          <div
+            className="absolute z-30 pointer-events-none px-2 py-1 rounded bg-slate-900/95 dark:bg-gray-950/95 text-white text-[11px] font-mono shadow-lg ring-1 ring-black/20"
+            style={{
+              left: Math.min(hover.x + 12, 9999),
+              top: Math.max(hover.y - 8, 4),
+              transform: hover.flipX ? 'translateX(-100%) translateX(-24px)' : undefined,
+              whiteSpace: 'pre',
+            }}
+          >
+            {hover.text}
+          </div>
+        )}
+        <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-full" preserveAspectRatio="xMidYMid meet"
+          onMouseMove={(e) => {
+            // keep tooltip glued to cursor while inside the svg
+            const rect = (e.currentTarget as SVGSVGElement).getBoundingClientRect();
+            const px = e.clientX - rect.left;
+            const py = e.clientY - rect.top;
+            setHover(h => h ? { ...h, x: px, y: py, flipX: px > rect.width - 200 } : h);
+          }}>
           {tickValues.map((v, i) => {
             const y = PAD_T + innerH - (v / maxY) * innerH;
             return (
@@ -266,13 +290,23 @@ function ChartCard({
                   const color = getColor(cand);
                   const pinned = isPinned(cand);
                   const dim = isDimmed(cand);
-                  const pctStr = total ? `${(100 * v / total).toFixed(0)}%` : '';
+                  const pctNum = total ? (100 * v / total) : 0;
+                  const pctStr = total ? `${pctNum.toFixed(0)}%` : '';
+                  const pctStrFine = total ? `${pctNum.toFixed(1)}%` : '';
                   const showName = h >= LABEL_NAME_MIN_H && barW >= 38;
+                  const showWide = showName && barW >= 60; // room for name + count + %
                   const showCount = h >= LABEL_MIN_H;
                   const midY = y + h / 2;
-                  const labelText = cand === '__OTHER__'
-                    ? `Other · ${v}`
-                    : (showName ? `${cand} · ${v}` : String(v));
+                  const inlineLabel = cand === '__OTHER__'
+                    ? `Other · ${v}${pctStr ? ` · ${pctStr}` : ''}`
+                    : showWide
+                      ? `${cand}  ${v} · ${pctStr}`
+                      : showName
+                        ? `${cand} · ${pctStr || v}`
+                        : `${v}${pctStr ? ` · ${pctStr}` : ''}`;
+                  const tipText = cand === '__OTHER__'
+                    ? `Other (${otherCands.length} candidates)\nT${t}: ${v}${total ? `\n${pctStrFine} of bar total` : ''}\nbar total: ${total}`
+                    : `${cand}\nT${t}: ${v}${total ? `\n${pctStrFine} of bar total` : ''}\nbar total: ${total}`;
                   return (
                     <g key={cand}>
                       <rect
@@ -283,21 +317,25 @@ function ChartCard({
                         opacity={dim ? 0.18 : 1}
                         style={{ cursor: cand !== '__OTHER__' && onPickCandidate ? 'pointer' : 'default' }}
                         onClick={() => cand !== '__OTHER__' && onPickCandidate?.(cand)}
+                        onMouseEnter={(e) => {
+                          const svg = (e.currentTarget as SVGRectElement).ownerSVGElement;
+                          const rect = svg?.getBoundingClientRect();
+                          const px = rect ? e.clientX - rect.left : 0;
+                          const py = rect ? e.clientY - rect.top : 0;
+                          setHover({ x: px, y: py, text: tipText, flipX: rect ? px > rect.width - 200 : false });
+                        }}
+                        onMouseLeave={() => setHover(null)}
                       >
-                        <title>
-                          {cand === '__OTHER__'
-                            ? `Other (${otherCands.length} candidates) · T${t}: ${v}${total ? ` (${(100 * v / total).toFixed(1)}%)` : ''}`
-                            : `${cand} · T${t}: ${v}${total ? ` (${(100 * v / total).toFixed(1)}%)` : ''}`}
-                        </title>
+                        <title>{tipText.replace(/\n/g, ' · ')}</title>
                       </rect>
                       {showCount && !dim && (
                         <text
                           x={cx} y={midY + 3.5} textAnchor="middle"
-                          fontSize={showName ? 11 : 10.5}
+                          fontSize={showWide ? 11.5 : showName ? 11 : 10.5}
                           className="pointer-events-none"
-                          style={{ fill: 'white', paintOrder: 'stroke', stroke: 'rgba(0,0,0,0.55)', strokeWidth: 2.5, strokeLinejoin: 'round', fontWeight: 600 }}
+                          style={{ fill: 'white', paintOrder: 'stroke', stroke: 'rgba(0,0,0,0.6)', strokeWidth: 2.6, strokeLinejoin: 'round', fontWeight: 700 }}
                         >
-                          {showName ? labelText : `${v}${pctStr ? ` · ${pctStr}` : ''}`}
+                          {inlineLabel}
                         </text>
                       )}
                     </g>
@@ -1193,31 +1231,65 @@ function CandidateLegendPanel({ chart, stats, candColors, pinnedCand, onPick, to
   void chart;
   const sorted = stats.candidateTotals;
   const rolled = topN > 0 && sorted.length > topN;
+  const maxPct = sorted[0]?.total && stats.totalReads ? (100 * sorted[0].total / stats.totalReads) : 100;
   return (
     <div className="flex flex-col h-full">
-      <div className="px-2 py-1.5 border-b border-slate-200 dark:border-gray-700 text-[10px] uppercase tracking-wider text-slate-500 dark:text-gray-400 flex items-center justify-between bg-slate-50/60 dark:bg-gray-800/60">
-        <span>Candidates ({sorted.length})</span>
-        {rolled && <span className="normal-case font-normal text-slate-400">top {topN} bold</span>}
+      <div className="px-2.5 py-2 border-b border-slate-200 dark:border-gray-700 bg-slate-50/60 dark:bg-gray-800/60">
+        <div className="flex items-center justify-between text-[11px] font-semibold text-slate-700 dark:text-gray-200 mb-0.5">
+          <span>Candidates in this chart</span>
+          <span className="text-slate-500 dark:text-gray-400 tabular-nums font-normal">{sorted.length}</span>
+        </div>
+        <div className="text-[10px] text-slate-500 dark:text-gray-400">
+          % of {stats.totalReads.toLocaleString()} reads · click to pin
+          {rolled && <> · top {topN} bold</>}
+        </div>
       </div>
-      <div className="flex-1 min-h-0 overflow-y-auto p-1">
+      <div className="flex-1 min-h-0 overflow-y-auto">
         {sorted.map(({ cand, total }, i) => {
           const dim = pinnedCand !== null && pinnedCand !== cand;
           const pin = pinnedCand === cand;
           const isTop = topN > 0 && i < topN;
-          const pct = stats.totalReads ? (100 * total / stats.totalReads).toFixed(1) : '0.0';
+          const pctNum = stats.totalReads ? (100 * total / stats.totalReads) : 0;
+          const pctStr = pctNum >= 10 ? pctNum.toFixed(0) : pctNum.toFixed(1);
+          // Relative bar width — scaled so the dominant candidate fills the
+          // gauge. Gives a visual sense of distribution at a glance.
+          const barPct = maxPct ? Math.min(100, (pctNum / maxPct) * 100) : 0;
           return (
             <button key={cand} onClick={() => onPick(cand)}
               className={cn(
-                'w-full flex items-center gap-1.5 px-1.5 py-0.5 rounded text-[11px] font-mono transition-opacity text-left',
-                pin ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-200 font-bold' :
-                dim ? 'opacity-40 hover:opacity-100' : 'hover:bg-slate-100 dark:hover:bg-gray-700',
-                isTop ? 'text-slate-800 dark:text-gray-100' : 'text-slate-500 dark:text-gray-400'
+                'group w-full flex items-center gap-2 px-2.5 py-1.5 border-b border-slate-100 dark:border-gray-700/40 text-left transition-colors',
+                pin ? 'bg-blue-50 dark:bg-blue-900/30' :
+                dim ? 'opacity-40 hover:opacity-100' : 'hover:bg-slate-50 dark:hover:bg-gray-700/60'
               )}
-              title={`${cand}: ${total.toLocaleString()} reads (${pct}%) — click to pin`}
+              title={`${cand}: ${total.toLocaleString()} reads — ${pctNum.toFixed(2)}% of bar total. Click to pin.`}
             >
-              <span className="inline-block w-2.5 h-2.5 rounded-sm shrink-0" style={{ background: candColors[cand] }} />
-              <span className="flex-1 truncate">{cand}</span>
-              <span className="text-[9.5px] tabular-nums text-slate-400 dark:text-gray-500">{pct}%</span>
+              {/* color swatch */}
+              <span className="inline-block w-3 h-3 rounded-sm shrink-0" style={{ background: candColors[cand] }} />
+              {/* name + relative-pct bar */}
+              <span className="flex-1 min-w-0">
+                <span className="flex items-center justify-between gap-1.5">
+                  <span className={cn('truncate font-mono text-[12px]',
+                    pin ? 'text-blue-800 dark:text-blue-100 font-bold' :
+                    isTop ? 'text-slate-800 dark:text-gray-100 font-semibold' : 'text-slate-600 dark:text-gray-300')}>
+                    {cand}
+                  </span>
+                  <span className="text-[10px] tabular-nums text-slate-400 dark:text-gray-500 shrink-0">
+                    {total >= 1000 ? `${(total/1000).toFixed(1)}k` : total}
+                  </span>
+                </span>
+                <span className="block mt-0.5 h-1 rounded-full bg-slate-100 dark:bg-gray-700 overflow-hidden">
+                  <span className="block h-full" style={{ width: `${barPct}%`, background: candColors[cand] }} />
+                </span>
+              </span>
+              {/* big percentage — the metric that matters */}
+              <span className={cn(
+                'shrink-0 tabular-nums font-bold text-right',
+                'text-[14px] leading-tight',
+                pin ? 'text-blue-700 dark:text-blue-200' :
+                pctNum >= 10 ? 'text-slate-800 dark:text-gray-100' : 'text-slate-500 dark:text-gray-400',
+              )} style={{ width: 46 }}>
+                {pctStr}<span className="text-[9.5px] font-normal text-slate-500 dark:text-gray-400">%</span>
+              </span>
             </button>
           );
         })}
@@ -1338,7 +1410,7 @@ function FocusView(props: FocusViewProps) {
             />
           </div>
         </div>
-        <div className="w-56 shrink-0 border-l border-slate-200 dark:border-gray-700 bg-white dark:bg-gray-800 flex flex-col overflow-hidden">
+        <div className="w-80 shrink-0 border-l border-slate-200 dark:border-gray-700 bg-white dark:bg-gray-800 flex flex-col overflow-hidden">
           <CandidateLegendPanel
             chart={chart} stats={stats} candColors={candColors}
             pinnedCand={pinnedCand} onPick={onPickCandidate} topN={topN}
