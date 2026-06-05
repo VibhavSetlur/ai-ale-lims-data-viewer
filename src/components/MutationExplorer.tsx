@@ -5,10 +5,9 @@ import {
   CheckSquare, Square, Search, X, AlertCircle, FlaskConical, GitCompare, RefreshCw,
   ArrowUpDown, ArrowUp, ArrowDown, Filter, Download, Info,
   ChevronDown, ChevronRight, Eye, EyeOff, FoldVertical, UnfoldVertical,
-  BarChart3, Grid3X3,
+  BarChart3,
 } from 'lucide-react';
 import BarcodeCharts from './BarcodeCharts';
-import CopyNumberHeatmap from './CopyNumberHeatmap';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
@@ -60,7 +59,7 @@ interface MutationDataset {
   warnings?: string[];
 }
 
-type Tab = 'samples' | 'compare' | 'barcodes' | 'copy';
+type Tab = 'samples' | 'compare' | 'barcodes';
 
 const SELECTED_KEY = 'lims:mutation:selected';
 const TAB_KEY = 'lims:mutation:tab';
@@ -213,7 +212,7 @@ export default function MutationExplorer() {
       const s = localStorage.getItem(SELECTED_KEY);
       if (s) setSelected(new Set(JSON.parse(s)));
       const t = localStorage.getItem(TAB_KEY);
-      if (t === 'compare' || t === 'samples' || t === 'barcodes' || t === 'copy') setTab(t);
+      if (t === 'compare' || t === 'samples' || t === 'barcodes') setTab(t);
       const e = localStorage.getItem(EXPERIMENT_KEY);
       if (e !== null) setExperiment(e);
       const r = localStorage.getItem(REGISTRY_KEY);
@@ -280,9 +279,6 @@ export default function MutationExplorer() {
           </TabButton>
           <TabButton active={tab === 'barcodes'} onClick={() => setTab('barcodes')} icon={<BarChart3 className="w-3.5 h-3.5" />}>
             Barcode Charts
-          </TabButton>
-          <TabButton active={tab === 'copy'} onClick={() => setTab('copy')} icon={<Grid3X3 className="w-3.5 h-3.5" />}>
-            Copy Number
           </TabButton>
         </div>
         <div className="flex items-center gap-1.5 pr-1">
@@ -404,9 +400,6 @@ export default function MutationExplorer() {
         </div>
         <div className={cn('flex-1 min-h-0 flex flex-col', tab === 'barcodes' ? '' : 'hidden')}>
           <BarcodeCharts />
-        </div>
-        <div className={cn('flex-1 min-h-0 flex flex-col', tab === 'copy' ? '' : 'hidden')}>
-          <CopyNumberHeatmap />
         </div>
       </div>
     </div>

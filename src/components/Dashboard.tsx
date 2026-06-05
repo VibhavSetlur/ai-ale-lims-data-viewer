@@ -532,15 +532,14 @@ export default function Dashboard({ initialTables }: DashboardProps) {
               ) : (
                 <div className="flex-1 overflow-y-auto p-3 text-[12px] text-slate-500 dark:text-gray-400 leading-relaxed">
                   <div className="font-semibold text-slate-700 dark:text-gray-200 mb-1">Mutation Explorer</div>
-                  <p className="text-[11.5px]">Four tabs inside:</p>
+                  <p className="text-[11.5px]">Three tabs inside:</p>
                   <ul className="list-disc list-inside space-y-1 mt-1 text-[11.5px]">
                     <li><span className="font-medium">Sample Selection</span> — pick samples to compare.</li>
-                    <li><span className="font-medium">Comparative View</span> — side-by-side mutation calls.</li>
-                    <li><span className="font-medium">Barcode Charts</span> — per (well · library · replicate) stacked bars.</li>
-                    <li><span className="font-medium">Copy Number</span> — sample × allele heat-map with sparklines.</li>
+                    <li><span className="font-medium">Comparative View</span> — side-by-side mutation calls, including copy-number rows when present.</li>
+                    <li><span className="font-medium">Barcode Charts</span> — per (library · replicate) stacked bars from <span className="font-mono">verAB_barcodes</span>.</li>
                   </ul>
                   <p className="text-[11px] mt-3 text-slate-400 dark:text-gray-500">
-                    Sources: <span className="font-mono">Mutations</span> (Sample · Comparative), <span className="font-mono">verAB_barcodes</span> (Barcode Charts), and Copy Number falls back to mock until Natasha&apos;s copy-number table lands.
+                    Future: dedicated copy-number viewer with read-coverage trace + breseq junctions (per Natasha 2026-06-05).
                   </p>
                 </div>
               )}

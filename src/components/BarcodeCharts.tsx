@@ -958,10 +958,13 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
                           });
                         }}
                         className={cn(
-                          'absolute top-1 right-1 z-10 w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold transition-all',
-                          inCompare ? 'bg-emerald-600 text-white' : 'bg-white/80 dark:bg-gray-900/70 text-slate-500 dark:text-gray-300 opacity-0 group-hover:opacity-100 border border-slate-300 dark:border-gray-600'
+                          'absolute top-1 right-1 z-10 w-5 h-5 rounded-full flex items-center justify-center text-[11px] font-bold transition-all shadow-sm',
+                          inCompare
+                            ? 'bg-emerald-600 text-white border border-emerald-700'
+                            // Always visible (subtle) so the affordance is discoverable; pops on hover.
+                            : 'bg-white dark:bg-gray-900/80 text-slate-500 dark:text-gray-300 border border-slate-300 dark:border-gray-600 hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-400 dark:hover:bg-emerald-900/30'
                         )}
-                        title={inCompare ? 'Remove from compare' : `Add to compare (max ${COMPARE_MAX})`}
+                        title={inCompare ? 'Remove from compare' : `Add to compare (max ${COMPARE_MAX} side-by-side)`}
                       >
                         {inCompare ? '✓' : '+'}
                       </button>
