@@ -6,7 +6,7 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$HERE"
 
-PORT="${PORT:-34721}"
+PORT="${PORT:-3457}"
 
 kill_pid() {
   local pid="$1"
