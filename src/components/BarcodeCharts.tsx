@@ -213,8 +213,12 @@ function ChartCard({
   return (
     <div className="rounded-lg border border-slate-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-sm overflow-hidden h-full flex flex-col">
       <div className="px-3 py-1.5 border-b border-slate-200 dark:border-gray-700 bg-slate-50/60 dark:bg-gray-800/60 flex items-center gap-2 text-[12px] shrink-0">
-        <span className="font-mono font-semibold text-slate-800 dark:text-gray-100">{chart.well}</span>
-        <span className="text-slate-400">|</span>
+        {chart.well && (
+          <>
+            <span className="font-mono font-semibold text-slate-800 dark:text-gray-100">{chart.well}</span>
+            <span className="text-slate-400">|</span>
+          </>
+        )}
         <span className="font-mono text-slate-700 dark:text-gray-200">{chart.strain}</span>
         <span className="text-slate-400">|</span>
         <span className="font-mono text-slate-700 dark:text-gray-200 truncate" title={chart.library}>{chart.library}</span>
@@ -527,9 +531,14 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
   const visibleCharts = useMemo<BarcodeChart[]>(() => {
     if (!data) return [];
     const q = search.trim().toLowerCase();
+    // If the dataset carries no wells (e.g. amplicon barcodes upstream
+    // haven't been linked to plate positions), the wells filter is a no-op
+    // — same for libraries.
+    const hasWells = data.wells.length > 0;
+    const hasLibs = data.libraries.length > 0;
     const filtered = data.charts
-      .filter(c => selectedLibs.has(c.library))
-      .filter(c => selectedWells.has(c.well))
+      .filter(c => !hasLibs || selectedLibs.has(c.library))
+      .filter(c => !hasWells || !c.well || selectedWells.has(c.well))
       .filter(c => !q || `${c.well} ${c.strain} ${c.library} ${c.experiment} rep${c.replicate}`.toLowerCase().includes(q))
       .map(c => {
         if (!transferRange) return c;
@@ -609,8 +618,8 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
   const activeFilterCount = useMemo(() => {
     let n = 0;
     if (data) {
-      if (selectedLibs.size > 0 && selectedLibs.size < data.libraries.length) n++;
-      if (selectedWells.size > 0 && selectedWells.size < data.wells.length) n++;
+      if (data.libraries.length > 0 && selectedLibs.size > 0 && selectedLibs.size < data.libraries.length) n++;
+      if (data.wells.length > 0 && selectedWells.size > 0 && selectedWells.size < data.wells.length) n++;
     }
     if (transferRange && allTransferValues.length > 1) {
       const lo0 = allTransferValues[0], hi0 = allTransferValues[allTransferValues.length - 1];
@@ -824,26 +833,28 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
                 </div>
               </div>
 
-              {/* Wells */}
-              <div className="mb-1 border-t border-slate-100 dark:border-gray-700 pt-2">
-                <div className="flex items-center justify-between text-[10px] uppercase font-semibold tracking-wider text-slate-500 dark:text-gray-400 mb-1">
-                  <span>Wells <span className="font-normal normal-case text-slate-400">({selectedWells.size}/{data.wells.length})</span></span>
-                  <button onClick={() => setSelectedWells(prev => prev.size === data.wells.length ? new Set() : new Set(data.wells))}
-                    className="text-emerald-600 dark:text-emerald-400 normal-case font-medium hover:underline">
-                    {selectedWells.size === data.wells.length ? 'Clear' : 'All'}
-                  </button>
-                </div>
-                <div className="flex flex-wrap gap-1 max-h-28 overflow-y-auto">
-                  {data.wells.map(w => (
-                    <button key={w} onClick={() => setSelectedWells(prev => toggle(prev, w))}
-                      className={cn('px-2 py-0.5 text-[11px] font-mono rounded border', selectedWells.has(w)
-                        ? 'bg-emerald-600 text-white border-emerald-700'
-                        : 'bg-white dark:bg-gray-700 border-slate-200 dark:border-gray-600 text-slate-600 dark:text-gray-300')}>
-                      {w}
+              {/* Wells — only shown when the dataset carries plate positions */}
+              {data.wells.length > 0 && (
+                <div className="mb-1 border-t border-slate-100 dark:border-gray-700 pt-2">
+                  <div className="flex items-center justify-between text-[10px] uppercase font-semibold tracking-wider text-slate-500 dark:text-gray-400 mb-1">
+                    <span>Wells <span className="font-normal normal-case text-slate-400">({selectedWells.size}/{data.wells.length})</span></span>
+                    <button onClick={() => setSelectedWells(prev => prev.size === data.wells.length ? new Set() : new Set(data.wells))}
+                      className="text-emerald-600 dark:text-emerald-400 normal-case font-medium hover:underline">
+                      {selectedWells.size === data.wells.length ? 'Clear' : 'All'}
                     </button>
-                  ))}
+                  </div>
+                  <div className="flex flex-wrap gap-1 max-h-28 overflow-y-auto">
+                    {data.wells.map(w => (
+                      <button key={w} onClick={() => setSelectedWells(prev => toggle(prev, w))}
+                        className={cn('px-2 py-0.5 text-[11px] font-mono rounded border', selectedWells.has(w)
+                          ? 'bg-emerald-600 text-white border-emerald-700'
+                          : 'bg-white dark:bg-gray-700 border-slate-200 dark:border-gray-600 text-slate-600 dark:text-gray-300')}>
+                        {w}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
           )}
         </div>
@@ -955,7 +966,9 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
                         {inCompare ? '✓' : '+'}
                       </button>
                       <div className="px-1.5 py-1 border-b border-slate-200/50 dark:border-gray-700/50 flex items-center gap-1 text-[10px] pr-7">
-                        <span className="font-mono font-bold text-slate-700 dark:text-gray-200">{c.well}</span>
+                        {c.well
+                          ? <span className="font-mono font-bold text-slate-700 dark:text-gray-200">{c.well}</span>
+                          : <span className="font-mono font-bold text-slate-700 dark:text-gray-200">r{c.replicate}</span>}
                         <span className="font-mono text-slate-500 dark:text-gray-400 truncate" title={c.library}>{c.library}</span>
                         {stats.flipped && <span className="ml-auto text-[8.5px] font-bold uppercase text-amber-600">flip</span>}
                       </div>
@@ -1383,7 +1396,7 @@ function FocusView(props: FocusViewProps) {
           className="text-[11.5px] border border-slate-300 dark:border-gray-600 rounded px-2 py-1 bg-white dark:bg-gray-700 dark:text-gray-100 outline-none font-mono min-w-[260px] max-w-[560px]">
           {charts.map(c => (
             <option key={chartKey(c)} value={chartKey(c)}>
-              {c.well} · {c.library} · rep {c.replicate}
+              {c.well ? `${c.well} · ` : ''}{c.library} · rep {c.replicate}
             </option>
           ))}
         </select>

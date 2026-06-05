@@ -540,7 +540,7 @@ export default function Dashboard({ initialTables }: DashboardProps) {
                     <li><span className="font-medium">Copy Number</span> — sample × allele heat-map with sparklines.</li>
                   </ul>
                   <p className="text-[11px] mt-3 text-slate-400 dark:text-gray-500">
-                    All four tabs read from the LIMS <span className="font-mono">Mutations</span> table (Barcode + Copy fall back to mock until Natasha&apos;s construct / copy_number columns land).
+                    Sources: <span className="font-mono">Mutations</span> (Sample · Comparative), <span className="font-mono">verAB_barcodes</span> (Barcode Charts), and Copy Number falls back to mock until Natasha&apos;s copy-number table lands.
                   </p>
                 </div>
               )}

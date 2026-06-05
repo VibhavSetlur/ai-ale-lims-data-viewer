@@ -16,165 +16,131 @@ export interface BarcodeDataset {
   warnings: string[];
 }
 
-interface MutationConstructRow {
-  seq_sample: string;
-  experiment: string | null;
-  construct: string | null;
-  count: number;
+// Row shape from the new LIMS table verAB_barcodes (added 2026-06-05 by
+// Natasha after the 2026-06-03 group meeting). One row per
+// (Seqsample, candidate) with the read count for the bar-chart cell.
+interface VerABRow {
+  Seqsample: string;
+  Transformation_library: string | null;
+  verA: string | null;
+  verB: string | null;
+  Candidate: string;
+  Count: number;
 }
 
-interface SeqSampleJoinRow {
-  seq_sample: string;
-  experiment: string | null;
-  sample_name: string | null;
+interface SeqsamplesJoinRow {
+  Sequencing_sample: string;
   well: string | null;
-  pop_or_colony: string | null;
+  Sample_Name: string | null;
 }
 
-// Mutations.{construct|library|mutation_set} → "library:candidate" per the
-// 2026-06-03 meeting (Natasha's convention, e.g. "concX_largeLib_SpeI:A153-B10").
-// We split on the first colon: prefix = library, suffix = candidate. Anything
-// without a colon is treated as candidate-only and falls under a "(none)"
-// library — better than dropping the row.
-function splitConstruct(value: string): { library: string; candidate: string } {
-  const idx = value.indexOf(':');
-  if (idx === -1) return { library: '(none)', candidate: value };
-  return { library: value.slice(0, idx), candidate: value.slice(idx + 1) };
+// Sample-name convention:
+//   TFMN4.exp2.ACN3788.concX_largeLib_EcorI.1.T3.P
+//   {experiment}.{sub}.{strain}.{library}.{replicate}.T{transfer}.{selection}
+function parseSeqsampleName(name: string): {
+  experiment: string;
+  strain: string;
+  library: string;
+  replicate: number;
+  transfer: number;
+} | null {
+  const parts = name.split('.');
+  if (parts.length < 6) return null;
+  // Find the .T<digits>. token — that's our transfer marker. Everything before
+  // its position has fixed semantics; anything after is the selection tag.
+  const tIdx = parts.findIndex(p => /^T\d+$/.test(p));
+  if (tIdx < 5) return null;
+  const transfer = parseInt(parts[tIdx].slice(1), 10);
+  const replicate = parseInt(parts[tIdx - 1], 10);
+  const library = parts[tIdx - 2];
+  const strain = parts[tIdx - 3];
+  // The experiment is "everything before strain" joined back together —
+  // handles both "TFMN4.exp2" and a single "TFMN1" cleanly.
+  const experiment = parts.slice(0, tIdx - 3).join('.');
+  if (Number.isNaN(transfer) || Number.isNaN(replicate)) return null;
+  return { experiment, strain, library, replicate, transfer };
 }
 
-// Recover transfer and replicate from the seq_sample suffix and the sample
-// name's trailing `.N`, matching the conventions used by the mutations API.
-function parseSeqSampleSuffix(seqSample: string): { transfer?: number } {
-  const m = seqSample.match(/\.T(\d+)\.[A-Za-z]\w*$/);
-  return m ? { transfer: parseInt(m[1], 10) } : {};
-}
-function deriveReplicate(sampleName: string | null): number | null {
-  if (!sampleName) return null;
-  const m = sampleName.match(/\.(\d+)$/);
-  return m ? parseInt(m[1], 10) : null;
-}
-
-async function probeConstructColumn(): Promise<string | null> {
-  let cols: { name: string }[] = [];
+async function tableExists(name: string): Promise<boolean> {
   try {
-    cols = await runQuery<{ name: string }>(
-      getDbType() === 'sqlite'
-        ? 'PRAGMA table_info("Mutations")'
-        : "SELECT COLUMN_NAME AS name FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME='Mutations'"
+    if (getDbType() === 'sqlite') {
+      const rows = await runQuery<{ name: string }>(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name = ?", [name]
+      );
+      return rows.length > 0;
+    }
+    const rows = await runQuery<{ c: number }>(
+      "SELECT COUNT(*) AS c FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = ?", [name]
     );
-  } catch { return null; }
-  const lower = new Map(cols.map(c => [c.name.toLowerCase(), c.name]));
-  for (const candidate of ['construct', 'library', 'mutation_set']) {
-    const real = lower.get(candidate);
-    if (real) return real;
-  }
-  return null;
+    return Number(rows[0]?.c ?? 0) > 0;
+  } catch { return false; }
 }
 
-// Build chart data straight from the LIMS once Natasha's construct column is
-// populated. Returns null if the column exists but is empty (so we fall back
-// to mock rather than rendering blank charts).
 async function tryLimsBarcodes(): Promise<{ charts: BarcodeChart[]; warnings: string[] } | null> {
-  const col = await probeConstructColumn();
-  if (!col) return null;
+  if (!(await tableExists('verAB_barcodes'))) return null;
 
-  const quoted = `"${col.replace(/"/g, '""')}"`;
-  let countRows: MutationConstructRow[];
+  let rows: VerABRow[];
   try {
-    countRows = await runQuery<MutationConstructRow>(
-      `SELECT "Seq_sample" AS seq_sample,
-              "Experiment" AS experiment,
-              ${quoted}    AS construct,
-              COUNT(*)     AS count
-       FROM Mutations
-       WHERE deleted = 0
-         AND ${quoted} IS NOT NULL
-         AND ${quoted} != ''
-       GROUP BY "Seq_sample", "Experiment", ${quoted}`
+    rows = await runQuery<VerABRow>(
+      `SELECT "Seqsample", "Transformation_library", "verA", "verB", "Candidate", "Count"
+       FROM verAB_barcodes
+       WHERE deleted = 0 AND "Count" > 0`
     );
   } catch (e) {
-    return { charts: [], warnings: [`LIMS construct-column query failed: ${e instanceof Error ? e.message : String(e)}`] };
+    return { charts: [], warnings: [`verAB_barcodes query failed: ${e instanceof Error ? e.message : String(e)}`] };
   }
+  if (rows.length === 0) return null;
 
-  if (countRows.length === 0) return null;
-
-  // Bring in well/sample_name/replicate for every observed seq_sample so we
-  // can label charts the same way Natasha's PDFs do.
-  const seqSamples = Array.from(new Set(countRows.map(r => r.seq_sample))).filter(Boolean);
-  const placeholders = seqSamples.map(() => '?').join(',');
-  let joinRows: SeqSampleJoinRow[] = [];
-  if (seqSamples.length > 0) {
+  // Best-effort: pull plate well from Seqsamples (lowercase table — the newer
+  // amplicon order may not be there yet, in which case well stays empty and
+  // the chart card just omits the well chip).
+  const seqsamples = Array.from(new Set(rows.map(r => r.Seqsample))).filter(Boolean);
+  const wellMap = new Map<string, string>();
+  if (seqsamples.length > 0) {
+    const ph = seqsamples.map(() => '?').join(',');
     try {
-      joinRows = await runQuery<SeqSampleJoinRow>(
-        `SELECT ss."Sequencing_sample" AS seq_sample,
-                ss."Experiment"        AS experiment,
-                ss."Sample_Name"       AS sample_name,
-                ss."Sequencing_plate_well" AS well,
-                ss."Population_or_Single_colony?" AS pop_or_colony
-         FROM Seq_samples ss
-         WHERE ss.deleted = 0 AND ss."Sequencing_sample" IN (${placeholders})`,
-        seqSamples,
+      const joined = await runQuery<SeqsamplesJoinRow>(
+        `SELECT ss."Sequencing_sample", ss."Sequencing_plate_well" AS well, ss."Sample_Name"
+         FROM Seqsamples ss
+         WHERE ss.deleted = 0 AND ss."Sequencing_sample" IN (${ph})`,
+        seqsamples,
       );
-    } catch (e) {
-      // Join failure shouldn't kill the whole view — proceed with empty join.
-      void e;
-    }
+      for (const j of joined) {
+        if (j.well) wellMap.set(j.Sequencing_sample, j.well);
+      }
+    } catch { /* table missing or other error — proceed without wells */ }
   }
-  const joinIdx = new Map(joinRows.map(r => [r.seq_sample, r]));
 
-  // Pull strain/transforming_dna from Samples so charts get a proper strain
-  // label and the right experiment + library when the construct prefix is
-  // ambiguous. Best-effort.
-  let strainRows: { sample_name: string; strain: string | null; transforming_dna: string | null }[] = [];
-  const sampleNames = Array.from(new Set(joinRows.map(r => r.sample_name).filter((n): n is string => !!n)));
-  if (sampleNames.length > 0) {
-    const ph = sampleNames.map(() => '?').join(',');
-    try {
-      strainRows = await runQuery<{ sample_name: string; strain: string | null; transforming_dna: string | null }>(
-        `SELECT "Name" AS sample_name, "Strain_name" AS strain, "Transforming_DNA" AS transforming_dna
-         FROM Samples WHERE deleted = 0 AND "Name" IN (${ph})`,
-        sampleNames,
-      );
-    } catch (e) { void e; }
-  }
-  const strainIdx = new Map(strainRows.map(r => [r.sample_name, r]));
-
-  // Bucket countRows into charts keyed by (experiment, well, strain, library, replicate).
+  // Bucket rows into charts keyed by (experiment, strain, library, replicate).
   const charts = new Map<string, BarcodeChart>();
-  for (const row of countRows) {
-    if (!row.construct) continue;
-    const { library, candidate } = splitConstruct(row.construct);
-    const join = joinIdx.get(row.seq_sample);
-    const strainRow = join?.sample_name ? strainIdx.get(join.sample_name) : null;
-    const { transfer } = parseSeqSampleSuffix(row.seq_sample);
-    const replicate = deriveReplicate(join?.sample_name ?? null) ?? 1;
-    const strain = strainRow?.strain ?? '(unknown)';
-    const experiment = (row.experiment || join?.experiment || strainRow?.transforming_dna || '(unknown)').toString();
-    const well = join?.well ?? '—';
-    const key = `${experiment}|${well}|${strain}|${library}|${replicate}`;
+  let skipped = 0;
+  for (const r of rows) {
+    const parsed = parseSeqsampleName(r.Seqsample);
+    if (!parsed) { skipped++; continue; }
+    const { experiment, strain, library, replicate, transfer } = parsed;
+    const key = `${experiment}|${strain}|${library}|${replicate}`;
     let chart = charts.get(key);
     if (!chart) {
       chart = {
-        well, strain, library, replicate, experiment,
+        well: wellMap.get(r.Seqsample) ?? '',
+        strain, library, replicate, experiment,
         transfers: [], candidates: {},
       };
       charts.set(key, chart);
     }
-    const t = typeof transfer === 'number' ? transfer : 0;
-    let ti = chart.transfers.indexOf(t);
+    let ti = chart.transfers.indexOf(transfer);
     if (ti === -1) {
-      chart.transfers.push(t);
+      chart.transfers.push(transfer);
       ti = chart.transfers.length - 1;
-      // Pad all existing candidate arrays so they stay aligned.
       for (const arr of Object.values(chart.candidates)) arr.push(0);
     }
-    if (!(candidate in chart.candidates)) {
-      chart.candidates[candidate] = Array(chart.transfers.length).fill(0);
+    if (!(r.Candidate in chart.candidates)) {
+      chart.candidates[r.Candidate] = Array(chart.transfers.length).fill(0);
     }
-    chart.candidates[candidate][ti] = (chart.candidates[candidate][ti] || 0) + Number(row.count || 0);
+    chart.candidates[r.Candidate][ti] += Number(r.Count || 0);
   }
 
-  // Sort transfers ascending within each chart (and re-align candidate arrays).
+  // Sort transfers ascending inside every chart (and realign candidate arrays).
   const finalCharts: BarcodeChart[] = [];
   for (const chart of charts.values()) {
     const order = chart.transfers
@@ -188,14 +154,18 @@ async function tryLimsBarcodes(): Promise<{ charts: BarcodeChart[]; warnings: st
     chart.candidates = newCands;
     finalCharts.push(chart);
   }
-  // Stable, useful sort: experiment → library → well → replicate.
   finalCharts.sort((a, b) =>
     a.experiment.localeCompare(b.experiment) ||
     a.library.localeCompare(b.library) ||
     a.well.localeCompare(b.well) ||
     a.replicate - b.replicate);
 
-  return { charts: finalCharts, warnings: [] };
+  const warnings: string[] = [];
+  if (skipped > 0) warnings.push(`Skipped ${skipped} verAB_barcodes row${skipped === 1 ? '' : 's'} with unparseable Seqsample names.`);
+  if (seqsamples.length > 0 && wellMap.size === 0) {
+    warnings.push('Wet-lab well positions (e.g. B3, C4) are not yet linked from Seqsamples for these amplicon samples — chart labels use library + replicate instead.');
+  }
+  return { charts: finalCharts, warnings };
 }
 
 function summarize(charts: BarcodeChart[]): Pick<BarcodeDataset, 'libraries'|'wells'|'experiments'|'uniqueA'|'uniqueB'> {
@@ -206,7 +176,7 @@ function summarize(charts: BarcodeChart[]): Pick<BarcodeDataset, 'libraries'|'we
   const bSet = new Set<string>();
   for (const c of charts) {
     libraries.add(c.library);
-    wells.add(c.well);
+    if (c.well) wells.add(c.well);
     experiments.add(c.experiment);
     for (const cand of Object.keys(c.candidates)) {
       const m = cand.match(/^(A\d+)-(B\d+)$/);
@@ -229,13 +199,13 @@ export async function GET() {
   try {
     limsResult = await tryLimsBarcodes();
   } catch (e: unknown) {
-    warnings.push('LIMS barcode probe failed: ' + (e instanceof Error ? e.message : String(e)));
+    warnings.push('verAB_barcodes probe failed: ' + (e instanceof Error ? e.message : String(e)));
   }
   if (limsResult) warnings.push(...limsResult.warnings);
 
   const source: 'mock' | 'lims' = limsResult && limsResult.charts.length > 0 ? 'lims' : 'mock';
   const reason = source === 'mock'
-    ? 'Mutations table has no construct/library column populated yet. Showing mock data shaped after the 2026-05-26 SeqCenter QUO1022807 figure set so the view is exercise-able. The viewer will auto-switch to live LIMS data the moment that column appears (per 2026-06-03 group meeting) — no code change needed.'
+    ? 'verAB_barcodes table is missing or empty. Showing mock data shaped after the 2026-05-26 SeqCenter QUO1022807 figure set so the view is exercise-able. The viewer auto-switches to live LIMS data the moment the table is populated (per Natasha’s 2026-06-05 update).'
     : undefined;
   const finalCharts = source === 'lims' ? limsResult!.charts : MOCK_BARCODES;
   const meta = summarize(finalCharts);
