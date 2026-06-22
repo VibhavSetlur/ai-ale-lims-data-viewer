@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 # Stop the LIMS data viewer started by ops/serve.sh.
-# Kills the recorded PID *and* anything still listening on PORT, because
-# `npm start` forks a `next-server` child that outlives the npm parent.
+# Kills the tmux session, the legacy recorded PID (old nohup deploy), *and*
+# anything still listening on PORT, because `npm start` forks a `next-server`
+# child that outlives the npm parent.
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$HERE"
 
 PORT="${PORT:-3457}"
+SESSION="${TMUX_SESSION:-ai-ale-viewer}"
 
 kill_pid() {
   local pid="$1"
@@ -19,6 +21,13 @@ kill_pid() {
   kill -9 "$pid" 2>/dev/null || true
 }
 
+# --- kill the tmux session (current deploy model) ---
+if command -v tmux >/dev/null 2>&1 && tmux has-session -t "$SESSION" 2>/dev/null; then
+  echo "Killing tmux session '${SESSION}' …"
+  tmux kill-session -t "$SESSION" 2>/dev/null || true
+fi
+
+# --- legacy nohup PID file (older deploys) ---
 if [[ -f ops/server.pid ]]; then
   RECORDED="$(cat ops/server.pid)"
   echo "Stopping recorded pid ${RECORDED} …"

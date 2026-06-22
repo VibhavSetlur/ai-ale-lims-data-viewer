@@ -51,6 +51,14 @@ export interface MutationDataset {
   selectedRegistry?: string | null;         // which registry the returned samples/mutations are restricted to
   warnings?: string[];
   source?: { driver: 'sqlite' | 'mysql'; table: string; rowsScanned: number };
+  stats?: {
+    sampleCount: number;        // sequenced samples in this dataset
+    mutationRowCount: number;   // total comparison rows (frequency + copy number)
+    frequencyRowCount: number;  // breseq SNP/indel frequency rows
+    cnRegionCount: number;      // distinct copy-number regions present
+    cnSampleCount: number;      // distinct samples with at least one copy-number value
+    curveCount: number;         // samples with a numeric OD growth curve (>=2 points)
+  };
 }
 
 /* ---------- Row shapes ---------- */
@@ -98,6 +106,26 @@ function parseSeqSampleSuffix(seqSample: string): { transfer?: number; selection
   const m = seqSample.match(/\.T(\d+)\.([A-Za-z]\w*)$/);
   if (!m) return {};
   return { transfer: parseInt(m[1], 10), selection: m[2] };
+}
+
+// Split an explorer seq_sample ID into its ALE lineage and transfer number so
+// it can be joined to a Robotic_OD curve (which is keyed by sample_name +
+// transfer). "TFMN1.fba.1.T5.P" -> { lineage: "TFMN1.fba.1", transfer: 5 }.
+function parseLineageTransfer(seqSample: string): { lineage: string; transfer: number } | null {
+  const m = seqSample.match(/\.T(\d+)\.[A-Za-z]\w*$/);
+  if (!m) return null;
+  return { lineage: seqSample.slice(0, m.index), transfer: parseInt(m[1], 10) };
+}
+
+// Robotic_OD readings are 'contam' or 'T0'..'T24' or bare '0'..'12'. Turn one
+// into an ordinal index for the x-axis when the numeric timepoint is absent.
+// 'contam' (the pre-inoculation check) sorts first at -1.
+function readingIndex(reading: string | null): number | null {
+  if (reading === null || reading === undefined) return null;
+  const r = String(reading).trim();
+  if (r.toLowerCase() === 'contam') return -1;
+  const m = r.match(/^T?(\d+)$/);
+  return m ? parseInt(m[1], 10) : null;
 }
 
 function describeSelection(sel: string | undefined, notes: string | null): string | undefined {
@@ -257,6 +285,11 @@ const REGISTRY_COUNTS_SQL = `
 // numeric series isn't in the mirror — the Data column carries a filename or
 // short reference. We still want to surface which samples have OD data
 // captured upstream and where to look for the file.
+//
+// NOTE: This is the FALLBACK. The real numeric growth curves now live in the
+// Robotic_OD table (see ROBOTIC_OD_SQL below) and are preferred whenever a
+// matching curve exists. od_sources is only attached to samples that have no
+// numeric curve, so researchers still see where to find the raw file.
 const OD_MEASUREMENTS_SQL = `
   SELECT DISTINCT
     ss."Sequencing_sample" AS seq_sample,
@@ -273,6 +306,52 @@ const OD_MEASUREMENTS_SQL = `
     AND ss."Sequencing_sample" IN (
       SELECT DISTINCT "Seq_sample" FROM Mutations WHERE deleted = 0
     )
+`;
+
+// Real robotic OD growth curves. Each row is one OD reading of one ALE culture
+// at one timepoint. A growth curve = all readings sharing (sample_name,
+// transfer), ordered in time. sample_name is the ALE LINEAGE (e.g.
+// "TFMN1.fba.1"); explorer seq_sample IDs are "<lineage>.T<transfer>.<sel>",
+// so we join a curve to a seq sample by (lineage, transfer). Every selection
+// (P / S1 / L1 …) of the same transfer shares the same population-plate curve.
+//
+//   reading: 'contam' (pre-inoculation contamination check), then 'T0'..'T24'
+//            or bare '0'..'12'. We turn this into an ordinal index for the
+//            x-axis when the numeric timepoint (hours) is missing.
+//   timepoint: hours since inoculation (FLOAT, preferred x-axis when present).
+//   od: optical density.
+//
+// We pull only the sample-bearing rows (sample_name set, Blank not a blank
+// well, od present) and let the route group them into per-curve series.
+const ROBOTIC_OD_SQL = `
+  SELECT
+    "sample_name" AS sample_name,
+    "transfer"    AS transfer,
+    "reading"     AS reading,
+    "od"          AS od,
+    "timepoint"   AS timepoint,
+    "datetime"    AS datetime
+  FROM Robotic_OD
+  WHERE deleted = 0
+    AND "sample_name" IS NOT NULL
+    AND "sample_name" != ''
+    AND "od" IS NOT NULL
+    AND ("Blank" IS NULL OR "Blank" = 0)
+`;
+
+// dgoA-star and verC copy numbers per sequenced sample. Seqsample maps DIRECTLY
+// onto the explorer's seq_sample IDs (verified: 100% overlap with Mutations).
+// Region_CN is the estimated copy number of the amplified region. We emit one
+// comparative row per region so the Comparative view can show copy number
+// alongside SNP frequencies.
+const COPY_NUMBERS_SQL = `
+  SELECT
+    "Seqsample"   AS seq_sample,
+    "Region_name" AS region_name,
+    "Region_CN"   AS region_cn
+  FROM Copy_numbers
+  WHERE deleted = 0
+    AND "Region_CN" IS NOT NULL
 `;
 
 /* ---------- Route ---------- */
@@ -336,14 +415,16 @@ export async function GET(req: NextRequest) {
       + (experimentFilter ? ' AND "Experiment" = ?' : '')
       + (selectedRegistry ? ' AND "Breseq_registry_ID" = ?' : '');
 
-    const [sampleRows, mutRows, allExperiments, odRows] = await Promise.all([
+    const [sampleRows, mutRows, allExperiments, odRows, curveRows, cnRows] = await Promise.all([
       runQuery<SeqSampleRow>(sampleSql, filterParams),
       runQuery<MutationRawRow>(mutSql, filterParams),
       runQuery<{ name: string }>(ALL_EXPERIMENTS_SQL),
       runQuery<{ seq_sample: string; od_type: string; od_source: string }>(OD_MEASUREMENTS_SQL),
+      runQuery<{ sample_name: string; transfer: number | null; reading: string | null; od: number | null; timepoint: number | null; datetime: string | null }>(ROBOTIC_OD_SQL),
+      runQuery<{ seq_sample: string; region_name: string | null; region_cn: number | null }>(COPY_NUMBERS_SQL),
     ]);
 
-    // seq_sample → list of OD source references
+    // seq_sample → list of OD source references (fallback filename pointers)
     const odBySample = new Map<string, { type: string; source: string }[]>();
     for (const r of odRows) {
       const list = odBySample.get(r.seq_sample) ?? [];
@@ -351,12 +432,57 @@ export async function GET(req: NextRequest) {
       odBySample.set(r.seq_sample, list);
     }
 
+    // Build real growth curves from Robotic_OD, keyed by `${lineage}\u0000${transfer}`.
+    // Each point is { t, od } where t is hours (timepoint) when available, else
+    // the ordinal reading index. We sort by t and de-dupe repeated t values
+    // (keep the last) so the sparkline draws a clean monotonic-in-time series.
+    type CurvePoint = { t: number; od: number; sort: number };
+    const curveByKey = new Map<string, CurvePoint[]>();
+    for (const r of curveRows) {
+      if (r.transfer === null || r.transfer === undefined) continue;
+      if (typeof r.od !== 'number' || !Number.isFinite(r.od)) continue;
+      const idx = readingIndex(r.reading);
+      // sort key: prefer the ordinal reading index (stable, gap-free) for
+      // ordering; fall back to timepoint when the reading didn't parse.
+      const sort = idx !== null ? idx : (typeof r.timepoint === 'number' ? r.timepoint : 0);
+      // x value the chart shows: hours when we have them, else the ordinal index.
+      const t = typeof r.timepoint === 'number' && Number.isFinite(r.timepoint)
+        ? r.timepoint
+        : (idx !== null ? Math.max(0, idx) : 0);
+      const key = `${r.sample_name}\u0000${r.transfer}`;
+      const list = curveByKey.get(key) ?? [];
+      list.push({ t, od: r.od, sort });
+      curveByKey.set(key, list);
+    }
+    // Finalize: sort each curve by its sort key, then collapse to { t, od }.
+    const finalizedCurves = new Map<string, { t: number; od: number }[]>();
+    for (const [key, pts] of curveByKey) {
+      pts.sort((a, b) => a.sort - b.sort);
+      finalizedCurves.set(key, pts.map(p => ({ t: p.t, od: p.od })));
+    }
+
+    // seq_sample → copy number by region. Region_CN keyed for fast lookup when
+    // emitting comparative rows below.
+    const cnBySampleRegion = new Map<string, Map<string, number>>();
+    for (const r of cnRows) {
+      if (!r.region_name || typeof r.region_cn !== 'number' || !Number.isFinite(r.region_cn)) continue;
+      const byRegion = cnBySampleRegion.get(r.seq_sample) ?? new Map<string, number>();
+      byRegion.set(r.region_name, r.region_cn);
+      cnBySampleRegion.set(r.seq_sample, byRegion);
+    }
+
     const samples: MutationSample[] = sampleRows.map(r => {
       const { transfer, selection } = parseSeqSampleSuffix(r.seq_sample);
       const replicate = deriveReplicate(r.sample_name);
       const donor_dna = deriveDonorDna(r.sample_name, r.transforming_dna);
       const popOrColony = (r.pop_or_colony_raw && r.pop_or_colony_raw.trim()) || selection;
-      const od_sources = odBySample.get(r.seq_sample);
+      // Real growth curve from Robotic_OD (joined by lineage + transfer).
+      const lt = parseLineageTransfer(r.seq_sample);
+      const growth_curve = lt ? finalizedCurves.get(`${lt.lineage}\u0000${lt.transfer}`) : undefined;
+      // Only fall back to the filename pointer when there's no numeric curve.
+      const od_sources = (!growth_curve || growth_curve.length < 2)
+        ? odBySample.get(r.seq_sample)
+        : undefined;
       return {
         id: r.seq_sample,
         name: r.seq_sample,
@@ -368,6 +494,7 @@ export async function GET(req: NextRequest) {
         strain: r.strain ?? undefined,
         donor_dna,
         selection_note: describeSelection(popOrColony ?? undefined, r.notes),
+        growth_curve: growth_curve && growth_curve.length >= 2 ? growth_curve : undefined,
         od_sources: od_sources && od_sources.length > 0 ? od_sources : undefined,
       };
     });
@@ -420,10 +547,61 @@ export async function GET(req: NextRequest) {
       return clean;
     });
 
+    // Copy number comparative rows. One row per amplified region (dgoA-star,
+    // verC); values are Region_CN keyed by seq_sample, restricted to samples in
+    // the current dataset. These ride alongside the SNP-frequency rows and the
+    // UI surfaces them via the copy_number metric filter + emerald color scale.
+    // dgoA-star is the headline amplification nspahr asked to display; verC is
+    // included when present so the two regions can be compared.
+    const REGION_LABELS: Record<string, { gene: string; product: string }> = {
+      'dgoA-star': { gene: 'dgoA*', product: 'dgoA amplified region (copy number)' },
+      'verC': { gene: 'verC', product: 'verC amplified region (copy number)' },
+    };
+    const cnRowsByRegion = new Map<string, MutationRow>();
+    let cnSamplesSeen = 0;
+    for (const [seqSample, byRegion] of cnBySampleRegion) {
+      if (!sampleIds.has(seqSample)) continue;
+      cnSamplesSeen++;
+      for (const [region, cnVal] of byRegion) {
+        let row = cnRowsByRegion.get(region);
+        if (!row) {
+          const label = REGION_LABELS[region] ?? { gene: region, product: `${region} (copy number)` };
+          row = {
+            id: `copy_number.${region}`,
+            gene: label.gene,
+            variant: 'copy number',
+            type: 'copy_number',
+            metric: 'copy_number',
+            values: {},
+            snp_type: 'copy_number',
+            gene_product: label.product,
+          };
+          cnRowsByRegion.set(region, row);
+        }
+        row.values[seqSample] = cnVal;
+      }
+    }
+    // Surface dgoA-star first (the requested region), then verC, then any others.
+    const cnOrder = ['dgoA-star', 'verC'];
+    const copyNumberRows = [...cnRowsByRegion.entries()]
+      .sort((a, b) => {
+        const ai = cnOrder.indexOf(a[0]); const bi = cnOrder.indexOf(b[0]);
+        return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
+      })
+      .map(([, row]) => row);
+    mutations.push(...copyNumberRows);
+
     if (samples.length === 0) warnings.push('No sequenced samples found in the database for this filter.');
     if (mutations.length === 0) warnings.push('No mutation calls found in the database for this filter.');
     if (droppedNoSampleMatch > 0) {
       warnings.push(`${droppedNoSampleMatch} mutation rows referenced seq samples not present in the sample set — skipped.`);
+    }
+    const samplesWithCurve = samples.filter(s => s.growth_curve && s.growth_curve.length >= 2).length;
+    if (samplesWithCurve > 0) {
+      warnings.push(`Loaded robotic OD growth curves for ${samplesWithCurve} of ${samples.length} samples (Robotic_OD).`);
+    }
+    if (copyNumberRows.length > 0) {
+      warnings.push(`Loaded copy number data for ${cnSamplesSeen} samples across ${copyNumberRows.length} region${copyNumberRows.length === 1 ? '' : 's'} (Copy_numbers). Switch the Comparative metric to "copy number" to view.`);
     }
 
     return NextResponse.json({
@@ -434,6 +612,14 @@ export async function GET(req: NextRequest) {
       selectedRegistry,
       warnings,
       source: { driver: getDbType(), table: 'Mutations', rowsScanned },
+      stats: {
+        sampleCount: samples.length,
+        mutationRowCount: mutations.length,
+        frequencyRowCount: mutations.length - copyNumberRows.length,
+        cnRegionCount: copyNumberRows.length,
+        cnSampleCount: cnSamplesSeen,
+        curveCount: samplesWithCurve,
+      },
     } satisfies MutationDataset);
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'Failed to query mutation dataset';

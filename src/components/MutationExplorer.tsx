@@ -5,7 +5,7 @@ import {
   CheckSquare, Square, Search, X, AlertCircle, FlaskConical, GitCompare, RefreshCw,
   ArrowUpDown, ArrowUp, ArrowDown, Filter, Download, Info,
   ChevronDown, ChevronRight, Eye, EyeOff, FoldVertical, UnfoldVertical,
-  BarChart3,
+  BarChart3, TrendingUp, Dna,
 } from 'lucide-react';
 import BarcodeCharts from './BarcodeCharts';
 import { clsx, type ClassValue } from 'clsx';
@@ -57,9 +57,17 @@ interface MutationDataset {
   registries?: RegistrySummary[];
   selectedRegistry?: string | null;
   warnings?: string[];
+  stats?: {
+    sampleCount: number;
+    mutationRowCount: number;
+    frequencyRowCount: number;
+    cnRegionCount: number;
+    cnSampleCount: number;
+    curveCount: number;
+  };
 }
 
-type Tab = 'samples' | 'compare' | 'barcodes';
+type Tab = 'samples' | 'compare' | 'copynumber' | 'barcodes';
 
 const SELECTED_KEY = 'lims:mutation:selected';
 const TAB_KEY = 'lims:mutation:tab';
@@ -206,13 +214,17 @@ export default function MutationExplorer() {
   const [search, setSearch] = useState('');
   const [experiment, setExperiment] = useState<string>(''); // '' = all experiments
   const [registry, setRegistry] = useState<string>('');     // '' = let the API pick the modal registry
+  // When the CN callout is clicked we jump to Comparative AND force its metric
+  // filter to copy_number. A bump counter lets the panel react even if the user
+  // later changes the filter and clicks the callout again.
+  const [forceMetric, setForceMetric] = useState<{ metric: 'copy_number'; nonce: number } | null>(null);
 
   useEffect(() => {
     try {
       const s = localStorage.getItem(SELECTED_KEY);
       if (s) setSelected(new Set(JSON.parse(s)));
       const t = localStorage.getItem(TAB_KEY);
-      if (t === 'compare' || t === 'samples' || t === 'barcodes') setTab(t);
+      if (t === 'compare' || t === 'samples' || t === 'barcodes' || t === 'copynumber') setTab(t);
       const e = localStorage.getItem(EXPERIMENT_KEY);
       if (e !== null) setExperiment(e);
       const r = localStorage.getItem(REGISTRY_KEY);
@@ -276,6 +288,12 @@ export default function MutationExplorer() {
               "ml-1.5 px-1.5 py-0.5 rounded text-[10px] tabular-nums",
               selected.size > 0 ? "bg-blue-600 text-white" : "bg-slate-200 dark:bg-gray-700 text-slate-700 dark:text-gray-300"
             )}>{selected.size}</span>
+          </TabButton>
+          <TabButton active={tab === 'copynumber'} onClick={() => setTab('copynumber')} icon={<Dna className="w-3.5 h-3.5" />}>
+            Copy Number
+            {(data?.stats?.cnRegionCount ?? 0) > 0 && (
+              <span className="ml-1.5 px-1.5 py-0.5 rounded text-[10px] tabular-nums bg-emerald-600 text-white">{data!.stats!.cnRegionCount}</span>
+            )}
           </TabButton>
           <TabButton active={tab === 'barcodes'} onClick={() => setTab('barcodes')} icon={<BarChart3 className="w-3.5 h-3.5" />}>
             Barcode Charts
@@ -350,6 +368,36 @@ export default function MutationExplorer() {
         </div>
       </div>
 
+      {/* Dataset summary bar — always tells the researcher what's loaded right now. */}
+      {!error && data?.stats && (
+        <div className="flex items-center gap-3 flex-wrap px-3 py-1.5 border-b border-slate-200 dark:border-gray-700 bg-slate-50/40 dark:bg-gray-800/40 text-[11px] text-slate-600 dark:text-gray-300">
+          <StatPill label="samples" value={data.stats.sampleCount} />
+          <StatPill label="mutations" value={data.stats.frequencyRowCount} />
+          <StatPill label="OD curves" value={data.stats.curveCount} accent={data.stats.curveCount > 0 ? 'blue' : undefined} />
+          <StatPill
+            label={data.stats.cnRegionCount === 1 ? 'copy-number region' : 'copy-number regions'}
+            value={data.stats.cnRegionCount}
+            accent={data.stats.cnRegionCount > 0 ? 'emerald' : undefined}
+          />
+          {data.stats.cnSampleCount > 0 && (
+            <span className="text-slate-400 dark:text-gray-500 tabular-nums">
+              ({data.stats.cnSampleCount} samples have copy-number data)
+            </span>
+          )}
+          {/* Prominent, one-click discovery for the copy-number feature. */}
+          {data.stats.cnRegionCount > 0 && tab !== 'copynumber' && (
+            <button
+              onClick={() => { setTab('copynumber'); }}
+              className="ml-auto flex items-center gap-1.5 px-2.5 py-1 rounded bg-emerald-600 text-white hover:bg-emerald-700 text-[11px] font-medium shadow-sm"
+              title="Open the dedicated copy-number trend view"
+            >
+              <Dna className="w-3.5 h-3.5" />
+              View copy-number data →
+            </button>
+          )}
+        </div>
+      )}
+
       {error && (
         <div className="flex items-start gap-2 m-3 p-2.5 bg-amber-50 dark:bg-amber-900/20 text-amber-800 dark:text-amber-200 text-[12px] rounded border border-amber-200 dark:border-amber-800">
           <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
@@ -396,6 +444,20 @@ export default function MutationExplorer() {
             setSelected={setSelected}
             onJumpToSelection={() => setTab('samples')}
             loading={loading}
+            forceMetric={forceMetric}
+          />
+        </div>
+        <div className={cn('flex-1 min-h-0 flex flex-col', tab === 'copynumber' ? '' : 'hidden')}>
+          <CopyNumberPanel
+            samples={data?.samples ?? []}
+            mutations={data?.mutations ?? []}
+            loading={loading}
+            cnRegionCount={data?.stats?.cnRegionCount ?? 0}
+            onCompareCN={() => {
+              setForceMetric({ metric: 'copy_number', nonce: Date.now() });
+              setTab('compare');
+            }}
+            onPickSamples={() => setTab('samples')}
           />
         </div>
         <div className={cn('flex-1 min-h-0 flex flex-col', tab === 'barcodes' ? '' : 'hidden')}>
@@ -915,11 +977,12 @@ type SortKey = 'gene' | 'variant' | 'type' | 'position' | 'maxFreq' | 'spread' |
 type SortDir = 'asc' | 'desc';
 
 function ComparativePanel({
-  samples, mutations, selected, setSelected, onJumpToSelection, loading,
+  samples, mutations, selected, setSelected, onJumpToSelection, loading, forceMetric,
 }: {
   samples: MutationSample[]; mutations: MutationRow[];
   selected: Set<string>; setSelected: (s: Set<string>) => void;
   onJumpToSelection: () => void; loading: boolean;
+  forceMetric?: { metric: 'copy_number'; nonce: number } | null;
 }) {
   const [mutFilter, setMutFilter] = useState('');
   const [metricFilter, setMetricFilter] = useState<'all' | 'frequency' | 'copy_number'>('all');
@@ -970,6 +1033,17 @@ function ComparativePanel({
     if (next.has(t)) next.delete(t); else next.add(t);
     setSnpTypes(next);
   };
+
+  // External request (from the Copy Number tab "compare these" action) to force
+  // the metric filter to copy_number. Keyed on nonce so repeated clicks re-apply
+  // even after the user manually changes the filter in between.
+  const lastForceNonce = React.useRef<number | null>(null);
+  useEffect(() => {
+    if (forceMetric && forceMetric.nonce !== lastForceNonce.current) {
+      lastForceNonce.current = forceMetric.nonce;
+      setMetricFilter(forceMetric.metric);
+    }
+  }, [forceMetric]);
 
   // Distinct mutation classes present in this dataset (in research-priority order).
   // We filter on the rendered `m.type` (which is snp_type || mutation_category || base_type),
@@ -1452,5 +1526,315 @@ function SortChip({ label, active, dir, onClick }: { label: string; active: bool
       <Icon className="w-3 h-3" />
       {label}
     </button>
+  );
+}
+
+/* ---------------- Dataset summary pill ---------------- */
+
+function StatPill({ label, value, accent }: { label: string; value: number; accent?: 'blue' | 'emerald' }) {
+  const tone =
+    accent === 'emerald'
+      ? 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300'
+      : accent === 'blue'
+        ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300'
+        : 'bg-slate-200 dark:bg-gray-700 text-slate-700 dark:text-gray-300';
+  return (
+    <span className="flex items-center gap-1.5">
+      <span className={cn('inline-block px-1.5 py-0.5 rounded text-[10.5px] font-semibold tabular-nums', tone)}>
+        {value.toLocaleString()}
+      </span>
+      <span className="text-slate-500 dark:text-gray-400">{label}</span>
+    </span>
+  );
+}
+
+/* ---------------- Copy Number panel ----------------
+   Dedicated view for copy-number data (the dgoA amplification story Natasha asked
+   for). Copy-number MutationRows from the API carry metric === 'copy_number' and a
+   values map keyed by seq-sample id. We pivot those into per-lineage trends across
+   transfers so the amplification timecourse is visible at a glance. */
+
+// Strip the trailing ".T<n>.<selection>" so replicate timepoints collapse to one lineage.
+function lineageOf(name: string): string {
+  return name.replace(/\.T-?\d+(\.[A-Za-z0-9]+)?$/i, '').replace(/\.contam$/i, '') || name;
+}
+
+const CN_LINE_COLORS = [
+  '#059669', '#2563eb', '#d97706', '#7c3aed', '#dc2626',
+  '#0891b2', '#db2777', '#65a30d', '#475569', '#c026d3',
+];
+
+function CopyNumberPanel({
+  samples, mutations, loading, cnRegionCount, onCompareCN, onPickSamples,
+}: {
+  samples: MutationSample[];
+  mutations: MutationRow[];
+  loading: boolean;
+  cnRegionCount: number;
+  onCompareCN: () => void;
+  onPickSamples: () => void;
+}) {
+  const cnRows = useMemo(() => mutations.filter(m => m.metric === 'copy_number'), [mutations]);
+  const [region, setRegion] = useState<string>('');
+
+  // Default the region selector to the first CN row once data arrives.
+  useEffect(() => {
+    if (cnRows.length > 0 && !cnRows.some(r => r.id === region)) {
+      setRegion(cnRows[0].id);
+    }
+  }, [cnRows, region]);
+
+  const sampleById = useMemo(() => new Map(samples.map(s => [s.id, s])), [samples]);
+  const activeRow = useMemo(() => cnRows.find(r => r.id === region) ?? cnRows[0], [cnRows, region]);
+
+  // Build per-lineage series: [{ lineage, points: [{transfer, value, name}], color }]
+  const series = useMemo(() => {
+    if (!activeRow) return [];
+    const byLineage = new Map<string, { transfer: number; value: number; name: string }[]>();
+    for (const [sid, value] of Object.entries(activeRow.values)) {
+      if (typeof value !== 'number' || Number.isNaN(value)) continue;
+      const s = sampleById.get(sid);
+      const lineage = lineageOf(s?.name ?? sid);
+      const transfer = typeof s?.transfer === 'number' ? s.transfer : NaN;
+      if (!byLineage.has(lineage)) byLineage.set(lineage, []);
+      byLineage.get(lineage)!.push({ transfer, value, name: s?.name ?? sid });
+    }
+    const out = [...byLineage.entries()]
+      .map(([lineage, pts]) => ({
+        lineage,
+        points: pts.sort((a, b) => {
+          if (Number.isNaN(a.transfer) && Number.isNaN(b.transfer)) return a.name.localeCompare(b.name);
+          if (Number.isNaN(a.transfer)) return 1;
+          if (Number.isNaN(b.transfer)) return -1;
+          return a.transfer - b.transfer;
+        }),
+      }))
+      .sort((a, b) => a.lineage.localeCompare(b.lineage));
+    return out.map((s, i) => ({ ...s, color: CN_LINE_COLORS[i % CN_LINE_COLORS.length] }));
+  }, [activeRow, sampleById]);
+
+  const allValues = useMemo(() => series.flatMap(s => s.points.map(p => p.value)), [series]);
+  const hasTransfers = useMemo(() => series.some(s => s.points.some(p => !Number.isNaN(p.transfer))), [series]);
+
+  const summary = useMemo(() => {
+    if (allValues.length === 0) return null;
+    const min = Math.min(...allValues);
+    const max = Math.max(...allValues);
+    const mean = allValues.reduce((a, b) => a + b, 0) / allValues.length;
+    return { min, max, mean, n: allValues.length, lineages: series.length };
+  }, [allValues, series.length]);
+
+  const exportCsv = () => {
+    if (!activeRow) return;
+    const rows: string[][] = [['region', 'lineage', 'sample', 'transfer', 'copy_number']];
+    for (const s of series) {
+      for (const p of s.points) {
+        rows.push([activeRow.gene, s.lineage, p.name, Number.isNaN(p.transfer) ? '' : String(p.transfer), p.value.toFixed(3)]);
+      }
+    }
+    const csv = rows.map(r => r.map(c => (/[",\n]/.test(c) ? `"${c.replace(/"/g, '""')}"` : c)).join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `copy-number-${activeRow.gene}.csv`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  if (loading && cnRows.length === 0) {
+    return <div className="flex-1 flex items-center justify-center text-slate-400 dark:text-gray-500 text-sm">Loading copy-number data…</div>;
+  }
+
+  if (cnRegionCount === 0 || cnRows.length === 0) {
+    return (
+      <div className="flex-1 flex flex-col items-center justify-center gap-3 p-6 text-center text-slate-500 dark:text-gray-400 text-sm">
+        <Dna className="w-10 h-10 text-slate-300 dark:text-gray-600" />
+        <p className="max-w-md">
+          No copy-number data in the current view. Copy numbers come from the
+          {' '}<span className="font-mono">Copy_numbers</span> LIMS table and only exist for some
+          experiments / breseq registries (e.g. the <span className="font-mono">dgoA*</span> amplification series).
+        </p>
+        <p className="text-[12px]">Try switching the <span className="font-semibold">Experiment</span> or <span className="font-semibold">Registry</span> dropdown above to one that contains sequenced copy-number samples.</p>
+        <button onClick={onPickSamples} className="px-3 py-1.5 text-[12px] bg-blue-600 text-white rounded hover:bg-blue-700">
+          Go to Sample Selection
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col h-full min-h-0">
+      {/* Controls */}
+      <div className="px-3 py-2 border-b border-slate-200 dark:border-gray-700 bg-white dark:bg-gray-800 flex items-center gap-2 flex-wrap">
+        <label className="text-[11.5px] text-slate-600 dark:text-gray-300 flex items-center gap-1.5">
+          Region
+          <select
+            value={region}
+            onChange={e => setRegion(e.target.value)}
+            className="text-[12px] border border-slate-300 dark:border-gray-600 rounded px-2 py-1 bg-white dark:bg-gray-700 dark:text-gray-100 outline-none"
+          >
+            {cnRows.map(r => (
+              <option key={r.id} value={r.id}>{r.gene}{r.gene_product ? ` — ${r.gene_product}` : ''}</option>
+            ))}
+          </select>
+        </label>
+        <div className="text-[11px] text-slate-500 dark:text-gray-400 tabular-nums">
+          {series.length} lineage{series.length === 1 ? '' : 's'} · {allValues.length} measurements
+        </div>
+        <div className="ml-auto flex items-center gap-2">
+          <button
+            onClick={onCompareCN}
+            className="flex items-center gap-1 px-2 py-1 text-[11px] text-slate-600 dark:text-gray-300 border border-slate-300 dark:border-gray-600 rounded hover:bg-slate-50 dark:hover:bg-gray-700"
+            title="Open the Comparative table filtered to copy-number rows"
+          >
+            <GitCompare className="w-3 h-3" /> Compare table
+          </button>
+          <button
+            onClick={exportCsv}
+            className="flex items-center gap-1 px-2 py-1 text-[11px] text-slate-600 dark:text-gray-300 border border-slate-300 dark:border-gray-600 rounded hover:bg-slate-50 dark:hover:bg-gray-700"
+            title="Export this region's copy numbers as CSV"
+          >
+            <Download className="w-3 h-3" /> CSV
+          </button>
+        </div>
+      </div>
+
+      {/* Summary cards */}
+      {summary && (
+        <div className="px-3 py-2 border-b border-slate-200 dark:border-gray-700 bg-slate-50/40 dark:bg-gray-800/40 flex items-center gap-2 flex-wrap text-[11px]">
+          <SummaryCard label="region" value={activeRow?.gene ?? ''} mono />
+          <SummaryCard label="min CN" value={summary.min.toFixed(2)} />
+          <SummaryCard label="mean CN" value={summary.mean.toFixed(2)} />
+          <SummaryCard label="max CN" value={summary.max.toFixed(2)} accent />
+          <SummaryCard label="lineages" value={String(summary.lineages)} />
+          <SummaryCard label="measurements" value={String(summary.n)} />
+        </div>
+      )}
+
+      {/* Trend chart */}
+      <div className="flex-1 min-h-0 overflow-auto p-4">
+        {series.length === 0 ? (
+          <div className="flex items-center justify-center h-full text-slate-400 dark:text-gray-500 text-sm">No measurements for this region.</div>
+        ) : (
+          <CopyNumberChart series={series} hasTransfers={hasTransfers} regionLabel={activeRow?.gene ?? ''} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function SummaryCard({ label, value, accent, mono }: { label: string; value: string; accent?: boolean; mono?: boolean }) {
+  return (
+    <div className={cn(
+      'flex flex-col px-2.5 py-1 rounded border',
+      accent
+        ? 'border-emerald-300 dark:border-emerald-700 bg-emerald-50 dark:bg-emerald-900/20'
+        : 'border-slate-200 dark:border-gray-700 bg-white dark:bg-gray-800'
+    )}>
+      <span className="text-[9.5px] uppercase tracking-wider text-slate-400 dark:text-gray-500">{label}</span>
+      <span className={cn('text-[13px] font-semibold tabular-nums text-slate-800 dark:text-gray-100', mono && 'font-mono')}>{value}</span>
+    </div>
+  );
+}
+
+// Responsive-ish SVG line chart: copy number (y) vs transfer (x). When transfers
+// aren't available we fall back to ordinal index so the series still renders.
+function CopyNumberChart({
+  series, hasTransfers, regionLabel,
+}: {
+  series: { lineage: string; color: string; points: { transfer: number; value: number; name: string }[] }[];
+  hasTransfers: boolean;
+  regionLabel: string;
+}) {
+  const W = 760, H = 380, padL = 48, padR = 16, padT = 16, padB = 44;
+  const plotW = W - padL - padR;
+  const plotH = H - padT - padB;
+
+  const xVals: number[] = [];
+  const yVals: number[] = [];
+  for (const s of series) {
+    s.points.forEach((p, i) => {
+      xVals.push(hasTransfers && !Number.isNaN(p.transfer) ? p.transfer : i);
+      yVals.push(p.value);
+    });
+  }
+  const xMin = xVals.length ? Math.min(...xVals) : 0;
+  const xMax = xVals.length ? Math.max(...xVals) : 1;
+  const yMax = Math.max(1, yVals.length ? Math.max(...yVals) : 1) * 1.1;
+  const yMin = 0;
+
+  const sx = (x: number) => padL + ((x - xMin) / Math.max(1e-6, xMax - xMin)) * plotW;
+  const sy = (y: number) => padT + plotH - ((y - yMin) / Math.max(1e-6, yMax - yMin)) * plotH;
+
+  // Y gridlines at integer copy numbers (and 0).
+  const yTicks: number[] = [];
+  for (let v = 0; v <= yMax; v += yMax > 6 ? 2 : 1) yTicks.push(v);
+
+  // X ticks: integer transfers within range (capped to keep labels readable).
+  const xTicks: number[] = [];
+  const span = xMax - xMin;
+  const step = span <= 12 ? 1 : Math.ceil(span / 12);
+  for (let v = Math.ceil(xMin); v <= xMax; v += step) xTicks.push(v);
+
+  return (
+    <div className="flex flex-col gap-3">
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full max-w-3xl mx-auto" role="img" aria-label={`Copy number trend for ${regionLabel}`}>
+        {/* baseline CN=1 reference (single-copy) */}
+        {yMin <= 1 && yMax >= 1 && (
+          <line x1={padL} x2={W - padR} y1={sy(1)} y2={sy(1)} className="stroke-slate-300 dark:stroke-gray-600" strokeWidth="1" strokeDasharray="4 3" />
+        )}
+        {/* gridlines + y labels */}
+        {yTicks.map(v => (
+          <g key={`y${v}`}>
+            <line x1={padL} x2={W - padR} y1={sy(v)} y2={sy(v)} className="stroke-slate-100 dark:stroke-gray-700/60" strokeWidth="1" />
+            <text x={padL - 6} y={sy(v) + 3} textAnchor="end" className="fill-slate-400 dark:fill-gray-500 text-[10px]">{v}</text>
+          </g>
+        ))}
+        {/* x axis labels */}
+        {xTicks.map(v => (
+          <text key={`x${v}`} x={sx(v)} y={H - padB + 16} textAnchor="middle" className="fill-slate-400 dark:fill-gray-500 text-[10px]">
+            {hasTransfers ? `T${v}` : v}
+          </text>
+        ))}
+        <text x={padL + plotW / 2} y={H - 6} textAnchor="middle" className="fill-slate-500 dark:fill-gray-400 text-[11px]">
+          {hasTransfers ? 'Transfer' : 'Sample (ordinal)'}
+        </text>
+        <text x={14} y={padT + plotH / 2} textAnchor="middle" transform={`rotate(-90 14 ${padT + plotH / 2})`} className="fill-slate-500 dark:fill-gray-400 text-[11px]">
+          Copy number
+        </text>
+        {/* series */}
+        {series.map(s => {
+          const pts = s.points.map((p, i) => ({
+            x: sx(hasTransfers && !Number.isNaN(p.transfer) ? p.transfer : i),
+            y: sy(p.value),
+            raw: p,
+          }));
+          const path = pts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(' ');
+          return (
+            <g key={s.lineage}>
+              <path d={path} fill="none" stroke={s.color} strokeWidth="1.8" />
+              {pts.map((p, i) => (
+                <circle key={i} cx={p.x} cy={p.y} r="2.6" fill={s.color}>
+                  <title>{`${s.lineage} · ${p.raw.name}\n${hasTransfers && !Number.isNaN(p.raw.transfer) ? `T${p.raw.transfer}` : `#${i + 1}`} · CN ${p.raw.value.toFixed(2)}`}</title>
+                </circle>
+              ))}
+            </g>
+          );
+        })}
+      </svg>
+      {/* legend */}
+      <div className="flex flex-wrap gap-x-4 gap-y-1.5 justify-center max-w-3xl mx-auto">
+        {series.map(s => {
+          const last = s.points[s.points.length - 1];
+          return (
+            <span key={s.lineage} className="flex items-center gap-1.5 text-[11px] text-slate-600 dark:text-gray-300">
+              <span className="inline-block w-3 h-0.5 rounded" style={{ backgroundColor: s.color }} />
+              <span className="font-mono">{s.lineage}</span>
+              {last && <span className="text-slate-400 dark:text-gray-500 tabular-nums">→ {last.value.toFixed(2)}×</span>}
+            </span>
+          );
+        })}
+      </div>
+    </div>
   );
 }
