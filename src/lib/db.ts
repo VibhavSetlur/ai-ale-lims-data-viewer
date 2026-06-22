@@ -47,6 +47,12 @@ let sqliteDb: Database.Database | null = null;
 let mysqlPool: mysql.Pool | null = null;
 let configVersion = 0;
 
+// Per-path caches for a read-only mirror (schema + unfiltered row counts are
+// stable within a process). Cleared when the connection/path changes.
+let tablesCache: string[] | null = null;
+let tablesCacheKey = '';
+const countCache = new Map<string, number>();
+
 function needsPoolReset(partial: Partial<DbConfig>): boolean {
   return 'mysqlHost' in partial || 'mysqlPort' in partial || 'mysqlUser' in partial ||
          'mysqlPassword' in partial || 'mysqlDatabase' in partial;
@@ -78,6 +84,9 @@ function closeConnections(): void {
     try { mysqlPool.end(); } catch {}
     mysqlPool = null;
   }
+  tablesCache = null;
+  tablesCacheKey = '';
+  countCache.clear();
 }
 
 let lastSqlitePath = '';
@@ -85,6 +94,24 @@ function getSqliteDb(): Database.Database {
   if (!sqliteDb || lastSqlitePath !== config.sqlitePath) {
     if (sqliteDb) { try { sqliteDb.close(); } catch {} }
     sqliteDb = new Database(config.sqlitePath, { readonly: true, fileMustExist: false });
+    // changing the file invalidates per-path caches
+    tablesCache = null;
+    tablesCacheKey = '';
+    countCache.clear();
+    // Performance pragmas for a large (250MB+) read-only mirror. Without these,
+    // every COUNT(*)/scan hits disk page-by-page and a 50-row query can take
+    // 30-60s on a cold cache. mmap + a generous page cache keep hot pages in
+    // memory so repeat queries are fast.
+    try {
+      sqliteDb.pragma('journal_mode = OFF');        // read-only: no journal needed
+      sqliteDb.pragma('synchronous = OFF');
+      sqliteDb.pragma('temp_store = MEMORY');
+      sqliteDb.pragma('cache_size = -262144');      // ~256MB page cache (negative = KiB)
+      sqliteDb.pragma('mmap_size = 536870912');     // 512MB memory-mapped I/O
+      sqliteDb.pragma('busy_timeout = 5000');
+    } catch {
+      // Pragmas are best-effort; a failure here must not break queries.
+    }
     lastSqlitePath = config.sqlitePath;
   }
   return sqliteDb;
@@ -150,11 +177,17 @@ export async function getTables(): Promise<string[]> {
     return rows.map(r => r.name);
   }
 
+  // Cache the table list per sqlite path: a read-only mirror's schema never
+  // changes within a process, and this is called on every data/schema/distinct
+  // request. Avoids a sqlite_master scan per request.
+  if (tablesCache && tablesCacheKey === config.sqlitePath) return tablesCache;
   const database = getSqliteDb();
   const stmt = database.prepare(
     "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
   );
-  return (stmt.all() as { name: string }[]).map(t => t.name);
+  tablesCache = (stmt.all() as { name: string }[]).map(t => t.name);
+  tablesCacheKey = config.sqlitePath;
+  return tablesCache;
 }
 
 export async function getTablesWithCounts(): Promise<TableInfo[]> {
@@ -176,8 +209,15 @@ export async function getTablesWithCounts(): Promise<TableInfo[]> {
   const database = getSqliteDb();
   for (const t of tables) {
     try {
-      const row = database.prepare(`SELECT COUNT(*) as c FROM ${quoteIdent(t)}`).get() as { c: number };
-      results.push({ name: t, rowCount: Number(row.c) || 0 });
+      let c: number;
+      if (countCache.has(t)) {
+        c = countCache.get(t)!;
+      } else {
+        const row = database.prepare(`SELECT COUNT(*) as c FROM ${quoteIdent(t)}`).get() as { c: number };
+        c = Number(row.c) || 0;
+        countCache.set(t, c);
+      }
+      results.push({ name: t, rowCount: c });
     } catch {
       results.push({ name: t, rowCount: 0 });
     }
@@ -451,10 +491,21 @@ export async function getTableData({
   const dataQuery = `SELECT ${projection} FROM ${qi} ${whereClause} ${orderClause} LIMIT ? OFFSET ?`;
   const countQuery = `SELECT COUNT(*) as count FROM ${qi} ${whereClause}`;
 
-  const countStmt = database.prepare(countQuery);
   const dataStmt = database.prepare(dataQuery);
 
-  const totalCount = (countStmt.get(...params) as { count: number }).count;
+  // COUNT(*) is a full scan on big tables (Mutations ~223k, Robotic_OD ~141k).
+  // For unfiltered queries the count is stable for a read-only mirror, so cache
+  // it per table and reuse across pagination/sort (sort/offset don't change it).
+  const isUnfiltered = params.length === 0 && whereClause === '';
+  let totalCount: number;
+  if (isUnfiltered && countCache.has(tableName)) {
+    totalCount = countCache.get(tableName)!;
+  } else {
+    const countStmt = database.prepare(countQuery);
+    totalCount = (countStmt.get(...params) as { count: number }).count;
+    if (isUnfiltered) countCache.set(tableName, totalCount);
+  }
+
   const rows = dataStmt.all(...params, effectiveLimit, effectiveOffset);
 
   return {
