@@ -4,7 +4,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import {
   CheckSquare, Square, Search, X, AlertCircle, FlaskConical, GitCompare, RefreshCw,
   ArrowUpDown, ArrowUp, ArrowDown, Filter, Download, Info,
-  ChevronDown, ChevronRight, Eye, EyeOff, FoldVertical, UnfoldVertical,
+  ChevronDown, ChevronRight, ChevronUp, Eye, EyeOff, FoldVertical, UnfoldVertical,
   BarChart3, TrendingUp, Dna,
 } from 'lucide-react';
 import BarcodeCharts from './BarcodeCharts';
@@ -167,7 +167,7 @@ function GrowthCurveSparkline({
   const sx = (x: number) => pad + ((x - xMin) / Math.max(1e-6, xMax - xMin)) * (width - pad * 2);
   const sy = (y: number) => height - pad - ((y - yMin) / Math.max(1e-6, yMax - yMin)) * (height - pad * 2);
   const path = data.map((d, i) => `${i === 0 ? 'M' : 'L'} ${sx(d.t).toFixed(1)} ${sy(d.od).toFixed(1)}`).join(' ');
-  const tooltip = `${data.length} points · OD ${Math.min(...ys).toFixed(2)}→${Math.max(...ys).toFixed(2)} over t=${Math.min(...xs)}–${Math.max(...xs)}`;
+  const tooltip = `${data.length} points · OD ${Math.min(...ys).toFixed(2)}→${Math.max(...ys).toFixed(2)} over t=${Math.min(...xs).toFixed(1)}–${Math.max(...xs).toFixed(1)}h`;
   return (
     <svg width={width} height={height} className="block" aria-label={tooltip}>
       <title>{tooltip}</title>
@@ -218,6 +218,7 @@ export default function MutationExplorer() {
   // filter to copy_number. A bump counter lets the panel react even if the user
   // later changes the filter and clicks the callout again.
   const [forceMetric, setForceMetric] = useState<{ metric: 'copy_number'; nonce: number } | null>(null);
+  const [showNotes, setShowNotes] = useState(false);
 
   useEffect(() => {
     try {
@@ -368,31 +369,42 @@ export default function MutationExplorer() {
         </div>
       </div>
 
-      {/* Dataset summary bar — always tells the researcher what's loaded right now. */}
+      {/* Compact context strip: stats + dataset-notes toggle in ONE thin row,
+          so the panel below gets the vertical space instead of stacked banners. */}
       {!error && data?.stats && (
-        <div className="flex items-center gap-3 flex-wrap px-3 py-1.5 border-b border-slate-200 dark:border-gray-700 bg-slate-50/40 dark:bg-gray-800/40 text-[11px] text-slate-600 dark:text-gray-300">
+        <div className="flex items-center gap-3 flex-wrap px-3 h-7 border-b border-slate-200 dark:border-gray-700 bg-slate-50/40 dark:bg-gray-800/40 text-[11px] text-slate-600 dark:text-gray-300">
           <StatPill label="samples" value={data.stats.sampleCount} />
           <StatPill label="mutations" value={data.stats.frequencyRowCount} />
           <StatPill label="OD curves" value={data.stats.curveCount} accent={data.stats.curveCount > 0 ? 'blue' : undefined} />
           <StatPill
-            label={data.stats.cnRegionCount === 1 ? 'copy-number region' : 'copy-number regions'}
+            label={data.stats.cnRegionCount === 1 ? 'CN region' : 'CN regions'}
             value={data.stats.cnRegionCount}
             accent={data.stats.cnRegionCount > 0 ? 'emerald' : undefined}
           />
-          {data.stats.cnSampleCount > 0 && (
-            <span className="text-slate-400 dark:text-gray-500 tabular-nums">
-              ({data.stats.cnSampleCount} samples have copy-number data)
-            </span>
+          {data?.warnings && data.warnings.length > 0 && (
+            <button
+              onClick={() => setShowNotes(v => !v)}
+              className={cn(
+                "flex items-center gap-1 px-1.5 py-0.5 rounded text-[10.5px]",
+                showNotes
+                  ? "bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-200"
+                  : "text-amber-700 dark:text-amber-300 hover:bg-amber-50 dark:hover:bg-amber-900/20"
+              )}
+              title="Dataset notes from the loader"
+            >
+              <Info className="w-3 h-3" />
+              {data.warnings.length} note{data.warnings.length === 1 ? '' : 's'}
+              {showNotes ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+            </button>
           )}
-          {/* Prominent, one-click discovery for the copy-number feature. */}
           {data.stats.cnRegionCount > 0 && tab !== 'copynumber' && (
             <button
               onClick={() => { setTab('copynumber'); }}
-              className="ml-auto flex items-center gap-1.5 px-2.5 py-1 rounded bg-emerald-600 text-white hover:bg-emerald-700 text-[11px] font-medium shadow-sm"
+              className="ml-auto flex items-center gap-1.5 px-2 py-0.5 rounded bg-emerald-600 text-white hover:bg-emerald-700 text-[10.5px] font-medium"
               title="Open the dedicated copy-number trend view"
             >
-              <Dna className="w-3.5 h-3.5" />
-              View copy-number data →
+              <Dna className="w-3 h-3" />
+              copy-number →
             </button>
           )}
         </div>
@@ -409,16 +421,16 @@ export default function MutationExplorer() {
         </div>
       )}
 
-      {!error && data?.warnings && data.warnings.length > 0 && (
-        <div className="flex items-start gap-2 mx-3 mt-3 p-2 bg-amber-50/70 dark:bg-amber-900/20 text-amber-800 dark:text-amber-200 text-[11px] rounded border border-amber-200 dark:border-amber-800">
+      {/* Dataset notes only render when toggled — they never steal table space. */}
+      {!error && showNotes && data?.warnings && data.warnings.length > 0 && (
+        <div className="flex items-start gap-2 mx-3 mt-2 p-2 bg-amber-50/70 dark:bg-amber-900/20 text-amber-800 dark:text-amber-200 text-[11px] rounded border border-amber-200 dark:border-amber-800">
           <Info className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-          <div>
-            <span className="font-semibold">Dataset notes ({data.warnings.length}):</span>
-            <ul className="list-disc list-inside opacity-90 mt-0.5 space-y-0.5">
-              {data.warnings.slice(0, 5).map((w, i) => <li key={i}>{w}</li>)}
-              {data.warnings.length > 5 && <li>… and {data.warnings.length - 5} more.</li>}
-            </ul>
-          </div>
+          <ul className="list-disc list-inside opacity-90 space-y-0.5 flex-1">
+            {data.warnings.map((w, i) => <li key={i}>{w}</li>)}
+          </ul>
+          <button onClick={() => setShowNotes(false)} className="shrink-0 opacity-60 hover:opacity-100" title="Hide notes">
+            <X className="w-3.5 h-3.5" />
+          </button>
         </div>
       )}
 
@@ -552,7 +564,7 @@ function SampleSelectionPanel({
 }) {
   const [filters, setFilters] = useState<SampleFilters>(EMPTY_SAMPLE_FILTERS);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
-  const [showFilters, setShowFilters] = useState(true);
+  const [showFilters, setShowFilters] = useState(false);
   const [hydrated, setHydrated] = useState(false);
 
   // Rehydrate filter + collapse state from localStorage.
@@ -742,29 +754,14 @@ function SampleSelectionPanel({
     filters.transferMax !== null ||
     (Object.values(filters.chips) as string[][]).some(arr => arr.length > 0);
 
+  // How many facet filters are active right now (chips + transfer range), so the
+  // collapsed Filters button can show a badge instead of hiding active filters.
+  const activeFacetCount =
+    (Object.values(filters.chips) as string[][]).reduce((n, arr) => n + arr.length, 0) +
+    (filters.transferMin !== null || filters.transferMax !== null ? 1 : 0);
+
   return (
     <div className="flex flex-col h-full min-h-0">
-      {/* Onboarding guide — appears until the researcher selects something, so
-          the Comparative / Copy Number views don't look "broken" when empty. */}
-      {!loading && samples.length > 0 && selected.size === 0 && (
-        <div className="flex items-start gap-2.5 mx-3 mt-3 mb-1 px-3 py-2.5 rounded-lg border border-blue-200 dark:border-blue-800 bg-blue-50/70 dark:bg-blue-900/20 text-[12px] text-blue-900 dark:text-blue-100">
-          <Info className="w-4 h-4 shrink-0 mt-0.5 text-blue-500 dark:text-blue-300" />
-          <div className="leading-relaxed">
-            <span className="font-semibold">Pick samples to compare.</span>{' '}
-            Check the boxes below (or a whole group with the group checkbox), then open the{' '}
-            <span className="font-semibold">Comparative View</span> to see their mutations side by side, or{' '}
-            <span className="font-semibold">Copy Number</span> for amplification trends.{' '}
-            <button
-              onClick={selectEndpoints}
-              disabled={grouped.length === 0}
-              className="font-medium underline decoration-dotted underline-offset-2 hover:text-blue-600 dark:hover:text-blue-300 disabled:opacity-50"
-              title="Auto-select the first and last transfer of every group (time-course endpoints)"
-            >
-              Or select time-course endpoints for me →
-            </button>
-          </div>
-        </div>
-      )}
       {/* Search + summary row */}
       <div className="px-3 py-2 border-b border-slate-200 dark:border-gray-700 flex items-center gap-2 bg-white dark:bg-gray-800 flex-wrap">
         <div className="relative flex-1 max-w-md min-w-[240px]">
@@ -792,6 +789,11 @@ function SampleSelectionPanel({
           title="Show or hide chip filters"
         >
           <Filter className="w-3 h-3" /> Filters
+          {activeFacetCount > 0 && (
+            <span className="ml-0.5 px-1 rounded-full bg-blue-600 text-white text-[9.5px] font-semibold tabular-nums leading-none py-0.5">
+              {activeFacetCount}
+            </span>
+          )}
         </button>
         <button
           onClick={() => setFilters(prev => ({ ...prev, selectedOnly: !prev.selectedOnly }))}

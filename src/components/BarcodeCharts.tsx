@@ -148,7 +148,7 @@ function ChartCard({
   // Hover tooltip state — managed in React so we get instant feedback
   // and rich content (multi-line, color swatch). SVG <title> stays as a
   // fallback for accessibility / native tools.
-  const [hover, setHover] = useState<{ x: number; y: number; text: string; flipX?: boolean } | null>(null);
+  const [hover, setHover] = useState<{ x: number; y: number; text: string; flipX?: boolean; flipY?: boolean } | null>(null);
   // Visible candidates after filter + Top-N rollup.
   const { visibleCands, otherCands } = useMemo(() => {
     let all = Object.keys(chart.candidates);
@@ -240,9 +240,12 @@ function ChartCard({
           <div
             className="absolute z-30 pointer-events-none px-2 py-1 rounded bg-slate-900/95 dark:bg-gray-950/95 text-white text-[11px] font-mono shadow-lg ring-1 ring-black/20"
             style={{
-              left: Math.min(hover.x + 12, 9999),
-              top: Math.max(hover.y - 8, 4),
-              transform: hover.flipX ? 'translateX(-100%) translateX(-24px)' : undefined,
+              // Sit the tooltip well clear of the cursor: offset down-right far
+              // enough that the pointer arrow never overlaps the text. Flip to the
+              // left near the right edge, and below the cursor near the top edge.
+              left: hover.x,
+              top: hover.y,
+              transform: `translate(${hover.flipX ? 'calc(-100% - 18px)' : '18px'}, ${hover.flipY ? '20px' : 'calc(-100% - 14px)'})`,
               whiteSpace: 'pre',
             }}
           >
@@ -255,7 +258,7 @@ function ChartCard({
             const rect = (e.currentTarget as SVGSVGElement).getBoundingClientRect();
             const px = e.clientX - rect.left;
             const py = e.clientY - rect.top;
-            setHover(h => h ? { ...h, x: px, y: py, flipX: px > rect.width - 200 } : h);
+            setHover(h => h ? { ...h, x: px, y: py, flipX: px > rect.width - 200, flipY: py < 56 } : h);
           }}>
           {tickValues.map((v, i) => {
             const y = PAD_T + innerH - (v / maxY) * innerH;
@@ -326,7 +329,7 @@ function ChartCard({
                           const rect = svg?.getBoundingClientRect();
                           const px = rect ? e.clientX - rect.left : 0;
                           const py = rect ? e.clientY - rect.top : 0;
-                          setHover({ x: px, y: py, text: tipText, flipX: rect ? px > rect.width - 200 : false });
+                          setHover({ x: px, y: py, text: tipText, flipX: rect ? px > rect.width - 200 : false, flipY: py < 56 });
                         }}
                         onMouseLeave={() => setHover(null)}
                       >
