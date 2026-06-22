@@ -744,6 +744,27 @@ function SampleSelectionPanel({
 
   return (
     <div className="flex flex-col h-full min-h-0">
+      {/* Onboarding guide — appears until the researcher selects something, so
+          the Comparative / Copy Number views don't look "broken" when empty. */}
+      {!loading && samples.length > 0 && selected.size === 0 && (
+        <div className="flex items-start gap-2.5 mx-3 mt-3 mb-1 px-3 py-2.5 rounded-lg border border-blue-200 dark:border-blue-800 bg-blue-50/70 dark:bg-blue-900/20 text-[12px] text-blue-900 dark:text-blue-100">
+          <Info className="w-4 h-4 shrink-0 mt-0.5 text-blue-500 dark:text-blue-300" />
+          <div className="leading-relaxed">
+            <span className="font-semibold">Pick samples to compare.</span>{' '}
+            Check the boxes below (or a whole group with the group checkbox), then open the{' '}
+            <span className="font-semibold">Comparative View</span> to see their mutations side by side, or{' '}
+            <span className="font-semibold">Copy Number</span> for amplification trends.{' '}
+            <button
+              onClick={selectEndpoints}
+              disabled={grouped.length === 0}
+              className="font-medium underline decoration-dotted underline-offset-2 hover:text-blue-600 dark:hover:text-blue-300 disabled:opacity-50"
+              title="Auto-select the first and last transfer of every group (time-course endpoints)"
+            >
+              Or select time-course endpoints for me →
+            </button>
+          </div>
+        </div>
+      )}
       {/* Search + summary row */}
       <div className="px-3 py-2 border-b border-slate-200 dark:border-gray-700 flex items-center gap-2 bg-white dark:bg-gray-800 flex-wrap">
         <div className="relative flex-1 max-w-md min-w-[240px]">
@@ -1240,9 +1261,12 @@ function ComparativePanel({
     return (
       <div className="flex-1 flex items-center justify-center text-slate-500 dark:text-gray-400 text-sm flex-col gap-3 p-6">
         <GitCompare className="w-10 h-10 text-slate-300 dark:text-gray-600" />
-        <p>No samples selected yet.</p>
-        <button onClick={onJumpToSelection} className="px-3 py-1.5 text-[12px] bg-blue-600 text-white rounded hover:bg-blue-700">
-          Pick samples on the Sample Selection tab
+        <p className="font-medium text-slate-600 dark:text-gray-300">Nothing to compare yet</p>
+        <p className="text-[12px] text-center max-w-sm text-slate-500 dark:text-gray-400">
+          Choose two or more samples and their mutations line up side by side here, one column per sample, so you can spot which calls appear, disappear, or shift in frequency across the time course.
+        </p>
+        <button onClick={onJumpToSelection} className="px-3 py-1.5 text-[12px] bg-blue-600 text-white rounded hover:bg-blue-700 font-medium">
+          Pick samples →
         </button>
       </div>
     );
