@@ -107,7 +107,7 @@ function highlightText(text: string, query: string): React.ReactNode {
   const parts = String(text).split(new RegExp(`(${escaped})`, 'gi'));
   return parts.map((part, i) =>
     part.toLowerCase() === query.toLowerCase()
-      ? <mark key={i} className="bg-yellow-300/60 dark:bg-yellow-500/40 rounded-[2px] px-0.5">{part}</mark>
+      ? <mark key={i} className="bg-[var(--data-mut-bg)] text-[var(--data-mut)] rounded-[2px] px-0.5">{part}</mark>
       : part
   );
 }
@@ -432,16 +432,16 @@ export default function DataTable({ tableName }: DataTableProps) {
   }
 
   return (
-    <div className="flex flex-col h-full bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-slate-200 dark:border-gray-700 overflow-hidden transition-colors">
+    <div className="flex flex-col h-full bg-[var(--surface)] rounded-lg shadow-sm border border-[var(--border)] overflow-hidden transition-colors">
       {/* Top Controls Bar */}
-      <div className="flex items-center justify-between px-3 py-2.5 border-b border-slate-200 dark:border-gray-700 bg-slate-50 dark:bg-gray-800/80 gap-3 transition-colors flex-wrap">
+      <div className="flex items-center justify-between px-3 py-2.5 border-b border-[var(--border)] bg-[var(--surface-2)] gap-3 transition-colors flex-wrap">
         <div className="flex items-center gap-3 flex-1 min-w-0">
           <div className="relative w-72 max-w-full">
-            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-gray-500" />
+            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-faint)]" />
             <input
               type="text"
               placeholder="Search all text columns..."
-              className="w-full pl-10 pr-8 py-1.5 text-[13px] border border-slate-300 dark:border-gray-600 rounded-md focus:border-blue-500 focus:ring-1 focus:ring-blue-500 bg-white dark:bg-gray-700 dark:text-gray-100 outline-none placeholder:text-slate-400 dark:placeholder:text-gray-500 transition-colors"
+              className="lims-input pl-10 pr-8"
               value={localGlobalSearch}
               onChange={(e) => setLocalGlobalSearch(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter') applyGlobalSearch(); if (e.key === 'Escape') { setLocalGlobalSearch(''); setGlobalSearch(''); setPage(1); } }}
@@ -449,24 +449,20 @@ export default function DataTable({ tableName }: DataTableProps) {
             />
             {localGlobalSearch && (
               <button onClick={() => { setLocalGlobalSearch(''); setGlobalSearch(''); setPage(1); }}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 dark:text-gray-500 hover:text-slate-600 dark:hover:text-gray-300">
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[var(--text-faint)] hover:text-[var(--text)]">
                 <X className="w-3.5 h-3.5" />
               </button>
             )}
           </div>
-          <div className="flex items-baseline gap-2 text-slate-500 dark:text-gray-400 text-[13px] font-medium whitespace-nowrap transition-colors">
+          <div className="flex items-baseline gap-2 text-[var(--text-soft)] text-[13px] font-medium whitespace-nowrap transition-colors">
             <span className="tabular-nums">{totalCount.toLocaleString()}</span>
-            <span className="text-[11px] text-slate-400 dark:text-gray-500">rows</span>
-            {loading && <span className="inline-block w-3 h-3 ml-0.5 border-2 border-slate-200 dark:border-gray-600 border-t-blue-500 rounded-full animate-spin align-middle" />}
+            <span className="text-[11px] text-[var(--text-faint)]">rows</span>
+            {loading && <span className="inline-block w-3 h-3 ml-0.5 border-2 border-[var(--border)] border-t-[var(--accent-500)] rounded-full animate-spin align-middle" />}
           </div>
           <button
             onClick={() => setShowSchema(s => !s)}
-            className={cn(
-              "flex items-center gap-1 px-2 py-1 rounded text-[11px] border transition-colors",
-              showSchema
-                ? "bg-slate-100 dark:bg-gray-700 text-slate-700 dark:text-gray-200 border-slate-300 dark:border-gray-600"
-                : "text-slate-500 dark:text-gray-400 border-transparent hover:bg-slate-100 dark:hover:bg-gray-700"
-            )}
+            className="lims-toolbtn"
+            data-on={showSchema}
             title="Toggle schema info"
           >
             <Info className="w-3 h-3" /> Schema
@@ -478,44 +474,40 @@ export default function DataTable({ tableName }: DataTableProps) {
           <div className="relative" ref={filterPopupRef}>
             <button
               onClick={() => setShowFilterPopup(!showFilterPopup)}
-              className={cn(
-                "flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border shadow-sm transition-colors font-medium text-[12.5px]",
-                showFilterPopup || filterCount > 0
-                  ? "bg-blue-50 dark:bg-blue-900/30 border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-300"
-                  : "bg-white dark:bg-gray-700 border-slate-200 dark:border-gray-600 text-slate-600 dark:text-gray-300 hover:bg-slate-50 dark:hover:bg-gray-600"
-              )}
+              className="lims-toolbtn"
+              data-on={showFilterPopup || filterCount > 0}
             >
               <ListFilter className="w-3.5 h-3.5" />
               Filters
               {filterCount > 0 && (
-                <span className="ml-1 bg-blue-600 dark:bg-blue-500 text-white text-[10px] font-bold rounded-full min-w-[16px] h-4 px-1 flex items-center justify-center">{filterCount}</span>
+                <span className="ml-1 bg-[var(--accent-600)] text-white text-[10px] font-bold rounded-full min-w-[16px] h-4 px-1 flex items-center justify-center">{filterCount}</span>
               )}
             </button>
 
             {showFilterPopup && (
-              <div className="absolute right-0 top-full mt-1 w-[560px] bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-slate-200 dark:border-gray-700 z-50 p-3 transition-colors">
+              <div className="lims-popover absolute right-0 top-full mt-1 w-[560px] z-50 p-3 transition-colors">
                 <div className="flex items-center justify-between mb-3">
-                  <h3 className="text-sm font-semibold text-slate-800 dark:text-gray-100 flex items-center gap-1.5">
-                    <Filter className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                  <h3 className="text-sm font-semibold text-[var(--text)] flex items-center gap-1.5">
+                    <Filter className="w-4 h-4 text-[var(--accent-600)]" />
                     Column Filters
                   </h3>
                   <div className="flex items-center gap-2 text-xs">
-                    <span className="text-slate-500 dark:text-gray-400">Join with:</span>
-                    <div className="flex rounded border border-slate-300 dark:border-gray-600 overflow-hidden">
+                    <span className="text-[var(--text-soft)]">Join with:</span>
+                    <div className="flex rounded border border-[var(--border-strong)] overflow-hidden">
                       <button
                         onClick={() => setFilterLogic('AND')}
                         className={cn("px-2 py-0.5 text-[11px] font-medium transition-colors",
                           filterLogic === 'AND'
-                            ? "bg-blue-600 dark:bg-blue-500 text-white"
-                            : "bg-white dark:bg-gray-700 text-slate-600 dark:text-gray-300 hover:bg-slate-50 dark:hover:bg-gray-600"
+                            ? "bg-[var(--accent-600)] text-white"
+                            : "bg-[var(--surface)] text-[var(--text-soft)] hover:bg-[var(--surface-3)]"
                         )}
                       >AND</button>
                       <button
                         onClick={() => setFilterLogic('OR')}
-                        className={cn("px-2 py-0.5 text-[11px] font-medium transition-colors border-l border-slate-300 dark:border-gray-600",
+                        className={cn("px-2 py-0.5 text-[11px] font-medium transition-colors border-l border-[var(--border-strong)]",
                           filterLogic === 'OR'
-                            ? "bg-blue-600 dark:bg-blue-500 text-white"
-                            : "bg-white dark:bg-gray-700 text-slate-600 dark:text-gray-300 hover:bg-slate-50 dark:hover:bg-gray-600"
+                            ? "bg-[var(--accent-600)] text-white"
+                            : "bg-[var(--surface)] text-[var(--text-soft)] hover:bg-[var(--surface-3)]"
                         )}
                       >OR</button>
                     </div>
@@ -532,19 +524,19 @@ export default function DataTable({ tableName }: DataTableProps) {
                     const distinct = entry.col ? distinctCache[entry.col] : undefined;
                     const dLoading = entry.col ? distinctLoading[entry.col] : false;
                     return (
-                      <div key={entry.id} className="flex items-start gap-2 bg-slate-50 dark:bg-gray-700/50 rounded-md px-2.5 py-2 border border-slate-200 dark:border-gray-600">
+                      <div key={entry.id} className="flex items-start gap-2 bg-[var(--surface-2)] rounded-md px-2.5 py-2 border border-[var(--border)]">
                         {idx > 0 && (
                           <span className={cn("text-[10px] font-bold uppercase tracking-wider pt-1.5 w-8 text-center",
-                            filterLogic === 'AND' ? "text-blue-600 dark:text-blue-400" : "text-orange-600 dark:text-orange-400"
+                            filterLogic === 'AND' ? "text-[var(--accent-600)]" : "text-[var(--data-mut)]"
                           )}>{filterLogic}</span>
                         )}
-                        {idx === 0 && <span className="text-[10px] font-bold uppercase tracking-wider pt-1.5 w-8 text-center text-slate-400 dark:text-gray-500">WHERE</span>}
+                        {idx === 0 && <span className="text-[10px] font-bold uppercase tracking-wider pt-1.5 w-8 text-center text-[var(--text-faint)]">WHERE</span>}
                         <div className="flex-1 min-w-0 flex flex-col gap-1.5">
                           <div className="flex items-center gap-2">
                             <select
                               value={entry.col}
                               onChange={(e) => updateFilterEntry(entry.id, 'col', e.target.value)}
-                              className="flex-1 min-w-0 py-1.5 px-2 text-[12.5px] border border-slate-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 dark:text-gray-100 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                              className="lims-select flex-1 min-w-0"
                             >
                               <option value="">-- column --</option>
                               {schema.map(c => (
@@ -557,7 +549,7 @@ export default function DataTable({ tableName }: DataTableProps) {
                             <select
                               value={entry.operator}
                               onChange={(e) => updateFilterEntry(entry.id, 'operator', e.target.value)}
-                              className="w-40 py-1.5 px-2 text-[12.5px] border border-slate-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 dark:text-gray-100 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                              className="lims-select w-40"
                             >
                               {ops.map(o => (
                                 <option key={o.value} value={o.value}>{o.label}</option>
@@ -567,7 +559,7 @@ export default function DataTable({ tableName }: DataTableProps) {
                             <button
                               onClick={() => removeFilterEntry(entry.id)}
                               disabled={filterEntries.length <= 1}
-                              className="p-1.5 text-slate-400 dark:text-gray-500 hover:text-red-500 dark:hover:text-red-400 disabled:opacity-30 disabled:hover:text-slate-400 dark:disabled:hover:text-gray-500 transition-colors shrink-0"
+                              className="p-1.5 text-[var(--text-faint)] hover:text-red-500 disabled:opacity-30 disabled:hover:text-[var(--text-faint)] transition-colors shrink-0"
                               title="Remove filter"
                             >
                               <X className="w-3.5 h-3.5" />
@@ -580,13 +572,13 @@ export default function DataTable({ tableName }: DataTableProps) {
                                   type="datetime-local"
                                   value={entry.value}
                                   onChange={(e) => updateFilterEntry(entry.id, 'value', e.target.value)}
-                                  className="w-full py-1.5 px-2 text-[12.5px] border border-slate-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 dark:text-gray-100 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                                  className="lims-input"
                                 />
                               ) : ct === 'boolean' && entry.operator === 'equals' ? (
                                 <select
                                   value={entry.value}
                                   onChange={(e) => updateFilterEntry(entry.id, 'value', e.target.value)}
-                                  className="w-full py-1.5 px-2 text-[12.5px] border border-slate-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 dark:text-gray-100 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                                  className="lims-select w-full"
                                 >
                                   <option value="">-- value --</option>
                                   <option value="1">true</option>
@@ -604,7 +596,7 @@ export default function DataTable({ tableName }: DataTableProps) {
                                     value={entry.value}
                                     onChange={(e) => updateFilterEntry(entry.id, 'value', e.target.value)}
                                     onKeyDown={(e) => { if (e.key === 'Enter') setShowFilterPopup(false); }}
-                                    className="flex-1 py-1.5 px-2 text-[12.5px] border border-slate-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 dark:text-gray-100 focus:ring-blue-500 focus:border-blue-500 outline-none placeholder:text-slate-400 dark:placeholder:text-gray-500"
+                                    className="lims-input flex-1"
                                   />
                                   {entry.col && (
                                     <button
@@ -614,7 +606,7 @@ export default function DataTable({ tableName }: DataTableProps) {
                                         setOpenSuggestFor(entry.id);
                                         loadDistinct(entry.col);
                                       }}
-                                      className="p-1.5 text-slate-400 dark:text-gray-500 hover:text-blue-600 dark:hover:text-blue-400 rounded border border-slate-300 dark:border-gray-600 bg-white dark:bg-gray-700"
+                                      className="p-1.5 text-[var(--text-faint)] hover:text-[var(--accent-600)] rounded border border-[var(--border-strong)] bg-[var(--surface)]"
                                       title="Suggest values"
                                     >
                                       <ChevronDown className="w-3.5 h-3.5" />
@@ -623,12 +615,12 @@ export default function DataTable({ tableName }: DataTableProps) {
                                 </div>
                               )}
                               {isOpen && entry.col && (
-                                <div ref={suggestRef} className="absolute right-0 top-full mt-1 w-full max-h-64 overflow-auto bg-white dark:bg-gray-800 rounded-md shadow-lg border border-slate-200 dark:border-gray-700 z-50 p-1">
+                                <div ref={suggestRef} className="lims-popover absolute right-0 top-full mt-1 w-full max-h-64 overflow-auto z-50 p-1">
                                   {dLoading && (
-                                    <div className="px-2 py-2 text-[12px] text-slate-500 dark:text-gray-400">Loading…</div>
+                                    <div className="px-2 py-2 text-[12px] text-[var(--text-soft)]">Loading…</div>
                                   )}
                                   {distinct && distinct.values.length === 0 && !dLoading && (
-                                    <div className="px-2 py-2 text-[12px] text-slate-500 dark:text-gray-400">No distinct values.</div>
+                                    <div className="px-2 py-2 text-[12px] text-[var(--text-soft)]">No distinct values.</div>
                                   )}
                                   {distinct && distinct.values.map((v, i) => {
                                     const s = formatCell(v);
@@ -645,15 +637,15 @@ export default function DataTable({ tableName }: DataTableProps) {
                                             setOpenSuggestFor(null);
                                           }
                                         }}
-                                        className="flex w-full items-center px-2 py-1 text-left text-[12px] hover:bg-slate-100 dark:hover:bg-gray-700 rounded text-slate-700 dark:text-gray-200 font-mono truncate"
+                                        className="flex w-full items-center px-2 py-1 text-left text-[12px] hover:bg-[var(--surface-3)] rounded text-[var(--text)] font-mono truncate"
                                         title={s}
                                       >
-                                        {s || <span className="italic text-slate-400">(empty)</span>}
+                                        {s || <span className="italic text-[var(--text-faint)]">(empty)</span>}
                                       </button>
                                     );
                                   })}
                                   {distinct && distinct.truncated && (
-                                    <div className="px-2 py-1 text-[10px] text-slate-400 dark:text-gray-500 italic border-t border-slate-100 dark:border-gray-700 mt-1">
+                                    <div className="px-2 py-1 text-[10px] text-[var(--text-faint)] italic border-t border-[var(--border)] mt-1">
                                       First 200 values shown.
                                     </div>
                                   )}
@@ -667,23 +659,23 @@ export default function DataTable({ tableName }: DataTableProps) {
                   })}
                 </div>
 
-                <div className="flex items-center justify-between mt-3 pt-2 border-t border-slate-200 dark:border-gray-700">
+                <div className="flex items-center justify-between mt-3 pt-2 border-t border-[var(--border)]">
                   <button
                     onClick={addFilterEntry}
-                    className="flex items-center gap-1 text-[12px] text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 font-medium"
+                    className="flex items-center gap-1 text-[12px] text-[var(--accent-600)] hover:text-[var(--accent-700)] font-medium"
                   >
                     <Plus className="w-3.5 h-3.5" /> Add Condition
                   </button>
                   <div className="flex items-center gap-2">
                     <button
                       onClick={clearAllFilters}
-                      className="px-3 py-1 text-[12px] text-slate-600 dark:text-gray-400 hover:text-red-600 dark:hover:text-red-400 font-medium"
+                      className="px-3 py-1 text-[12px] text-[var(--text-soft)] hover:text-red-600 font-medium"
                     >
                       Clear All
                     </button>
                     <button
                       onClick={() => setShowFilterPopup(false)}
-                      className="px-4 py-1.5 text-[12px] font-medium bg-blue-600 dark:bg-blue-500 text-white rounded-md hover:bg-blue-700 dark:hover:bg-blue-600 transition-colors shadow-sm"
+                      className="lims-btn lims-btn-primary"
                     >
                       Done
                     </button>
@@ -697,33 +689,29 @@ export default function DataTable({ tableName }: DataTableProps) {
           <div className="relative" ref={colSettingsRef}>
             <button
               onClick={() => setShowColSettings(!showColSettings)}
-              className={cn(
-                "flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border shadow-sm transition-colors font-medium text-[12.5px]",
-                showColSettings
-                  ? "bg-slate-100 dark:bg-gray-700 border-slate-300 dark:border-gray-600 text-slate-800 dark:text-gray-100"
-                  : "bg-white dark:bg-gray-700 border-slate-200 dark:border-gray-600 text-slate-600 dark:text-gray-300 hover:bg-slate-50 dark:hover:bg-gray-600"
-              )}
+              className="lims-toolbtn"
+              data-on={showColSettings}
             >
               <Settings2 className="w-3.5 h-3.5" />
-              Columns <span className="text-[11px] text-slate-400 dark:text-gray-500">{visibleCols.length}/{schema.length}</span>
+              Columns <span className="text-[11px] text-[var(--text-faint)]">{visibleCols.length}/{schema.length}</span>
             </button>
 
             {showColSettings && (
-              <div className="absolute right-0 top-full mt-1 w-72 bg-white dark:bg-gray-800 rounded-md shadow-lg border border-slate-200 dark:border-gray-700 z-50 transition-colors flex flex-col max-h-[420px]">
-                <div className="p-2 border-b border-slate-200 dark:border-gray-700">
+              <div className="lims-popover absolute right-0 top-full mt-1 w-72 z-50 transition-colors flex flex-col max-h-[420px]">
+                <div className="p-2 border-b border-[var(--border)]">
                   <div className="relative mb-2">
-                    <Search className="w-3.5 h-3.5 absolute left-2 top-1/2 -translate-y-1/2 text-slate-400 dark:text-gray-500" />
+                    <Search className="w-3.5 h-3.5 absolute left-2 top-1/2 -translate-y-1/2 text-[var(--text-faint)]" />
                     <input
                       type="text"
                       placeholder="Search columns..."
                       value={colSearch}
                       onChange={(e) => setColSearch(e.target.value)}
-                      className="w-full pl-7 pr-2 py-1 text-[12px] border border-slate-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 dark:text-gray-100 outline-none"
+                      className="lims-input pl-7"
                     />
                   </div>
                   <div className="flex justify-between text-[11px]">
-                    <button onClick={setAllColsVisible} className="text-blue-600 dark:text-blue-400 hover:underline font-medium">Show all</button>
-                    <button onClick={hideAllExceptFirst} className="text-slate-500 dark:text-gray-400 hover:text-red-600 dark:hover:text-red-400 font-medium">Hide all</button>
+                    <button onClick={setAllColsVisible} className="text-[var(--accent-600)] hover:underline font-medium">Show all</button>
+                    <button onClick={hideAllExceptFirst} className="text-[var(--text-soft)] hover:text-red-600 font-medium">Hide all</button>
                   </div>
                 </div>
                 <div className="flex-1 overflow-y-auto p-1">
@@ -731,20 +719,20 @@ export default function DataTable({ tableName }: DataTableProps) {
                     const hidden = hiddenCols.has(col.name);
                     return (
                       <button key={col.name} onClick={() => toggleCol(col.name)}
-                        className="flex items-center justify-between w-full px-2.5 py-1.5 text-left text-[12.5px] hover:bg-slate-100 dark:hover:bg-gray-700 rounded text-slate-700 dark:text-gray-200 transition-colors gap-2"
+                        className="flex items-center justify-between w-full px-2.5 py-1.5 text-left text-[12.5px] hover:bg-[var(--surface-3)] rounded text-[var(--text)] transition-colors gap-2"
                       >
                         <span className="truncate font-mono" title={col.name}>{col.name}</span>
                         <span className="flex items-center gap-1.5 shrink-0">
-                          <span className="text-[10px] text-slate-400 dark:text-gray-500 uppercase tabular-nums">{col.type || ''}</span>
+                          <span className="text-[10px] text-[var(--text-faint)] uppercase tabular-nums">{col.type || ''}</span>
                           {hidden
-                            ? <EyeOff className="w-3.5 h-3.5 text-slate-400 dark:text-gray-500" />
-                            : <Eye className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />}
+                            ? <EyeOff className="w-3.5 h-3.5 text-[var(--text-faint)]" />
+                            : <Eye className="w-3.5 h-3.5 text-[var(--accent-600)]" />}
                         </span>
                       </button>
                     );
                   })}
                   {filteredColList.length === 0 && (
-                    <div className="px-2 py-3 text-center text-[12px] text-slate-500 dark:text-gray-400">No columns match.</div>
+                    <div className="px-2 py-3 text-center text-[12px] text-[var(--text-soft)]">No columns match.</div>
                   )}
                 </div>
               </div>
@@ -755,7 +743,7 @@ export default function DataTable({ tableName }: DataTableProps) {
           <button
             onClick={exportCsv}
             disabled={exporting || totalCount === 0}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-slate-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-slate-600 dark:text-gray-300 hover:bg-slate-50 dark:hover:bg-gray-600 shadow-sm transition-colors font-medium text-[12.5px] disabled:opacity-50"
+            className="lims-toolbtn"
             title={`Export current filter to CSV (up to 10,000 rows)`}
           >
             {exporting ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
@@ -771,7 +759,7 @@ export default function DataTable({ tableName }: DataTableProps) {
                 setSortBy(undefined);
                 setSortDirection(undefined);
               }}
-              className="flex items-center gap-1 px-2 py-1.5 rounded-md text-[11.5px] text-slate-500 dark:text-gray-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-slate-100 dark:hover:bg-gray-700 transition-colors"
+              className="flex items-center gap-1 px-2 py-1.5 rounded-md text-[11.5px] text-[var(--text-soft)] hover:text-red-600 hover:bg-[var(--surface-3)] transition-colors"
               title="Reset all filters, sort, and column visibility"
             >
               <X className="w-3 h-3" /> Reset
@@ -781,7 +769,7 @@ export default function DataTable({ tableName }: DataTableProps) {
           <select
             value={pageSize}
             onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1); }}
-            className="py-1.5 px-2 text-[12.5px] font-medium border-slate-200 dark:border-gray-600 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-gray-100 outline-none"
+            className="lims-select"
             title="Page size"
           >
             {[25, 50, 100, 200, 500].map(size => (
@@ -789,65 +777,65 @@ export default function DataTable({ tableName }: DataTableProps) {
             ))}
           </select>
 
-          <div className="flex items-center border border-slate-200 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-700 overflow-hidden h-8 transition-colors">
-            <button onClick={() => setPage(1)} disabled={page === 1 || loading} className="px-2 hover:bg-slate-100 dark:hover:bg-gray-600 disabled:opacity-50 disabled:hover:bg-white dark:disabled:hover:bg-gray-700 text-slate-600 dark:text-gray-300 transition-colors h-full" title="First"><ChevronsLeft className="w-3.5 h-3.5" /></button>
-            <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1 || loading} className="px-2 hover:bg-slate-100 dark:hover:bg-gray-600 disabled:opacity-50 disabled:hover:bg-white dark:disabled:hover:bg-gray-700 text-slate-600 dark:text-gray-300 border-l border-slate-200 dark:border-gray-600 transition-colors h-full" title="Prev"><ChevronLeft className="w-3.5 h-3.5" /></button>
-            <div className="px-2 flex items-center gap-1 border-x border-slate-200 dark:border-gray-600 h-full bg-slate-50 dark:bg-gray-800">
+          <div className="flex items-center border border-[var(--border-strong)] rounded-md shadow-sm bg-[var(--surface)] overflow-hidden h-8 transition-colors">
+            <button onClick={() => setPage(1)} disabled={page === 1 || loading} className="px-2 hover:bg-[var(--surface-3)] disabled:opacity-50 disabled:hover:bg-[var(--surface)] text-[var(--text-soft)] transition-colors h-full" title="First"><ChevronsLeft className="w-3.5 h-3.5" /></button>
+            <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1 || loading} className="px-2 hover:bg-[var(--surface-3)] disabled:opacity-50 disabled:hover:bg-[var(--surface)] text-[var(--text-soft)] border-l border-[var(--border-strong)] transition-colors h-full" title="Prev"><ChevronLeft className="w-3.5 h-3.5" /></button>
+            <div className="px-2 flex items-center gap-1 border-x border-[var(--border-strong)] h-full bg-[var(--surface-2)]">
               <input type="text" value={pageJumpVal}
                 onChange={e => setPageJumpVal(e.target.value)} onKeyDown={handlePageJump}
                 onBlur={() => setPageJumpVal(page.toString())}
-                className="w-9 px-1 py-0 text-center text-[12.5px] border border-slate-300 dark:border-gray-600 rounded focus:border-blue-500 focus:outline-none bg-white dark:bg-gray-700 dark:text-gray-100"
+                className="w-9 px-1 py-0 text-center text-[12.5px] border border-[var(--border-strong)] rounded focus:border-[var(--accent-500)] focus:outline-none bg-[var(--surface)] text-[var(--text)]"
               />
-              <span className="text-slate-500 dark:text-gray-400 font-medium text-[12.5px]">/ {totalPages || 1}</span>
+              <span className="text-[var(--text-soft)] font-medium text-[12.5px]">/ {totalPages || 1}</span>
             </div>
-            <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages || totalPages === 0 || loading} className="px-2 hover:bg-slate-100 dark:hover:bg-gray-600 disabled:opacity-50 disabled:hover:bg-white dark:disabled:hover:bg-gray-700 text-slate-600 dark:text-gray-300 border-r border-slate-200 dark:border-gray-600 transition-colors h-full" title="Next"><ChevronRight className="w-3.5 h-3.5" /></button>
-            <button onClick={() => setPage(totalPages)} disabled={page === totalPages || totalPages === 0 || loading} className="px-2 hover:bg-slate-100 dark:hover:bg-gray-600 disabled:opacity-50 disabled:hover:bg-white dark:disabled:hover:bg-gray-700 text-slate-600 dark:text-gray-300 transition-colors h-full" title="Last"><ChevronsRight className="w-3.5 h-3.5" /></button>
+            <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages || totalPages === 0 || loading} className="px-2 hover:bg-[var(--surface-3)] disabled:opacity-50 disabled:hover:bg-[var(--surface)] text-[var(--text-soft)] border-r border-[var(--border-strong)] transition-colors h-full" title="Next"><ChevronRight className="w-3.5 h-3.5" /></button>
+            <button onClick={() => setPage(totalPages)} disabled={page === totalPages || totalPages === 0 || loading} className="px-2 hover:bg-[var(--surface-3)] disabled:opacity-50 disabled:hover:bg-[var(--surface)] text-[var(--text-soft)] transition-colors h-full" title="Last"><ChevronsRight className="w-3.5 h-3.5" /></button>
           </div>
         </div>
       </div>
 
       {/* Active filter tags bar */}
       {(activeFilters.length > 0 || globalSearch) && (
-        <div className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50/60 dark:bg-blue-900/20 border-b border-blue-100 dark:border-blue-800 flex-wrap transition-colors">
+        <div className="flex items-center gap-1.5 px-3 py-1.5 bg-[var(--accent-50)] border-b border-[var(--accent-300)] flex-wrap transition-colors">
           {globalSearch && (
-            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-white dark:bg-gray-700 rounded border border-yellow-300 dark:border-yellow-600 text-[11px] text-yellow-800 dark:text-yellow-200 shadow-sm">
+            <span className="lims-chip border-[var(--data-mut)] text-[var(--data-mut)] bg-[var(--data-mut-bg)]">
               <Search className="w-3 h-3" />
               <span className="font-mono max-w-[160px] truncate">{globalSearch}</span>
               <button onClick={() => { setLocalGlobalSearch(''); setGlobalSearch(''); setPage(1); }}
-                className="text-yellow-500 dark:text-yellow-400 hover:text-red-500 ml-0.5"><X className="w-2.5 h-2.5" /></button>
+                className="text-[var(--data-mut)] hover:text-red-500 ml-0.5"><X className="w-2.5 h-2.5" /></button>
             </span>
           )}
           {activeFilters.map((e, idx) => (
             <React.Fragment key={e.id}>
               {idx > 0 && (
-                <span className="text-[10px] text-blue-400 dark:text-blue-300 font-bold uppercase">{filterLogic}</span>
+                <span className="text-[10px] text-[var(--accent-600)] font-bold uppercase">{filterLogic}</span>
               )}
-              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-white dark:bg-gray-700 rounded border border-blue-200 dark:border-blue-700 text-[11px] text-blue-800 dark:text-blue-200 shadow-sm">
+              <span className="lims-chip lims-chip-accent">
                 <span className="font-mono font-medium">{e.col}</span>
-                <span className="text-blue-400 dark:text-blue-300">{operatorSymbol(e.operator)}</span>
+                <span className="text-[var(--accent-600)]">{operatorSymbol(e.operator)}</span>
                 {!NO_VALUE_OPS.has(e.operator) && <span className="font-mono max-w-[160px] truncate">{e.value}</span>}
                 <button onClick={() => removeFilterEntry(e.id)}
-                  className="text-blue-400 dark:text-blue-300 hover:text-red-500 dark:hover:text-red-400 ml-0.5"><X className="w-2.5 h-2.5" /></button>
+                  className="text-[var(--accent-600)] hover:text-red-500 ml-0.5"><X className="w-2.5 h-2.5" /></button>
               </span>
             </React.Fragment>
           ))}
           <button onClick={clearAllFilters}
-            className="ml-1 text-[11px] text-blue-500 dark:text-blue-400 hover:text-red-600 dark:hover:text-red-400 font-medium">Clear all</button>
+            className="ml-1 text-[11px] text-[var(--accent-600)] hover:text-red-600 font-medium">Clear all</button>
         </div>
       )}
 
       {/* Optional schema bar */}
       {showSchema && (
-        <div className="px-3 py-2 bg-slate-50 dark:bg-gray-800/60 border-b border-slate-200 dark:border-gray-700 text-[11px] text-slate-600 dark:text-gray-400 flex items-center gap-3 overflow-x-auto whitespace-nowrap">
-          <span className="font-semibold text-slate-700 dark:text-gray-300">{tableName}</span>
-          <span className="text-slate-400">·</span>
+        <div className="px-3 py-2 bg-[var(--surface-2)] border-b border-[var(--border)] text-[11px] text-[var(--text-soft)] flex items-center gap-3 overflow-x-auto whitespace-nowrap">
+          <span className="font-semibold text-[var(--text)]">{tableName}</span>
+          <span className="text-[var(--text-faint)]">·</span>
           <span>{schema.length} cols</span>
-          <span className="text-slate-400">·</span>
+          <span className="text-[var(--text-faint)]">·</span>
           {schema.map(c => (
             <span key={c.name} className="font-mono">
-              <span className="text-slate-700 dark:text-gray-300">{c.name}</span>
-              <span className="text-slate-400 dark:text-gray-500">:{c.type || 'TEXT'}</span>
-              {c.pk ? <span className="text-amber-600 dark:text-amber-400 ml-0.5">·pk</span> : null}
+              <span className="text-[var(--text)]">{c.name}</span>
+              <span className="text-[var(--text-faint)]">:{c.type || 'TEXT'}</span>
+              {c.pk ? <span className="text-[var(--data-mut)] ml-0.5">·pk</span> : null}
               {c.notnull ? <span className="text-rose-600 dark:text-rose-400 ml-0.5">·nn</span> : null}
             </span>
           ))}
@@ -855,37 +843,37 @@ export default function DataTable({ tableName }: DataTableProps) {
       )}
 
       {/* Table */}
-      <div className="flex-1 overflow-auto relative bg-white dark:bg-gray-800 transition-colors">
+      <div className="flex-1 overflow-auto relative bg-[var(--surface)] transition-colors">
         <table className="w-full text-left border-collapse min-w-[600px]">
-          <thead className="bg-slate-50 dark:bg-gray-800 sticky top-0 z-10 shadow-sm">
+          <thead className="lims-thead sticky top-0 z-10 shadow-sm">
             <tr>
               {visibleCols.map((col) => {
                 const isEmptyCol = emptyCols.has(col.name);
                 const hasFilter = !!appliedFilters[col.name];
                 const isSorted = sortBy === col.name;
                 return (
-                  <th key={col.name} className="p-0 align-top group bg-slate-50 dark:bg-gray-800 border-b border-slate-200 dark:border-gray-700">
+                  <th key={col.name} className="p-0 align-top group">
                     <div className="px-3 py-2 flex flex-col">
-                      <div className="flex items-center justify-between cursor-pointer select-none hover:text-blue-700 dark:hover:text-blue-400 transition-colors text-[12.5px] font-semibold text-slate-700 dark:text-gray-200"
+                      <div className="lims-th-sort flex items-center justify-between cursor-pointer select-none transition-colors text-[12.5px] font-semibold text-[var(--text)]"
                         onClick={() => handleSort(col.name)}
                         title={`${col.name} (${col.type || 'TEXT'})${col.pk ? ' · PK' : ''}${col.notnull ? ' · NOT NULL' : ''}`}
                       >
                         <span className="flex items-center gap-1.5 min-w-0">
                           <span className="truncate max-w-[200px] font-mono">{col.name}</span>
                           {isEmptyCol && (
-                            <AlertCircle className="w-3 h-3 text-amber-400/70 shrink-0" />
+                            <AlertCircle className="w-3 h-3 text-[var(--data-mut)] shrink-0" />
                           )}
-                          {hasFilter && <Filter className="w-3 h-3 text-blue-500 dark:text-blue-400 shrink-0" />}
+                          {hasFilter && <Filter className="w-3 h-3 text-[var(--accent-600)] shrink-0" />}
                         </span>
                         <span className={cn("shrink-0 transition-colors",
-                          isSorted ? "text-blue-600 dark:text-blue-400" : "text-slate-300 dark:text-gray-600 opacity-0 group-hover:opacity-100"
+                          isSorted ? "text-[var(--accent-600)]" : "text-[var(--text-faint)] opacity-0 group-hover:opacity-100"
                         )}>
                           {isSorted
                             ? (sortDirection === 'desc' ? <ArrowUpZA className="w-3.5 h-3.5" /> : <ArrowDownAZ className="w-3.5 h-3.5" />)
                             : <ArrowUpDown className="w-3 h-3" />}
                         </span>
                       </div>
-                      <div className="text-[10px] text-slate-400 dark:text-gray-500 uppercase font-mono tracking-wider mt-0.5">
+                      <div className="text-[10px] text-[var(--text-faint)] uppercase font-mono tracking-wider mt-0.5">
                         {col.type || 'TEXT'}
                       </div>
                     </div>
@@ -894,14 +882,14 @@ export default function DataTable({ tableName }: DataTableProps) {
               })}
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-100 dark:divide-gray-700/60 transition-colors">
+          <tbody className="divide-y divide-[var(--border)] transition-colors">
             {loading && data.length === 0 ? (
-              <tr><td colSpan={visibleCols.length || 1} className="h-48 text-center text-slate-400 dark:text-gray-500 align-middle text-sm">Loading...</td></tr>
+              <tr><td colSpan={visibleCols.length || 1} className="h-48 text-center text-[var(--text-faint)] align-middle text-sm">Loading...</td></tr>
             ) : data.length === 0 ? (
-              <tr><td colSpan={visibleCols.length || 1} className="h-48 text-center text-slate-500 dark:text-gray-400 align-middle">
+              <tr><td colSpan={visibleCols.length || 1} className="h-48 text-center text-[var(--text-soft)] align-middle">
                 <p className="text-sm">No records found. Try clearing some filters.</p>
                 {(activeFilters.length > 0 || globalSearch) && (
-                  <button onClick={clearAllFilters} className="mt-3 px-3 py-1 text-xs bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded hover:bg-blue-100 dark:hover:bg-blue-900/50">Clear filters</button>
+                  <button onClick={clearAllFilters} className="lims-btn lims-btn-secondary mt-3">Clear filters</button>
                 )}
               </td></tr>
             ) : (
@@ -909,31 +897,37 @@ export default function DataTable({ tableName }: DataTableProps) {
                 <tr key={i}
                   className={cn(
                     "transition-colors group cursor-pointer",
-                    searchActive ? "even:bg-yellow-50/30 dark:even:bg-yellow-900/10" : "hover:bg-blue-50/40 dark:hover:bg-gray-700/40"
+                    searchActive ? "lims-trow-alt" : "lims-trow"
                   )}
                   onClick={() => setDetailRow(row)}
                 >
                   {visibleCols.map((col) => {
                     const val = row[col.name];
+                    // Identifier-like string columns render in monospace so
+                    // IDs (breseq_..., TFMN1.fba.1.T1.P, sample keys) align and
+                    // read as codes rather than prose.
+                    const isIdCol = /(^|_)(id|ids|sample|seqsample|seqorder|registry|refgenome|barcode|well|strain|plasmid|construct|primer|accession|key|name)s?$/i.test(col.name)
+                      || /^(seqsample|seqorder|breseq)/i.test(col.name);
+                    const mono = isIdCol && typeof val === 'string' && val !== '';
                     return (
                       <td key={col.name}
-                        className="px-3 py-1.5 text-slate-700 dark:text-gray-200 border-r border-slate-100 dark:border-gray-700/60 max-w-[350px] truncate transition-colors"
+                        className="lims-tcell px-3 py-1.5 max-w-[350px] truncate transition-colors"
                         title={val === null || val === undefined ? '' : String(val)}
                       >
                         {val === null || val === undefined ? (
-                          <span className="text-slate-400/60 dark:text-gray-500 italic text-[11.5px]">null</span>
+                          <span className="text-[var(--text-faint)] italic text-[11.5px]">null</span>
                         ) : typeof val === 'boolean' ? (
                           <span className={cn("px-1.5 py-0.5 rounded-[3px] text-[11px] font-semibold uppercase tracking-wider",
-                            val ? "bg-emerald-100 dark:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300"
+                            val ? "bg-[var(--data-grow-bg)] text-[var(--data-grow)]"
                                 : "bg-rose-100 dark:bg-rose-900/50 text-rose-700 dark:text-rose-300")}>
                             {val ? 'True' : 'False'}
                           </span>
                         ) : typeof val === 'number' ? (
-                          <span className="font-mono text-[13px] text-slate-600 dark:text-gray-300 tabular-nums">{val}</span>
+                          <span className="font-mono text-[13px] text-[var(--text-soft)] tabular-nums">{val}</span>
                         ) : searchActive ? (
-                          <span className="text-[13px]">{highlightText(String(val), globalSearch)}</span>
+                          <span className={cn("text-[13px]", mono && "font-mono text-[12px] text-[var(--text-soft)]")}>{highlightText(String(val), globalSearch)}</span>
                         ) : (
-                          <span className="text-[13px]">{String(val)}</span>
+                          <span className={cn("text-[13px]", mono && "font-mono text-[12px] text-[var(--text-soft)]")}>{String(val)}</span>
                         )}
                       </td>
                     );
@@ -950,30 +944,30 @@ export default function DataTable({ tableName }: DataTableProps) {
         <div className="fixed inset-0 z-40 flex justify-end" onClick={() => setDetailRow(null)}>
           <div className="absolute inset-0 bg-slate-900/30 dark:bg-black/40 backdrop-blur-[1px]" />
           <div
-            className="relative w-[480px] max-w-full h-full bg-white dark:bg-gray-800 border-l border-slate-200 dark:border-gray-700 shadow-2xl flex flex-col"
+            className="lims-drawer relative w-[480px] max-w-full h-full flex flex-col"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between px-4 py-2.5 border-b border-slate-200 dark:border-gray-700 bg-slate-50 dark:bg-gray-800/80">
+            <div className="flex items-center justify-between px-4 py-2.5 border-b border-[var(--border)] bg-[var(--surface-2)]">
               <div className="flex items-center gap-2 min-w-0">
-                <Table2 className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
-                <h3 className="text-sm font-semibold text-slate-700 dark:text-gray-200 truncate font-mono">{tableName}</h3>
-                <span className="text-xs text-slate-400 dark:text-gray-500 shrink-0">row {detailIndex >= 0 ? detailIndex + 1 : '?'} / {data.length}</span>
+                <Table2 className="w-4 h-4 text-[var(--accent-600)] shrink-0" />
+                <h3 className="text-sm font-semibold text-[var(--text)] truncate font-mono">{tableName}</h3>
+                <span className="text-xs text-[var(--text-faint)] shrink-0">row {detailIndex >= 0 ? detailIndex + 1 : '?'} / {data.length}</span>
               </div>
               <div className="flex items-center gap-1">
                 <button onClick={() => goToDetail(-1)} disabled={detailIndex <= 0}
-                  className="p-1 rounded text-slate-500 dark:text-gray-400 hover:bg-slate-100 dark:hover:bg-gray-700 disabled:opacity-30" title="Previous (↑/k)">
+                  className="p-1 rounded text-[var(--text-soft)] hover:bg-[var(--surface-3)] disabled:opacity-30" title="Previous (↑/k)">
                   <ChevronLeft className="w-4 h-4" />
                 </button>
                 <button onClick={() => goToDetail(1)} disabled={detailIndex < 0 || detailIndex >= data.length - 1}
-                  className="p-1 rounded text-slate-500 dark:text-gray-400 hover:bg-slate-100 dark:hover:bg-gray-700 disabled:opacity-30" title="Next (↓/j)">
+                  className="p-1 rounded text-[var(--text-soft)] hover:bg-[var(--surface-3)] disabled:opacity-30" title="Next (↓/j)">
                   <ChevronRight className="w-4 h-4" />
                 </button>
                 <button onClick={() => navigator.clipboard?.writeText(JSON.stringify(detailRow, null, 2))}
-                  className="p-1 rounded text-slate-500 dark:text-gray-400 hover:bg-slate-100 dark:hover:bg-gray-700" title="Copy as JSON">
+                  className="p-1 rounded text-[var(--text-soft)] hover:bg-[var(--surface-3)]" title="Copy as JSON">
                   <Copy className="w-4 h-4" />
                 </button>
                 <button onClick={() => setDetailRow(null)}
-                  className="p-1 rounded text-slate-500 dark:text-gray-400 hover:bg-slate-100 dark:hover:bg-gray-700" title="Close (Esc)">
+                  className="p-1 rounded text-[var(--text-soft)] hover:bg-[var(--surface-3)]" title="Close (Esc)">
                   <X className="w-4 h-4" />
                 </button>
               </div>
@@ -983,23 +977,23 @@ export default function DataTable({ tableName }: DataTableProps) {
                 const val = detailRow[col.name];
                 const empty = val === null || val === undefined || val === '';
                 return (
-                  <div key={col.name} className="flex flex-col gap-0.5 border-b border-slate-100 dark:border-gray-700/50 pb-1.5">
+                  <div key={col.name} className="flex flex-col gap-0.5 border-b border-[var(--border)] pb-1.5">
                     <div className="flex items-center justify-between gap-2">
-                      <span className="text-[11px] font-mono font-semibold text-slate-500 dark:text-gray-400 truncate" title={col.name}>{col.name}</span>
+                      <span className="text-[11px] font-mono font-semibold text-[var(--text-soft)] truncate" title={col.name}>{col.name}</span>
                       <span className="flex items-center gap-1.5 shrink-0">
-                        <span className="text-[9.5px] uppercase font-mono text-slate-400 dark:text-gray-500">{col.type || 'TEXT'}</span>
+                        <span className="text-[9.5px] uppercase font-mono text-[var(--text-faint)]">{col.type || 'TEXT'}</span>
                         <button
                           onClick={() => filterColumnQuick(col.name, val)}
-                          className="text-slate-300 dark:text-gray-600 hover:text-blue-600 dark:hover:text-blue-400"
+                          className="text-[var(--text-faint)] hover:text-[var(--accent-600)]"
                           title={empty ? 'Filter where this column is null' : 'Filter rows with this value'}
                         >
                           <Filter className="w-3 h-3" />
                         </button>
                       </span>
                     </div>
-                    <div className="text-[12.5px] text-slate-700 dark:text-gray-200 font-mono break-all">
+                    <div className="text-[12.5px] text-[var(--text)] font-mono break-all">
                       {empty
-                        ? <span className="italic text-slate-400 dark:text-gray-500">null</span>
+                        ? <span className="italic text-[var(--text-faint)]">null</span>
                         : typeof val === 'boolean'
                           ? (val ? 'true' : 'false')
                           : formatCell(val)}

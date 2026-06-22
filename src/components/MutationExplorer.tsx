@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   CheckSquare, Square, Search, X, AlertCircle, FlaskConical, GitCompare, RefreshCw,
   ArrowUpDown, ArrowUp, ArrowDown, Filter, Download, Info,
@@ -155,7 +155,7 @@ function GrowthCurveSparkline({
         </div>
       );
     }
-    return <div className="text-[9px] text-slate-300 dark:text-gray-600 italic flex items-center justify-center" style={{ width, height }}>no curve</div>;
+    return <div className="text-[9px] text-[var(--text-faint)] italic flex items-center justify-center" style={{ width, height }}>no curve</div>;
   }
   const xs = data.map(d => d.t);
   const ys = data.map(d => d.od);
@@ -171,10 +171,10 @@ function GrowthCurveSparkline({
   return (
     <svg width={width} height={height} className="block" aria-label={tooltip}>
       <title>{tooltip}</title>
-      <line x1={pad} y1={height - pad} x2={width - pad} y2={height - pad} className="stroke-slate-200 dark:stroke-gray-700" strokeWidth="0.5" />
-      <path d={path} fill="none" stroke="currentColor" className="text-blue-600 dark:text-blue-400" strokeWidth="1.4" />
+      <line x1={pad} y1={height - pad} x2={width - pad} y2={height - pad} stroke="var(--border)" strokeWidth="0.5" />
+      <path d={path} fill="none" stroke="var(--data-grow)" strokeWidth="1.4" />
       {data.map((d, i) => (
-        <circle key={i} cx={sx(d.t)} cy={sy(d.od)} r="1.2" className="fill-blue-600 dark:fill-blue-400" />
+        <circle key={i} cx={sx(d.t)} cy={sy(d.od)} r="1.2" fill="var(--data-grow)" />
       ))}
     </svg>
   );
@@ -276,24 +276,24 @@ export default function MutationExplorer() {
   }, [data]);
 
   return (
-    <div className="flex flex-col h-full min-h-0 bg-white dark:bg-gray-800 rounded-lg border border-slate-200 dark:border-gray-700 shadow-sm overflow-hidden">
-      <div className="flex items-center justify-between border-b border-slate-200 dark:border-gray-700 bg-slate-50/60 dark:bg-gray-800/60 px-2">
-        <div className="flex">
+    <div className="flex flex-col h-full min-h-0 bg-[var(--surface)] rounded-lg border border-[var(--border)] overflow-hidden" style={{ boxShadow: 'var(--shadow-sm)' }}>
+      <div className="flex items-center justify-between border-b border-[var(--border)] px-2">
+        <div className="flex items-stretch">
           <TabButton active={tab === 'samples'} onClick={() => setTab('samples')} icon={<FlaskConical className="w-3.5 h-3.5" />}>
             Sample Selection
-            <span className="ml-1.5 px-1.5 py-0.5 rounded text-[10px] bg-slate-200 dark:bg-gray-700 text-slate-700 dark:text-gray-300 tabular-nums">{data?.samples.length ?? 0}</span>
+            <span className="ml-1.5 px-1.5 py-0.5 rounded text-[10px] bg-[var(--surface-3)] text-[var(--text-soft)] tabular-nums">{data?.samples.length ?? 0}</span>
           </TabButton>
           <TabButton active={tab === 'compare'} onClick={() => setTab('compare')} icon={<GitCompare className="w-3.5 h-3.5" />}>
             Comparative View
             <span className={cn(
               "ml-1.5 px-1.5 py-0.5 rounded text-[10px] tabular-nums",
-              selected.size > 0 ? "bg-blue-600 text-white" : "bg-slate-200 dark:bg-gray-700 text-slate-700 dark:text-gray-300"
+              selected.size > 0 ? "bg-[var(--accent-600)] text-white" : "bg-[var(--surface-3)] text-[var(--text-soft)]"
             )}>{selected.size}</span>
           </TabButton>
           <TabButton active={tab === 'copynumber'} onClick={() => setTab('copynumber')} icon={<Dna className="w-3.5 h-3.5" />}>
             Copy Number
             {(data?.stats?.cnRegionCount ?? 0) > 0 && (
-              <span className="ml-1.5 px-1.5 py-0.5 rounded text-[10px] tabular-nums bg-emerald-600 text-white">{data!.stats!.cnRegionCount}</span>
+              <span className="ml-1.5 px-1.5 py-0.5 rounded text-[10px] tabular-nums lims-pill-cn">{data!.stats!.cnRegionCount}</span>
             )}
           </TabButton>
           <TabButton active={tab === 'barcodes'} onClick={() => setTab('barcodes')} icon={<BarChart3 className="w-3.5 h-3.5" />}>
@@ -301,12 +301,12 @@ export default function MutationExplorer() {
           </TabButton>
         </div>
         <div className="flex items-center gap-1.5 pr-1">
-          <label className="flex items-center gap-1 text-[11px] text-slate-500 dark:text-gray-400">
-            Experiment
+          <label className="flex items-center gap-1.5 text-[11px] text-[var(--text-soft)]">
+            <span className="lims-label">Experiment</span>
             <select
               value={experiment}
               onChange={e => onExperimentChange(e.target.value)}
-              className="text-[11.5px] border border-slate-300 dark:border-gray-600 rounded px-1.5 py-0.5 bg-white dark:bg-gray-700 dark:text-gray-100 outline-none"
+              className="lims-input !w-auto !py-1 !text-[11.5px]"
               title="Scope the loaded dataset to one experiment for faster queries"
             >
               <option value="">all ({data?.experiments?.length ?? '?'})</option>
@@ -315,13 +315,13 @@ export default function MutationExplorer() {
               ))}
             </select>
           </label>
-          <label className="flex items-center gap-1 text-[11px] text-slate-500 dark:text-gray-400" title="Breseq parameter set. Each registry is one breseq run; the dataset can contain calls from multiple runs. Pick one to view at a time.">
-            Registry
+          <label className="flex items-center gap-1.5 text-[11px] text-[var(--text-soft)]" title="Breseq parameter set. Each registry is one breseq run; the dataset can contain calls from multiple runs. Pick one to view at a time.">
+            <span className="lims-label">Registry</span>
             <select
               value={registry}
               onChange={e => setRegistry(e.target.value)}
               disabled={!data?.registries || data.registries.length <= 1}
-              className="text-[11.5px] border border-slate-300 dark:border-gray-600 rounded px-1.5 py-0.5 bg-white dark:bg-gray-700 dark:text-gray-100 outline-none disabled:opacity-60 disabled:cursor-not-allowed font-mono"
+              className="lims-input !w-auto !py-1 !text-[11.5px] disabled:opacity-60 disabled:cursor-not-allowed font-mono"
             >
               <option value="">
                 {data?.selectedRegistry
@@ -342,54 +342,37 @@ export default function MutationExplorer() {
             </select>
           </label>
           {tab === 'samples' && selected.size > 0 && (
-            <button
-              onClick={() => setTab('compare')}
-              className="text-[11px] font-medium text-white bg-blue-600 hover:bg-blue-700 px-2.5 py-1 rounded"
-              title="Compare the selected samples"
-            >
+            <button onClick={() => setTab('compare')} className="lims-btn lims-btn-primary" title="Compare the selected samples">
               Compare {selected.size} →
             </button>
           )}
           {selected.size > 0 && (
-            <button
-              onClick={() => setSelected(new Set())}
-              className="text-[11px] text-slate-500 dark:text-gray-400 hover:text-slate-800 dark:hover:text-gray-100 px-2 py-1 rounded hover:bg-slate-100 dark:hover:bg-gray-700"
-              title="Clear selection"
-            >
-              clear
+            <button onClick={() => setSelected(new Set())} className="lims-btn lims-btn-ghost" title="Clear selection">
+              Clear
             </button>
           )}
-          <button
-            onClick={() => load(experiment, registry)}
-            className="p-1.5 rounded text-slate-500 dark:text-gray-400 hover:bg-slate-100 dark:hover:bg-gray-700"
-            title="Reload mutation dataset"
-          >
+          <button onClick={() => load(experiment, registry)} className="lims-btn lims-btn-ghost p-1.5" title="Reload mutation dataset">
             <RefreshCw className={cn('w-3.5 h-3.5', loading && 'animate-spin')} />
           </button>
         </div>
       </div>
 
-      {/* Compact context strip: stats + dataset-notes toggle in ONE thin row,
-          so the panel below gets the vertical space instead of stacked banners. */}
+      {/* Compact context strip: stats + dataset-notes toggle in ONE thin row */}
       {!error && data?.stats && (
-        <div className="flex items-center gap-3 flex-wrap px-3 h-7 border-b border-slate-200 dark:border-gray-700 bg-slate-50/40 dark:bg-gray-800/40 text-[11px] text-slate-600 dark:text-gray-300">
+        <div className="flex items-center gap-4 flex-wrap px-3 h-8 border-b border-[var(--border)] bg-[var(--surface-2)] text-[11px]">
           <StatPill label="samples" value={data.stats.sampleCount} />
-          <StatPill label="mutations" value={data.stats.frequencyRowCount} />
-          <StatPill label="OD curves" value={data.stats.curveCount} accent={data.stats.curveCount > 0 ? 'blue' : undefined} />
+          <StatPill label="mutations" value={data.stats.frequencyRowCount} accent="mut" />
+          <StatPill label="OD curves" value={data.stats.curveCount} accent={data.stats.curveCount > 0 ? 'grow' : undefined} />
           <StatPill
             label={data.stats.cnRegionCount === 1 ? 'CN region' : 'CN regions'}
             value={data.stats.cnRegionCount}
-            accent={data.stats.cnRegionCount > 0 ? 'emerald' : undefined}
+            accent={data.stats.cnRegionCount > 0 ? 'cn' : undefined}
           />
           {data?.warnings && data.warnings.length > 0 && (
             <button
               onClick={() => setShowNotes(v => !v)}
-              className={cn(
-                "flex items-center gap-1 px-1.5 py-0.5 rounded text-[10.5px]",
-                showNotes
-                  ? "bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-200"
-                  : "text-amber-700 dark:text-amber-300 hover:bg-amber-50 dark:hover:bg-amber-900/20"
-              )}
+              data-on={showNotes}
+              className="lims-toggle !py-0.5 !px-1.5 !text-[10.5px]"
               title="Dataset notes from the loader"
             >
               <Info className="w-3 h-3" />
@@ -465,6 +448,9 @@ export default function MutationExplorer() {
             mutations={data?.mutations ?? []}
             loading={loading}
             cnRegionCount={data?.stats?.cnRegionCount ?? 0}
+            currentExperiment={experiment}
+            availableExperiments={data?.experiments ?? []}
+            onLoadExperiment={onExperimentChange}
             onCompareCN={() => {
               setForceMetric({ metric: 'copy_number', nonce: Date.now() });
               setTab('compare');
@@ -482,15 +468,7 @@ export default function MutationExplorer() {
 
 function TabButton({ active, onClick, icon, children }: { active: boolean; onClick: () => void; icon: React.ReactNode; children: React.ReactNode }) {
   return (
-    <button
-      onClick={onClick}
-      className={cn(
-        'flex items-center gap-1.5 px-3 py-2 text-[12.5px] font-medium border-b-2 -mb-px transition-colors',
-        active
-          ? 'border-blue-600 text-blue-700 dark:text-blue-300'
-          : 'border-transparent text-slate-500 dark:text-gray-400 hover:text-slate-800 dark:hover:text-gray-100'
-      )}
-    >
+    <button onClick={onClick} data-active={active} className="lims-tab">
       {icon}
       {children}
     </button>
@@ -581,7 +559,9 @@ function SampleSelectionPanel({
             strain: f.chips?.strain ?? [],
             condition: f.chips?.condition ?? [],
           },
-          selectedOnly: !!f.selectedOnly,
+          // "Selected only" is a transient view toggle, never restored on load:
+          // restoring it true opens the table empty (nothing is selected yet).
+          selectedOnly: false,
           transferMin: typeof f.transferMin === 'number' ? f.transferMin : null,
           transferMax: typeof f.transferMax === 'number' ? f.transferMax : null,
         });
@@ -770,61 +750,45 @@ function SampleSelectionPanel({
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search by name, strain, experiment, replicate, donor, condition…"
-            className="w-full pl-8 pr-7 py-1.5 text-[12px] border border-slate-300 dark:border-gray-600 rounded-md focus:ring-1 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-gray-100 outline-none placeholder:text-slate-400 dark:placeholder:text-gray-500"
+            className="lims-input pl-8 pr-7 !py-1.5"
           />
           {search && (
-            <button onClick={() => setSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 dark:text-gray-500 hover:text-slate-700 dark:hover:text-gray-300" title="Clear search">
+            <button onClick={() => setSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--text-faint)] hover:text-[var(--text)]" title="Clear search">
               <X className="w-3 h-3" />
             </button>
           )}
         </div>
         <button
           onClick={() => setShowFilters(v => !v)}
-          className={cn(
-            "flex items-center gap-1 text-[11px] px-2 py-1 rounded border",
-            showFilters
-              ? 'border-blue-300 dark:border-blue-700 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
-              : 'border-slate-200 dark:border-gray-600 text-slate-600 dark:text-gray-300 hover:bg-slate-100 dark:hover:bg-gray-700'
-          )}
+          data-on={showFilters}
+          className="lims-toolbtn"
           title="Show or hide chip filters"
         >
           <Filter className="w-3 h-3" /> Filters
           {activeFacetCount > 0 && (
-            <span className="ml-0.5 px-1 rounded-full bg-blue-600 text-white text-[9.5px] font-semibold tabular-nums leading-none py-0.5">
+            <span className="ml-0.5 px-1 rounded-full bg-[var(--accent-600)] text-white text-[9.5px] font-semibold tabular-nums leading-none py-0.5">
               {activeFacetCount}
             </span>
           )}
         </button>
         <button
           onClick={() => setFilters(prev => ({ ...prev, selectedOnly: !prev.selectedOnly }))}
-          className={cn(
-            "flex items-center gap-1 text-[11px] px-2 py-1 rounded border",
-            filters.selectedOnly
-              ? 'border-blue-300 dark:border-blue-700 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
-              : 'border-slate-200 dark:border-gray-600 text-slate-600 dark:text-gray-300 hover:bg-slate-100 dark:hover:bg-gray-700'
-          )}
+          data-on={filters.selectedOnly}
+          className="lims-toolbtn"
           title="Show only samples you've selected"
         >
           {filters.selectedOnly ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
           Selected only
         </button>
-        <button
-          onClick={expandAll}
-          className="flex items-center gap-1 text-[11px] px-2 py-1 rounded border border-slate-200 dark:border-gray-600 text-slate-600 dark:text-gray-300 hover:bg-slate-100 dark:hover:bg-gray-700"
-          title="Expand every group"
-        >
+        <button onClick={expandAll} className="lims-toolbtn" title="Expand every group">
           <UnfoldVertical className="w-3 h-3" /> Expand
         </button>
-        <button
-          onClick={collapseAll}
-          className="flex items-center gap-1 text-[11px] px-2 py-1 rounded border border-slate-200 dark:border-gray-600 text-slate-600 dark:text-gray-300 hover:bg-slate-100 dark:hover:bg-gray-700"
-          title="Collapse every group"
-        >
+        <button onClick={collapseAll} className="lims-toolbtn" title="Collapse every group">
           <FoldVertical className="w-3 h-3" /> Collapse
         </button>
         <button
           onClick={selectEndpoints}
-          className="flex items-center gap-1 text-[11px] px-2 py-1 rounded border border-slate-200 dark:border-gray-600 text-slate-600 dark:text-gray-300 hover:bg-slate-100 dark:hover:bg-gray-700"
+          className="lims-toolbtn"
           title="Select the first and last transfer per group (useful for time-course endpoints)"
           disabled={grouped.length === 0}
         >
@@ -833,13 +797,13 @@ function SampleSelectionPanel({
         {anyFilterActive && (
           <button
             onClick={() => { clearAllFilters(); setSearch(''); }}
-            className="text-[11px] px-2 py-1 rounded text-slate-500 dark:text-gray-400 hover:bg-slate-100 dark:hover:bg-gray-700"
+            className="lims-btn lims-btn-ghost !text-[11px]"
             title="Clear search + all chip filters"
           >
-            reset all filters
+            Reset all
           </button>
         )}
-        <div className="text-[11px] text-slate-500 dark:text-gray-400 ml-auto tabular-nums whitespace-nowrap">
+        <div className="text-[11px] text-[var(--text-soft)] ml-auto tabular-nums whitespace-nowrap">
           {selected.size} selected · {filtered.length}/{samples.length} shown · {grouped.length} group{grouped.length === 1 ? '' : 's'}
         </div>
       </div>
@@ -883,11 +847,11 @@ function SampleSelectionPanel({
       {/* Sample table */}
       <div className="flex-1 min-h-0 overflow-auto">
         <table className="w-full text-[12px] border-collapse">
-          <thead className="sticky top-0 z-10 bg-slate-50 dark:bg-gray-800/95 backdrop-blur border-b border-slate-200 dark:border-gray-700">
-            <tr className="text-left text-slate-600 dark:text-gray-300">
+          <thead className="sticky top-0 z-10 bg-[var(--surface-2)] backdrop-blur border-b border-[var(--border)]">
+            <tr className="text-left text-[var(--text-soft)]">
               <th className="px-2 py-1.5 w-8">
-                <button onClick={toggleAll} className="flex items-center justify-center w-6 h-6 hover:bg-slate-200 dark:hover:bg-gray-700 rounded" title={allOnPageSelected ? 'Deselect all (filtered)' : 'Select all (filtered)'}>
-                  {allOnPageSelected ? <CheckSquare className="w-4 h-4 text-blue-600" /> : <Square className="w-4 h-4 text-slate-400 dark:text-gray-500" />}
+                <button onClick={toggleAll} className="flex items-center justify-center w-6 h-6 hover:bg-[var(--surface-3)] rounded" title={allOnPageSelected ? 'Deselect all (filtered)' : 'Select all (filtered)'}>
+                  {allOnPageSelected ? <CheckSquare className="w-4 h-4 text-[var(--accent-600)]" /> : <Square className="w-4 h-4 text-[var(--text-faint)]" />}
                 </button>
               </th>
               <th className="px-2 py-1.5 font-semibold">Sample</th>
@@ -921,29 +885,29 @@ function SampleSelectionPanel({
               const isCollapsed = collapsed.has(group.key);
               return (
                 <React.Fragment key={group.key}>
-                  <tr className="bg-slate-100/70 dark:bg-gray-800/40 text-[11px] uppercase tracking-wider text-slate-500 dark:text-gray-400">
+                  <tr className="bg-[var(--surface-3)] text-[11px] uppercase tracking-wider text-[var(--text-soft)]">
                     <td className="px-2 py-1">
                       <button
                         onClick={() => toggleGroup(group.rows)}
-                        className="flex items-center justify-center w-6 h-6 hover:bg-slate-200 dark:hover:bg-gray-700 rounded"
+                        className="flex items-center justify-center w-6 h-6 hover:bg-[var(--border)] rounded"
                         title={allSel ? 'Deselect this group' : 'Select this group'}
                       >
                         {allSel
-                          ? <CheckSquare className="w-3.5 h-3.5 text-blue-600" />
+                          ? <CheckSquare className="w-3.5 h-3.5 text-[var(--accent-600)]" />
                           : someSel
-                            ? <CheckSquare className="w-3.5 h-3.5 text-blue-400 opacity-60" />
-                            : <Square className="w-3.5 h-3.5 text-slate-400 dark:text-gray-500" />}
+                            ? <CheckSquare className="w-3.5 h-3.5 text-[var(--accent-500)] opacity-60" />
+                            : <Square className="w-3.5 h-3.5 text-[var(--text-faint)]" />}
                       </button>
                     </td>
                     <td colSpan={9} className="px-1 py-1">
                       <button
                         onClick={() => toggleCollapse(group.key)}
-                        className="flex items-center gap-1 font-semibold hover:text-slate-700 dark:hover:text-gray-200"
+                        className="flex items-center gap-1 font-semibold hover:text-[var(--text)]"
                         title={isCollapsed ? 'Expand group' : 'Collapse group'}
                       >
                         {isCollapsed ? <ChevronRight className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
                         {group.label}
-                        <span className="ml-1 normal-case text-slate-400 dark:text-gray-500 font-normal tabular-nums">
+                        <span className="ml-1 normal-case text-[var(--text-faint)] font-normal tabular-nums">
                           ({selectedInGroup > 0 ? `${selectedInGroup}/` : ''}{group.rows.length})
                         </span>
                       </button>
@@ -957,24 +921,24 @@ function SampleSelectionPanel({
                         key={s.id}
                         onClick={() => toggleOne(s.id)}
                         className={cn(
-                          'cursor-pointer border-b border-slate-100 dark:border-gray-700/60',
-                          isSel ? 'bg-blue-50/70 dark:bg-blue-900/20' : 'hover:bg-slate-50 dark:hover:bg-gray-700/40'
+                          'cursor-pointer border-b border-[var(--border)]',
+                          isSel ? 'bg-[var(--accent-50)]' : 'hover:bg-[var(--surface-2)]'
                         )}
                       >
                         <td className="px-2 py-1 align-middle">
-                          {isSel ? <CheckSquare className="w-4 h-4 text-blue-600" /> : <Square className="w-4 h-4 text-slate-300 dark:text-gray-600" />}
+                          {isSel ? <CheckSquare className="w-4 h-4 text-[var(--accent-600)]" /> : <Square className="w-4 h-4 text-[var(--text-faint)]" />}
                         </td>
-                        <td className="px-2 py-1 font-mono text-[11.5px] text-slate-800 dark:text-gray-100">{s.name}</td>
-                        <td className="px-2 py-1 text-slate-600 dark:text-gray-300">{s.experiment}</td>
-                        <td className="px-2 py-1 text-slate-600 dark:text-gray-300">{s.replicate ?? ''}</td>
-                        <td className="px-2 py-1 text-slate-600 dark:text-gray-300">{s.donor_dna ?? ''}</td>
-                        <td className="px-2 py-1 text-slate-600 dark:text-gray-300">{s.strain ?? ''}</td>
-                        <td className="px-2 py-1 text-slate-600 dark:text-gray-300">{s.condition ?? ''}</td>
-                        <td className="px-2 py-1 text-right tabular-nums text-slate-700 dark:text-gray-200">{s.transfer ?? ''}</td>
+                        <td className="px-2 py-1 lims-id text-[var(--text)]">{s.name}</td>
+                        <td className="px-2 py-1 text-[var(--text-soft)]">{s.experiment}</td>
+                        <td className="px-2 py-1 text-[var(--text-soft)]">{s.replicate ?? ''}</td>
+                        <td className="px-2 py-1 text-[var(--text-soft)]">{s.donor_dna ?? ''}</td>
+                        <td className="px-2 py-1 text-[var(--text-soft)]">{s.strain ?? ''}</td>
+                        <td className="px-2 py-1 text-[var(--text-soft)]">{s.condition ?? ''}</td>
+                        <td className="px-2 py-1 text-right tabular-nums text-[var(--text)]">{s.transfer ?? ''}</td>
                         <td className="px-2 py-1 text-right tabular-nums">
                           {muts > 0 ? (
-                            <span className="inline-block px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 text-[10.5px] font-semibold">{muts}</span>
-                          ) : <span className="text-slate-300 dark:text-gray-600">—</span>}
+                            <span className="inline-block px-1.5 py-0.5 rounded lims-pill-mut text-[10.5px] font-semibold">{muts}</span>
+                          ) : <span className="text-[var(--text-faint)]">—</span>}
                         </td>
                         <td className="px-2 py-1">
                           <div className="flex justify-end">
@@ -1557,19 +1521,18 @@ function SortChip({ label, active, dir, onClick }: { label: string; active: bool
 
 /* ---------------- Dataset summary pill ---------------- */
 
-function StatPill({ label, value, accent }: { label: string; value: number; accent?: 'blue' | 'emerald' }) {
+function StatPill({ label, value, accent }: { label: string; value: number; accent?: 'mut' | 'grow' | 'cn' }) {
   const tone =
-    accent === 'emerald'
-      ? 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300'
-      : accent === 'blue'
-        ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300'
-        : 'bg-slate-200 dark:bg-gray-700 text-slate-700 dark:text-gray-300';
+    accent === 'cn' ? 'lims-pill-cn'
+      : accent === 'grow' ? 'lims-pill-grow'
+        : accent === 'mut' ? 'lims-pill-mut'
+          : 'bg-[var(--surface-3)] text-[var(--text-soft)]';
   return (
     <span className="flex items-center gap-1.5">
       <span className={cn('inline-block px-1.5 py-0.5 rounded text-[10.5px] font-semibold tabular-nums', tone)}>
         {value.toLocaleString()}
       </span>
-      <span className="text-slate-500 dark:text-gray-400">{label}</span>
+      <span className="text-[var(--text-soft)]">{label}</span>
     </span>
   );
 }
@@ -1592,6 +1555,7 @@ const CN_LINE_COLORS = [
 
 function CopyNumberPanel({
   samples, mutations, loading, cnRegionCount, onCompareCN, onPickSamples,
+  currentExperiment, availableExperiments, onLoadExperiment,
 }: {
   samples: MutationSample[];
   mutations: MutationRow[];
@@ -1599,9 +1563,14 @@ function CopyNumberPanel({
   cnRegionCount: number;
   onCompareCN: () => void;
   onPickSamples: () => void;
+  currentExperiment: string;
+  availableExperiments: string[];
+  onLoadExperiment: (next: string) => void;
 }) {
   const cnRows = useMemo(() => mutations.filter(m => m.metric === 'copy_number'), [mutations]);
   const [region, setRegion] = useState<string>('');
+  const [logScale, setLogScale] = useState(false);
+  const [showPoints, setShowPoints] = useState(true);
 
   // Default the region selector to the first CN row once data arrives.
   useEffect(() => {
@@ -1672,18 +1641,32 @@ function CopyNumberPanel({
   }
 
   if (cnRegionCount === 0 || cnRows.length === 0) {
+    // Copy numbers only exist for certain experiments (the dgoA* amplification
+    // series lives in TFMN1 / TFMN4). The default "all experiments" view resolves
+    // to a breseq registry whose sample set excludes them, so offer a one-click
+    // jump to an experiment that actually carries copy-number data.
+    const CN_EXPERIMENTS = ['TFMN1', 'TFMN4'];
+    const loadable = CN_EXPERIMENTS.filter(e => availableExperiments.includes(e));
+    const target = loadable[0] ?? 'TFMN1';
+    const onCnExperiment = CN_EXPERIMENTS.includes(currentExperiment);
     return (
-      <div className="flex-1 flex flex-col items-center justify-center gap-3 p-6 text-center text-slate-500 dark:text-gray-400 text-sm">
-        <Dna className="w-10 h-10 text-slate-300 dark:text-gray-600" />
+      <div className="flex-1 flex flex-col items-center justify-center gap-3 p-6 text-center text-[var(--text-soft)] text-sm">
+        <Dna className="w-10 h-10 text-[var(--data-cn)]" />
         <p className="max-w-md">
-          No copy-number data in the current view. Copy numbers come from the
-          {' '}<span className="font-mono">Copy_numbers</span> LIMS table and only exist for some
-          experiments / breseq registries (e.g. the <span className="font-mono">dgoA*</span> amplification series).
+          {onCnExperiment
+            ? <>No copy-number rows came back for <span className="lims-id">{currentExperiment}</span> in the current registry. The <span className="lims-id">Copy_numbers</span> table may not cover the selected samples.</>
+            : <>No copy-number data in the current view. Copy numbers (the <span className="lims-id">dgoA*</span> amplification series) are recorded per sequenced sample in the <span className="lims-id">Copy_numbers</span> table and only exist in the <span className="font-semibold text-[var(--text)]">TFMN1</span> and <span className="font-semibold text-[var(--text)]">TFMN4</span> experiments.</>}
         </p>
-        <p className="text-[12px]">Try switching the <span className="font-semibold">Experiment</span> or <span className="font-semibold">Registry</span> dropdown above to one that contains sequenced copy-number samples.</p>
-        <button onClick={onPickSamples} className="px-3 py-1.5 text-[12px] bg-blue-600 text-white rounded hover:bg-blue-700">
-          Go to Sample Selection
-        </button>
+        <div className="flex items-center gap-2">
+          {!onCnExperiment && (
+            <button onClick={() => onLoadExperiment(target)} className="lims-btn lims-btn-primary">
+              Load {target} copy numbers
+            </button>
+          )}
+          <button onClick={onPickSamples} className="lims-btn lims-btn-ghost">
+            Go to Sample Selection
+          </button>
+        </div>
       </div>
     );
   }
@@ -1691,33 +1674,51 @@ function CopyNumberPanel({
   return (
     <div className="flex flex-col h-full min-h-0">
       {/* Controls */}
-      <div className="px-3 py-2 border-b border-slate-200 dark:border-gray-700 bg-white dark:bg-gray-800 flex items-center gap-2 flex-wrap">
-        <label className="text-[11.5px] text-slate-600 dark:text-gray-300 flex items-center gap-1.5">
+      <div className="px-3 py-2 border-b border-[var(--border)] bg-[var(--surface)] flex items-center gap-2 flex-wrap">
+        <label className="text-[11.5px] text-[var(--text-soft)] flex items-center gap-1.5">
           Region
           <select
             value={region}
             onChange={e => setRegion(e.target.value)}
-            className="text-[12px] border border-slate-300 dark:border-gray-600 rounded px-2 py-1 bg-white dark:bg-gray-700 dark:text-gray-100 outline-none"
+            className="lims-select"
           >
             {cnRows.map(r => (
               <option key={r.id} value={r.id}>{r.gene}{r.gene_product ? ` — ${r.gene_product}` : ''}</option>
             ))}
           </select>
         </label>
-        <div className="text-[11px] text-slate-500 dark:text-gray-400 tabular-nums">
+        <div className="text-[11px] text-[var(--text-faint)] tabular-nums">
           {series.length} lineage{series.length === 1 ? '' : 's'} · {allValues.length} measurements
         </div>
         <div className="ml-auto flex items-center gap-2">
           <button
+            type="button"
+            onClick={() => setLogScale(v => !v)}
+            data-on={logScale}
+            className="lims-toolbtn"
+            title="Toggle logarithmic copy-number axis (useful when amplification spans an order of magnitude)"
+          >
+            log Y
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowPoints(v => !v)}
+            data-on={showPoints}
+            className="lims-toolbtn"
+            title="Show / hide individual measurement points"
+          >
+            points
+          </button>
+          <button
             onClick={onCompareCN}
-            className="flex items-center gap-1 px-2 py-1 text-[11px] text-slate-600 dark:text-gray-300 border border-slate-300 dark:border-gray-600 rounded hover:bg-slate-50 dark:hover:bg-gray-700"
+            className="lims-toolbtn"
             title="Open the Comparative table filtered to copy-number rows"
           >
-            <GitCompare className="w-3 h-3" /> Compare table
+            <GitCompare className="w-3 h-3" /> Compare
           </button>
           <button
             onClick={exportCsv}
-            className="flex items-center gap-1 px-2 py-1 text-[11px] text-slate-600 dark:text-gray-300 border border-slate-300 dark:border-gray-600 rounded hover:bg-slate-50 dark:hover:bg-gray-700"
+            className="lims-toolbtn"
             title="Export this region's copy numbers as CSV"
           >
             <Download className="w-3 h-3" /> CSV
@@ -1727,7 +1728,7 @@ function CopyNumberPanel({
 
       {/* Summary cards */}
       {summary && (
-        <div className="px-3 py-2 border-b border-slate-200 dark:border-gray-700 bg-slate-50/40 dark:bg-gray-800/40 flex items-center gap-2 flex-wrap text-[11px]">
+        <div className="px-3 py-2 border-b border-[var(--border)] bg-[var(--surface-2)] flex items-center gap-2 flex-wrap text-[11px]">
           <SummaryCard label="region" value={activeRow?.gene ?? ''} mono />
           <SummaryCard label="min CN" value={summary.min.toFixed(2)} />
           <SummaryCard label="mean CN" value={summary.mean.toFixed(2)} />
@@ -1740,9 +1741,15 @@ function CopyNumberPanel({
       {/* Trend chart */}
       <div className="flex-1 min-h-0 overflow-auto p-4">
         {series.length === 0 ? (
-          <div className="flex items-center justify-center h-full text-slate-400 dark:text-gray-500 text-sm">No measurements for this region.</div>
+          <div className="flex items-center justify-center h-full text-[var(--text-faint)] text-sm">No measurements for this region.</div>
         ) : (
-          <CopyNumberChart series={series} hasTransfers={hasTransfers} regionLabel={activeRow?.gene ?? ''} />
+          <CopyNumberChart
+            series={series}
+            hasTransfers={hasTransfers}
+            regionLabel={activeRow?.gene ?? ''}
+            logScale={logScale}
+            showPoints={showPoints}
+          />
         )}
       </div>
     </div>
@@ -1751,14 +1758,17 @@ function CopyNumberPanel({
 
 function SummaryCard({ label, value, accent, mono }: { label: string; value: string; accent?: boolean; mono?: boolean }) {
   return (
-    <div className={cn(
-      'flex flex-col px-2.5 py-1 rounded border',
-      accent
-        ? 'border-emerald-300 dark:border-emerald-700 bg-emerald-50 dark:bg-emerald-900/20'
-        : 'border-slate-200 dark:border-gray-700 bg-white dark:bg-gray-800'
-    )}>
-      <span className="text-[9.5px] uppercase tracking-wider text-slate-400 dark:text-gray-500">{label}</span>
-      <span className={cn('text-[13px] font-semibold tabular-nums text-slate-800 dark:text-gray-100', mono && 'font-mono')}>{value}</span>
+    <div
+      className="flex flex-col px-2.5 py-1 rounded border"
+      style={accent
+        ? { borderColor: 'var(--data-cn)', background: 'var(--data-cn-bg)' }
+        : { borderColor: 'var(--border)', background: 'var(--surface)' }}
+    >
+      <span className="text-[9.5px] uppercase tracking-wider text-[var(--text-faint)]">{label}</span>
+      <span
+        className={cn('text-[13px] font-semibold tabular-nums', mono && 'font-mono')}
+        style={{ color: accent ? 'var(--data-cn)' : 'var(--text)' }}
+      >{value}</span>
     </div>
   );
 }
@@ -1766,15 +1776,25 @@ function SummaryCard({ label, value, accent, mono }: { label: string; value: str
 // Responsive-ish SVG line chart: copy number (y) vs transfer (x). When transfers
 // aren't available we fall back to ordinal index so the series still renders.
 function CopyNumberChart({
-  series, hasTransfers, regionLabel,
+  series, hasTransfers, regionLabel, logScale = false, showPoints = true,
 }: {
   series: { lineage: string; color: string; points: { transfer: number; value: number; name: string }[] }[];
   hasTransfers: boolean;
   regionLabel: string;
+  logScale?: boolean;
+  showPoints?: boolean;
 }) {
-  const W = 760, H = 380, padL = 48, padR = 16, padT = 16, padB = 44;
+  const W = 760, H = 380, padL = 52, padR = 18, padT = 16, padB = 44;
   const plotW = W - padL - padR;
   const plotH = H - padT - padB;
+
+  // Click a legend entry to ISOLATE it (show only that lineage); click again to
+  // clear. Hover dims the others so a single trajectory pops out of the bundle.
+  const [isolated, setIsolated] = useState<string | null>(null);
+  const [hovered, setHovered] = useState<string | null>(null);
+  // Crosshair tooltip: nearest data point under the cursor.
+  const [cursor, setCursor] = useState<{ px: number; py: number; lineage: string; name: string; x: number; value: number } | null>(null);
+  const svgRef = useRef<SVGSVGElement | null>(null);
 
   const xVals: number[] = [];
   const yVals: number[] = [];
@@ -1786,78 +1806,207 @@ function CopyNumberChart({
   }
   const xMin = xVals.length ? Math.min(...xVals) : 0;
   const xMax = xVals.length ? Math.max(...xVals) : 1;
-  const yMax = Math.max(1, yVals.length ? Math.max(...yVals) : 1) * 1.1;
-  const yMin = 0;
+  const dataYMax = yVals.length ? Math.max(...yVals) : 1;
+  const dataYMin = yVals.length ? Math.min(...yVals) : 0;
+
+  // Linear: 0 -> 1.1*max. Log: clamp floor to the smaller of 0.5 or the data min
+  // so sub-single-copy values still render; ceil to next power-ish above max.
+  const yMaxLin = Math.max(1, dataYMax) * 1.1;
+  const logFloor = Math.max(0.1, Math.min(0.5, dataYMin > 0 ? dataYMin * 0.8 : 0.5));
+  const logTop = Math.max(2, dataYMax * 1.15);
 
   const sx = (x: number) => padL + ((x - xMin) / Math.max(1e-6, xMax - xMin)) * plotW;
-  const sy = (y: number) => padT + plotH - ((y - yMin) / Math.max(1e-6, yMax - yMin)) * plotH;
+  const sy = (y: number) => {
+    if (logScale) {
+      const lo = Math.log10(logFloor), hi = Math.log10(logTop);
+      const v = Math.log10(Math.max(logFloor, y));
+      return padT + plotH - ((v - lo) / Math.max(1e-6, hi - lo)) * plotH;
+    }
+    return padT + plotH - ((y - 0) / Math.max(1e-6, yMaxLin - 0)) * plotH;
+  };
 
-  // Y gridlines at integer copy numbers (and 0).
+  // Y ticks. Log: 0.5,1,2,5,10,... within range. Linear: integer steps.
   const yTicks: number[] = [];
-  for (let v = 0; v <= yMax; v += yMax > 6 ? 2 : 1) yTicks.push(v);
+  if (logScale) {
+    for (const v of [0.25, 0.5, 1, 2, 3, 5, 8, 10, 15, 20, 30, 50]) {
+      if (v >= logFloor && v <= logTop) yTicks.push(v);
+    }
+  } else {
+    const stepY = yMaxLin > 12 ? 2 : 1;
+    for (let v = 0; v <= yMaxLin; v += stepY) yTicks.push(v);
+  }
 
-  // X ticks: integer transfers within range (capped to keep labels readable).
   const xTicks: number[] = [];
   const span = xMax - xMin;
   const step = span <= 12 ? 1 : Math.ceil(span / 12);
   for (let v = Math.ceil(xMin); v <= xMax; v += step) xTicks.push(v);
 
+  // Reference copy-number lines (single + double copy) for quick orientation.
+  const refLines = [1, 2].filter(v => (logScale ? v >= logFloor && v <= logTop : v <= yMaxLin));
+
+  // Precompute screen-space points per lineage once.
+  const drawn = series.map(s => ({
+    ...s,
+    pts: s.points.map((p, i) => ({
+      sxv: sx(hasTransfers && !Number.isNaN(p.transfer) ? p.transfer : i),
+      syv: sy(p.value),
+      xv: hasTransfers && !Number.isNaN(p.transfer) ? p.transfer : i,
+      raw: p,
+    })),
+  }));
+
+  const isDim = (lineage: string) => {
+    if (isolated) return lineage !== isolated;
+    if (hovered) return lineage !== hovered;
+    return false;
+  };
+  const anyFocus = !!isolated || !!hovered;
+
+  // Nearest-point lookup for the crosshair tooltip.
+  function handleMove(e: React.MouseEvent<SVGSVGElement>) {
+    const svg = svgRef.current;
+    if (!svg) return;
+    const rect = svg.getBoundingClientRect();
+    const mx = ((e.clientX - rect.left) / rect.width) * W;
+    const my = ((e.clientY - rect.top) / rect.height) * H;
+    let best: typeof cursor = null;
+    let bestD = Infinity;
+    for (const s of drawn) {
+      if (isolated && s.lineage !== isolated) continue;
+      for (const p of s.pts) {
+        const d = (p.sxv - mx) ** 2 + (p.syv - my) ** 2;
+        if (d < bestD) {
+          bestD = d;
+          best = { px: p.sxv, py: p.syv, lineage: s.lineage, name: p.raw.name, x: p.xv, value: p.raw.value };
+        }
+      }
+    }
+    // Only snap within a reasonable radius.
+    setCursor(bestD <= 26 * 26 ? best : null);
+  }
+
   return (
     <div className="flex flex-col gap-3">
-      <svg viewBox={`0 0 ${W} ${H}`} className="w-full max-w-3xl mx-auto" role="img" aria-label={`Copy number trend for ${regionLabel}`}>
-        {/* baseline CN=1 reference (single-copy) */}
-        {yMin <= 1 && yMax >= 1 && (
-          <line x1={padL} x2={W - padR} y1={sy(1)} y2={sy(1)} className="stroke-slate-300 dark:stroke-gray-600" strokeWidth="1" strokeDasharray="4 3" />
-        )}
-        {/* gridlines + y labels */}
-        {yTicks.map(v => (
-          <g key={`y${v}`}>
-            <line x1={padL} x2={W - padR} y1={sy(v)} y2={sy(v)} className="stroke-slate-100 dark:stroke-gray-700/60" strokeWidth="1" />
-            <text x={padL - 6} y={sy(v) + 3} textAnchor="end" className="fill-slate-400 dark:fill-gray-500 text-[10px]">{v}</text>
-          </g>
-        ))}
-        {/* x axis labels */}
-        {xTicks.map(v => (
-          <text key={`x${v}`} x={sx(v)} y={H - padB + 16} textAnchor="middle" className="fill-slate-400 dark:fill-gray-500 text-[10px]">
-            {hasTransfers ? `T${v}` : v}
-          </text>
-        ))}
-        <text x={padL + plotW / 2} y={H - 6} textAnchor="middle" className="fill-slate-500 dark:fill-gray-400 text-[11px]">
-          {hasTransfers ? 'Transfer' : 'Sample (ordinal)'}
-        </text>
-        <text x={14} y={padT + plotH / 2} textAnchor="middle" transform={`rotate(-90 14 ${padT + plotH / 2})`} className="fill-slate-500 dark:fill-gray-400 text-[11px]">
-          Copy number
-        </text>
-        {/* series */}
-        {series.map(s => {
-          const pts = s.points.map((p, i) => ({
-            x: sx(hasTransfers && !Number.isNaN(p.transfer) ? p.transfer : i),
-            y: sy(p.value),
-            raw: p,
-          }));
-          const path = pts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(' ');
-          return (
-            <g key={s.lineage}>
-              <path d={path} fill="none" stroke={s.color} strokeWidth="1.8" />
-              {pts.map((p, i) => (
-                <circle key={i} cx={p.x} cy={p.y} r="2.6" fill={s.color}>
-                  <title>{`${s.lineage} · ${p.raw.name}\n${hasTransfers && !Number.isNaN(p.raw.transfer) ? `T${p.raw.transfer}` : `#${i + 1}`} · CN ${p.raw.value.toFixed(2)}`}</title>
-                </circle>
-              ))}
+      <div className="relative w-full max-w-3xl mx-auto">
+        <svg
+          ref={svgRef}
+          viewBox={`0 0 ${W} ${H}`}
+          className="w-full select-none"
+          role="img"
+          aria-label={`Copy number trend for ${regionLabel}`}
+          onMouseMove={handleMove}
+          onMouseLeave={() => setCursor(null)}
+        >
+          {/* gridlines + y labels */}
+          {yTicks.map(v => (
+            <g key={`y${v}`}>
+              <line x1={padL} x2={W - padR} y1={sy(v)} y2={sy(v)} stroke="var(--border)" strokeWidth="1" opacity="0.5" />
+              <text x={padL - 7} y={sy(v) + 3} textAnchor="end" className="text-[10px]" fill="var(--text-faint)">{v}</text>
             </g>
-          );
-        })}
-      </svg>
-      {/* legend */}
-      <div className="flex flex-wrap gap-x-4 gap-y-1.5 justify-center max-w-3xl mx-auto">
+          ))}
+          {/* reference copy-number lines */}
+          {refLines.map(v => (
+            <g key={`ref${v}`}>
+              <line x1={padL} x2={W - padR} y1={sy(v)} y2={sy(v)} stroke="var(--data-cn)" strokeWidth="1" strokeDasharray="4 3" opacity="0.55" />
+              <text x={W - padR} y={sy(v) - 3} textAnchor="end" className="text-[9px]" fill="var(--data-cn)" opacity="0.85">{v}×</text>
+            </g>
+          ))}
+          {/* x axis labels */}
+          {xTicks.map(v => (
+            <text key={`x${v}`} x={sx(v)} y={H - padB + 16} textAnchor="middle" className="text-[10px]" fill="var(--text-faint)">
+              {hasTransfers ? `T${v}` : v}
+            </text>
+          ))}
+          <text x={padL + plotW / 2} y={H - 6} textAnchor="middle" className="text-[11px]" fill="var(--text-soft)">
+            {hasTransfers ? 'Transfer' : 'Sample (ordinal)'}
+          </text>
+          <text x={14} y={padT + plotH / 2} textAnchor="middle" transform={`rotate(-90 14 ${padT + plotH / 2})`} className="text-[11px]" fill="var(--text-soft)">
+            Copy number{logScale ? ' (log)' : ''}
+          </text>
+          {/* series */}
+          {drawn.map(s => {
+            const dim = isDim(s.lineage);
+            const focus = (isolated === s.lineage) || (hovered === s.lineage);
+            const path = s.pts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.sxv.toFixed(1)} ${p.syv.toFixed(1)}`).join(' ');
+            return (
+              <g key={s.lineage} opacity={dim ? 0.12 : 1} style={{ transition: 'opacity .12s' }}>
+                <path d={path} fill="none" stroke={s.color} strokeWidth={focus ? 2.6 : 1.7} strokeLinejoin="round" strokeLinecap="round" />
+                {(showPoints || focus) && s.pts.map((p, i) => (
+                  <circle key={i} cx={p.sxv} cy={p.syv} r={focus ? 3.2 : 2.4} fill={s.color} stroke="var(--surface)" strokeWidth="0.6" />
+                ))}
+                {/* endpoint value label when isolated/hovered */}
+                {focus && s.pts.length > 0 && (
+                  <text
+                    x={s.pts[s.pts.length - 1].sxv + 5}
+                    y={s.pts[s.pts.length - 1].syv + 3}
+                    className="text-[9.5px] font-mono"
+                    fill={s.color}
+                  >{s.pts[s.pts.length - 1].raw.value.toFixed(2)}×</text>
+                )}
+              </g>
+            );
+          })}
+          {/* crosshair + active point */}
+          {cursor && (
+            <g pointerEvents="none">
+              <line x1={cursor.px} x2={cursor.px} y1={padT} y2={padT + plotH} stroke="var(--text-faint)" strokeWidth="1" strokeDasharray="3 3" opacity="0.6" />
+              <circle cx={cursor.px} cy={cursor.py} r="4.5" fill="none" stroke="var(--data-cn)" strokeWidth="1.6" />
+            </g>
+          )}
+        </svg>
+        {/* floating tooltip */}
+        {cursor && (
+          <div
+            className="lims-popover absolute pointer-events-none px-2 py-1.5 text-[11px] z-10"
+            style={{
+              left: `${(cursor.px / W) * 100}%`,
+              top: `${(cursor.py / H) * 100}%`,
+              transform: 'translate(10px, -50%)',
+            }}
+          >
+            <div className="font-mono font-semibold text-[var(--text)]">{cursor.lineage}</div>
+            <div className="text-[var(--text-soft)]">{cursor.name}</div>
+            <div className="tabular-nums">
+              <span className="text-[var(--text-faint)]">{hasTransfers ? 'T' : '#'}{Number.isFinite(cursor.x) ? cursor.x : '?'}</span>
+              <span className="mx-1 text-[var(--text-faint)]">·</span>
+              <span className="font-semibold" style={{ color: 'var(--data-cn)' }}>CN {cursor.value.toFixed(2)}×</span>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* interactive legend: click to isolate, hover to highlight */}
+      <div className="flex flex-wrap gap-x-3 gap-y-1.5 justify-center max-w-3xl mx-auto">
+        {isolated && (
+          <button
+            type="button"
+            onClick={() => setIsolated(null)}
+            className="lims-chip lims-chip-accent"
+            title="Clear isolation, show all lineages"
+          >clear filter ×</button>
+        )}
         {series.map(s => {
           const last = s.points[s.points.length - 1];
+          const active = isolated === s.lineage;
           return (
-            <span key={s.lineage} className="flex items-center gap-1.5 text-[11px] text-slate-600 dark:text-gray-300">
+            <button
+              key={s.lineage}
+              type="button"
+              onClick={() => setIsolated(active ? null : s.lineage)}
+              onMouseEnter={() => setHovered(s.lineage)}
+              onMouseLeave={() => setHovered(null)}
+              className="flex items-center gap-1.5 text-[11px] px-1.5 py-0.5 rounded transition-colors"
+              style={{
+                color: 'var(--text-soft)',
+                background: active ? 'var(--data-cn-bg)' : 'transparent',
+                opacity: anyFocus && !active && hovered !== s.lineage && isolated ? 0.4 : 1,
+              }}
+              title={active ? 'Click to clear' : 'Click to isolate this lineage'}
+            >
               <span className="inline-block w-3 h-0.5 rounded" style={{ backgroundColor: s.color }} />
               <span className="font-mono">{s.lineage}</span>
-              {last && <span className="text-slate-400 dark:text-gray-500 tabular-nums">→ {last.value.toFixed(2)}×</span>}
-            </span>
+              {last && <span className="text-[var(--text-faint)] tabular-nums">{last.value.toFixed(2)}×</span>}
+            </button>
           );
         })}
       </div>
