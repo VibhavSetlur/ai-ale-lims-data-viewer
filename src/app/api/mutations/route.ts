@@ -400,24 +400,37 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // Same (experiment?, registry?) filters applied to both the sample CTE and
-    // the mutation pull so the two result sets are consistent. Param order is
-    // (experiment, registry) — both queries take the same params array.
-    const filterParams: (string | number | null)[] = [];
-    if (experimentFilter) filterParams.push(experimentFilter);
-    if (selectedRegistry) filterParams.push(selectedRegistry);
+    // The mutation CALLS are correctly scoped to (experiment?, registry?) — a
+    // different breseq run yields different SNP calls, so the selected registry
+    // matters for what mutations we show.
+    const mutParams: (string | number | null)[] = [];
+    if (experimentFilter) mutParams.push(experimentFilter);
+    if (selectedRegistry) mutParams.push(selectedRegistry);
+
+    // The SAMPLE LIST must NOT be silently scoped to a single breseq registry.
+    // A sample's existence in the picker should not depend on which parameter
+    // run you happen to be viewing: doing so made entire experiments (TFMN1 /
+    // TFMN4, whose calls live under a different default registry than the modal
+    // one) disappear from Sample Selection. We only apply the registry filter to
+    // the sample list when the caller EXPLICITLY asked for a registry; in the
+    // default view we list samples across all registries so every experiment is
+    // selectable. The experiment filter still applies to both.
+    const scopeSamplesByRegistry = !!registryParam && !!selectedRegistry;
+    const sampleParams: (string | number | null)[] = [];
+    if (experimentFilter) sampleParams.push(experimentFilter);
+    if (scopeSamplesByRegistry) sampleParams.push(selectedRegistry);
 
     const sampleSql = buildSamplesSql({
       experiment: !!experimentFilter,
-      registry: !!selectedRegistry,
+      registry: scopeSamplesByRegistry,
     });
     const mutSql = MUTATIONS_SQL
       + (experimentFilter ? ' AND "Experiment" = ?' : '')
       + (selectedRegistry ? ' AND "Breseq_registry_ID" = ?' : '');
 
     const [sampleRows, mutRows, allExperiments, odRows, curveRows, cnRows] = await Promise.all([
-      runQuery<SeqSampleRow>(sampleSql, filterParams),
-      runQuery<MutationRawRow>(mutSql, filterParams),
+      runQuery<SeqSampleRow>(sampleSql, sampleParams),
+      runQuery<MutationRawRow>(mutSql, mutParams),
       runQuery<{ name: string }>(ALL_EXPERIMENTS_SQL),
       runQuery<{ seq_sample: string; od_type: string; od_source: string }>(OD_MEASUREMENTS_SQL),
       runQuery<{ sample_name: string; transfer: number | null; reading: string | null; od: number | null; timepoint: number | null; datetime: string | null }>(ROBOTIC_OD_SQL),
