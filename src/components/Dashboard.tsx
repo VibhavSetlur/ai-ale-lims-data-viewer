@@ -20,6 +20,17 @@ interface TableInfo {
   rowCount: number;
 }
 
+// Legacy / superseded tables. These are older mirrors that are strict subsets of
+// (or have been replaced by) a canonical table, and are a common source of
+// "I picked the wrong table and the data looked off" confusion. We keep them
+// reachable but push them to the bottom of the list and tag them so the
+// canonical table is the obvious choice.
+//   Seqsamples   -> superseded by Seq_samples (strict subset, missing newer orders)
+//   Seqorders    -> superseded by Seq_orders
+//   dgoA_alleles_old -> superseded by dgoA_alleles_new
+const LEGACY_TABLES = new Set<string>(['Seqsamples', 'Seqorders', 'dgoA_alleles_old']);
+const isLegacyTable = (name: string) => LEGACY_TABLES.has(name);
+
 interface DashboardProps {
   initialTables: string[];
 }
@@ -229,8 +240,14 @@ export default function Dashboard({ initialTables }: DashboardProps) {
 
   const filteredTables = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
-    if (!q) return tables;
-    return tables.filter(t => t.name.toLowerCase().includes(q));
+    const base = q ? tables.filter(t => t.name.toLowerCase().includes(q)) : tables;
+    // Canonical tables first, legacy/superseded ones grouped at the bottom.
+    return [...base].sort((a, b) => {
+      const al = isLegacyTable(a.name) ? 1 : 0;
+      const bl = isLegacyTable(b.name) ? 1 : 0;
+      if (al !== bl) return al - bl;
+      return 0;
+    });
   }, [tables, searchQuery]);
 
   const totalRows = useMemo(() => tables.reduce((acc, t) => acc + (t.rowCount || 0), 0), [tables]);
@@ -400,12 +417,18 @@ export default function Dashboard({ initialTables }: DashboardProps) {
                   <div className="flex-1 overflow-y-auto p-1">
                     {filteredTables.map((table) => {
                       const isActive = activeTable === table.name;
+                      const legacy = isLegacyTable(table.name);
                       return (
                         <button key={table.name} onClick={() => setActiveTable(table.name)}
                           data-active={isActive} className="lims-nav !py-1.5"
-                          title={`${table.name} — ${table.rowCount.toLocaleString()} rows`}>
-                          <Table2 className="w-3.5 h-3.5 shrink-0 opacity-60" />
-                          <span className="truncate flex-1 lims-id">{table.name}</span>
+                          title={legacy
+                            ? `${table.name} — ${table.rowCount.toLocaleString()} rows (legacy / superseded table)`
+                            : `${table.name} — ${table.rowCount.toLocaleString()} rows`}>
+                          <Table2 className={clsx('w-3.5 h-3.5 shrink-0', legacy ? 'opacity-30' : 'opacity-60')} />
+                          <span className={clsx('truncate flex-1 lims-id', legacy && 'text-[var(--text-faint)]')}>{table.name}</span>
+                          {legacy && (
+                            <span className="text-[8px] font-semibold uppercase tracking-wide px-1 py-px rounded bg-[var(--border)] text-[var(--text-faint)] shrink-0">legacy</span>
+                          )}
                           <span className="text-[10px] font-medium tabular-nums shrink-0 text-[var(--text-faint)]">
                             {table.rowCount > 0 ? formatCount(table.rowCount) : ''}
                           </span>

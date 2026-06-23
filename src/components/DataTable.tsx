@@ -140,6 +140,7 @@ export default function DataTable({ tableName }: DataTableProps) {
     { id: newFilterId(), col: '', operator: 'contains', value: '' },
   ]);
   const [filterLogic, setFilterLogic] = useState<'AND' | 'OR'>('AND');
+  const [showDeleted, setShowDeleted] = useState<boolean>(false);
   const [showFilterPopup, setShowFilterPopup] = useState(false);
   const filterPopupRef = useRef<HTMLDivElement>(null);
 
@@ -185,6 +186,7 @@ export default function DataTable({ tableName }: DataTableProps) {
     setSortDirection(undefined);
     setFilterEntries([{ id: newFilterId(), col: '', operator: 'contains', value: '' }]);
     setFilterLogic('AND');
+    setShowDeleted(false);
     setGlobalSearch('');
     setLocalGlobalSearch('');
     setHiddenCols(new Set());
@@ -209,12 +211,13 @@ export default function DataTable({ tableName }: DataTableProps) {
     if (sortDirection) params.set('sortDirection', sortDirection);
     if (globalSearch) params.set('globalSearch', globalSearch);
     params.set('filterLogic', filterLogic);
+    if (showDeleted) params.set('includeDeleted', '1');
     for (const [k, v] of Object.entries(appliedFilters)) {
       params.set(`${k}[operator]`, v.operator);
       params.set(`${k}[value]`, v.value);
     }
     return params;
-  }, [page, pageSize, sortBy, sortDirection, globalSearch, filterLogic, appliedFilters]);
+  }, [page, pageSize, sortBy, sortDirection, globalSearch, filterLogic, showDeleted, appliedFilters]);
 
   // Fetch data
   useEffect(() => {
@@ -315,6 +318,7 @@ export default function DataTable({ tableName }: DataTableProps) {
     return Boolean(e.value);
   }), [filterEntries]);
   const filterCount = activeFilters.length;
+  const hasDeletedCol = useMemo(() => schema.some(c => c.name === 'deleted'), [schema]);
 
   const addFilterEntry = () => {
     setFilterEntries(prev => [...prev, { id: newFilterId(), col: '', operator: 'contains', value: '' }]);
@@ -467,6 +471,19 @@ export default function DataTable({ tableName }: DataTableProps) {
           >
             <Info className="w-3 h-3" /> Schema
           </button>
+          {hasDeletedCol && (
+            <button
+              onClick={() => { setShowDeleted(s => !s); setPage(1); }}
+              className="lims-toolbtn"
+              data-on={showDeleted}
+              title={showDeleted
+                ? 'Showing soft-deleted rows. Click to hide them.'
+                : 'Soft-deleted rows are hidden. Click to show them.'}
+            >
+              {showDeleted ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
+              {showDeleted ? 'Showing deleted' : 'Deleted hidden'}
+            </button>
+          )}
         </div>
 
         <div className="flex items-center gap-2 flex-wrap justify-end">

@@ -296,6 +296,7 @@ export interface FetchDataOptions {
   filterLogic?: 'AND' | 'OR';
   columns?: string[]; // optional projection (for export); default = *
   limit?: number; // override page-based limit (for export). When set, page/pageSize are ignored.
+  includeDeleted?: boolean; // when false (default) and the table has a `deleted` column, only live rows (deleted=0) are returned
 }
 
 function isNumericType(type: string): boolean {
@@ -341,7 +342,13 @@ function buildCondition(
     case '<=':
     case '=':
     case '!=': {
-      params.push(isNumeric ? parseFloat(value) : value);
+      if (isNumeric) {
+        const n = parseFloat(value);
+        if (Number.isNaN(n)) return null; // ignore a non-numeric value on a numeric column rather than silently matching nothing
+        params.push(n);
+      } else {
+        params.push(value);
+      }
       return `${qi} ${operator} ?`;
     }
     case 'isNull':
@@ -352,15 +359,34 @@ function buildCondition(
     case 'notIn': {
       const list = splitList(value);
       if (list.length === 0) return null;
-      const placeholders = list.map(() => '?').join(',');
-      for (const v of list) params.push(isNumeric ? parseFloat(v) : v);
+      const vals: (string | number)[] = [];
+      for (const v of list) {
+        if (isNumeric) {
+          const n = parseFloat(v);
+          if (Number.isNaN(n)) continue; // drop non-numeric tokens from a numeric IN list
+          vals.push(n);
+        } else {
+          vals.push(v);
+        }
+      }
+      if (vals.length === 0) return null;
+      const placeholders = vals.map(() => '?').join(',');
+      for (const v of vals) params.push(v);
       return `${qi} ${operator === 'in' ? 'IN' : 'NOT IN'} (${placeholders})`;
     }
     case 'between': {
       const parts = value.split(',').map(s => s.trim());
       if (parts.length < 2 || parts[0] === '' || parts[1] === '') return null;
-      params.push(isNumeric ? parseFloat(parts[0]) : parts[0]);
-      params.push(isNumeric ? parseFloat(parts[1]) : parts[1]);
+      if (isNumeric) {
+        const lo = parseFloat(parts[0]);
+        const hi = parseFloat(parts[1]);
+        if (Number.isNaN(lo) || Number.isNaN(hi)) return null; // ignore a malformed numeric range
+        params.push(lo);
+        params.push(hi);
+      } else {
+        params.push(parts[0]);
+        params.push(parts[1]);
+      }
       return `${qi} BETWEEN ? AND ?`;
     }
     default: {
@@ -383,7 +409,8 @@ function buildWhere(
   filters: Record<string, { value: string; operator: string }> | undefined,
   globalSearch: string | undefined,
   filterLogic: 'AND' | 'OR' | undefined,
-  columnNames: string[]
+  columnNames: string[],
+  hideDeleted = false
 ): BuildWhereResult {
   const filterConditions: string[] = [];
   const globalSearchParts: string[] = [];
@@ -416,6 +443,12 @@ function buildWhere(
 
   const joinLogic = filterLogic === 'OR' ? ' OR ' : ' AND ';
   const combined: string[] = [];
+  // Hide soft-deleted rows by default (only when the table actually has the
+  // column). Always ANDed in as its own clause so an OR filter group can't
+  // accidentally surface deleted rows.
+  if (hideDeleted && columnNames.includes('deleted')) {
+    combined.push('"deleted" = 0');
+  }
   if (filterConditions.length > 0) {
     combined.push(`(${filterConditions.join(joinLogic)})`);
   }
@@ -442,7 +475,7 @@ export async function runQuery<T = Record<string, unknown>>(
 }
 
 export async function getTableData({
-  tableName, page, pageSize, sortBy, sortDirection, filters, globalSearch, filterLogic, columns, limit,
+  tableName, page, pageSize, sortBy, sortDirection, filters, globalSearch, filterLogic, columns, limit, includeDeleted,
 }: FetchDataOptions) {
   const tables = await getTables();
   validateTableName(tables, tableName);
@@ -460,7 +493,8 @@ export async function getTableData({
     if (safe.length > 0) projection = safe.map(quoteIdent).join(', ');
   }
 
-  const { whereClause, params } = buildWhere(schema, filters, globalSearch, filterLogic, columnNames);
+  const hideDeleted = !includeDeleted && columnNames.includes('deleted');
+  const { whereClause, params } = buildWhere(schema, filters, globalSearch, filterLogic, columnNames, hideDeleted);
   const orderClause = sortBy ? `ORDER BY ${quoteIdent(sortBy)} ${sortDirection === 'desc' ? 'DESC' : 'ASC'}` : '';
 
   const useLimitOverride = typeof limit === 'number' && limit > 0;
@@ -496,14 +530,19 @@ export async function getTableData({
   // COUNT(*) is a full scan on big tables (Mutations ~223k, Robotic_OD ~141k).
   // For unfiltered queries the count is stable for a read-only mirror, so cache
   // it per table and reuse across pagination/sort (sort/offset don't change it).
-  const isUnfiltered = params.length === 0 && whereClause === '';
+  // Two cacheable shapes: a truly unfiltered count (key=tableName, shared with
+  // getTablesWithCounts) and the default hide-deleted view whose only clause is
+  // `deleted = 0` (separate key so it never collides with the full count).
+  const isTrulyUnfiltered = params.length === 0 && whereClause === '';
+  const isHideDeletedOnly = params.length === 0 && hideDeleted && whereClause === 'WHERE "deleted" = 0';
+  const cacheKey = isTrulyUnfiltered ? tableName : (isHideDeletedOnly ? `${tableName}\u0000live` : null);
   let totalCount: number;
-  if (isUnfiltered && countCache.has(tableName)) {
-    totalCount = countCache.get(tableName)!;
+  if (cacheKey && countCache.has(cacheKey)) {
+    totalCount = countCache.get(cacheKey)!;
   } else {
     const countStmt = database.prepare(countQuery);
     totalCount = (countStmt.get(...params) as { count: number }).count;
-    if (isUnfiltered) countCache.set(tableName, totalCount);
+    if (cacheKey) countCache.set(cacheKey, totalCount);
   }
 
   const rows = dataStmt.all(...params, effectiveLimit, effectiveOffset);

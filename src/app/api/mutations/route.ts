@@ -196,8 +196,9 @@ function mutationKey(r: MutationRawRow): string {
 /* ---------- SQL ----------
    Drive samples FROM the Mutations table so the experiment label is whatever
    breseq tagged the call with (not what the wet-lab folks happened to type in
-   Seq_samples — e.g. "Gyorgy" vs "GB1"/"GB2"/"GB3"). Take the modal
-   Mutations.Experiment per seq_sample.
+   Seq_samples — e.g. "Gyorgy" vs "GB1"/"GB2"/"GB3"). In this mirror no
+   seq_sample is tagged with more than one Experiment, so MIN("Experiment")
+   simply returns that single label (deterministic if that ever changes).
 */
 
 // Build SAMPLES SQL on demand so the registry/experiment filters can be pushed
@@ -225,8 +226,23 @@ function buildSamplesSql(opts: { experiment: boolean; registry: boolean }): stri
       WHERE ${inner.join(' AND ')}
       GROUP BY "Seq_sample"
     ) ms
-    LEFT JOIN Seq_samples ss
-      ON ss."Sequencing_sample" = ms.seq_sample AND ss.deleted = 0
+    LEFT JOIN (
+      -- A handful of samples were re-sequenced under two Seqorders, so the same
+      -- Sequencing_sample has >1 live Seq_samples row (and Database_ID is blank
+      -- in this mirror, so we can't pick a "latest"). The duplicated rows carry
+      -- identical Sample_Name / Experiment / selection metadata, so collapse to
+      -- exactly one row per Sequencing_sample with GROUP BY to stop the sample
+      -- list from fanning out into phantom duplicates.
+      SELECT
+        "Sequencing_sample"               AS "Sequencing_sample",
+        MIN("Experiment")                 AS "Experiment",
+        MIN("Sample_Name")                AS "Sample_Name",
+        MIN("Population_or_Single_colony?") AS "Population_or_Single_colony?"
+      FROM Seq_samples
+      WHERE deleted = 0
+      GROUP BY "Sequencing_sample"
+    ) ss
+      ON ss."Sequencing_sample" = ms.seq_sample
     LEFT JOIN Samples s
       ON s."Name" = ss."Sample_Name" AND s.deleted = 0
     LEFT JOIN Experiments e

@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { runQuery, getDbType } from '@/lib/db';
 import { MOCK_BARCODES, type MockBarcodeChart } from '@/lib/mockBarcodes';
 
-export interface BarcodeChart extends MockBarcodeChart {}
+export type BarcodeChart = MockBarcodeChart;
 
 export interface BarcodeDataset {
   source: 'mock' | 'lims';
@@ -91,9 +91,10 @@ async function tryLimsBarcodes(): Promise<{ charts: BarcodeChart[]; warnings: st
   }
   if (rows.length === 0) return null;
 
-  // Best-effort: pull plate well from Seqsamples (lowercase table — the newer
-  // amplicon order may not be there yet, in which case well stays empty and
-  // the chart card just omits the well chip).
+  // Best-effort: pull plate well from Seq_samples (the authoritative table; the
+  // legacy lowercase "Seqsamples" mirror is a strict subset that is missing the
+  // newer amplicon orders, so it had 0 well coverage for verAB samples). If a
+  // sample still has no well the chart card just omits the well chip.
   const seqsamples = Array.from(new Set(rows.map(r => r.Seqsample))).filter(Boolean);
   const wellMap = new Map<string, string>();
   if (seqsamples.length > 0) {
@@ -101,7 +102,7 @@ async function tryLimsBarcodes(): Promise<{ charts: BarcodeChart[]; warnings: st
     try {
       const joined = await runQuery<SeqsamplesJoinRow>(
         `SELECT ss."Sequencing_sample", ss."Sequencing_plate_well" AS well, ss."Sample_Name"
-         FROM Seqsamples ss
+         FROM Seq_samples ss
          WHERE ss.deleted = 0 AND ss."Sequencing_sample" IN (${ph})`,
         seqsamples,
       );
@@ -163,7 +164,7 @@ async function tryLimsBarcodes(): Promise<{ charts: BarcodeChart[]; warnings: st
   const warnings: string[] = [];
   if (skipped > 0) warnings.push(`Skipped ${skipped} verAB_barcodes row${skipped === 1 ? '' : 's'} with unparseable Seqsample names.`);
   if (seqsamples.length > 0 && wellMap.size === 0) {
-    warnings.push('Wet-lab well positions (e.g. B3, C4) are not yet linked from Seqsamples for these amplicon samples — chart labels use library + replicate instead.');
+    warnings.push('Wet-lab well positions (e.g. B3, C4) are not yet linked from Seq_samples for these amplicon samples — chart labels use library + replicate instead.');
   }
   return { charts: finalCharts, warnings };
 }
