@@ -230,17 +230,39 @@ function buildSamplesSql(opts: { experiment: boolean; registry: boolean }): stri
       -- A handful of samples were re-sequenced under two Seqorders, so the same
       -- Sequencing_sample has >1 live Seq_samples row (and Database_ID is blank
       -- in this mirror, so we can't pick a "latest"). The duplicated rows carry
-      -- identical Sample_Name / Experiment / selection metadata, so collapse to
-      -- exactly one row per Sequencing_sample with GROUP BY to stop the sample
-      -- list from fanning out into phantom duplicates.
+      -- identical Sample_Name / Experiment / selection metadata, so we collapse
+      -- to exactly one row per Sequencing_sample to stop the sample list from
+      -- fanning out into phantom duplicates.
+      --
+      -- Per nspahr: the CANONICAL row for mutation viewing is the WGS seqorder,
+      -- not the amplicon one (mutations are only called from WGS runs). We pick
+      -- the canonical row by ranking each Sequencing_sample's live rows so that
+      -- a WGS seqorder (Seq_orders.Type LIKE 'WGS%') beats an amplicon seqorder.
+      -- Ties (e.g. two WGS orders, or no Seq_orders match) fall back to Seqorder
+      -- name so the choice is deterministic.
       SELECT
-        "Sequencing_sample"               AS "Sequencing_sample",
-        MIN("Experiment")                 AS "Experiment",
-        MIN("Sample_Name")                AS "Sample_Name",
-        MIN("Population_or_Single_colony?") AS "Population_or_Single_colony?"
-      FROM Seq_samples
-      WHERE deleted = 0
-      GROUP BY "Sequencing_sample"
+        "Sequencing_sample",
+        "Experiment",
+        "Sample_Name",
+        "Population_or_Single_colony?"
+      FROM (
+        SELECT
+          sq."Sequencing_sample"                 AS "Sequencing_sample",
+          sq."Experiment"                        AS "Experiment",
+          sq."Sample_Name"                       AS "Sample_Name",
+          sq."Population_or_Single_colony?"      AS "Population_or_Single_colony?",
+          ROW_NUMBER() OVER (
+            PARTITION BY sq."Sequencing_sample"
+            ORDER BY
+              CASE WHEN so."Type" LIKE 'WGS%' THEN 0 ELSE 1 END,
+              sq."Seqorder"
+          ) AS rn
+        FROM Seq_samples sq
+        LEFT JOIN Seq_orders so
+          ON so."Poplar_Seqorder_Name" = sq."Seqorder" AND so.deleted = 0
+        WHERE sq.deleted = 0
+      )
+      WHERE rn = 1
     ) ss
       ON ss."Sequencing_sample" = ms.seq_sample
     LEFT JOIN Samples s
