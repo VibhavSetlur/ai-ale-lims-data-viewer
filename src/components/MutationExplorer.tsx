@@ -8,6 +8,7 @@ import {
   BarChart3, TrendingUp, Dna,
 } from 'lucide-react';
 import BarcodeCharts from './BarcodeCharts';
+import { fetchData, IS_STATIC } from '../lib/dataSource';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
@@ -245,7 +246,7 @@ export default function MutationExplorer() {
       if (expFilter) qs.set('experiment', expFilter);
       if (regFilter) qs.set('registry', regFilter);
       const url = qs.toString() ? `/api/mutations?${qs.toString()}` : '/api/mutations';
-      const res = await fetch(url);
+      const res = await fetchData(url);
       const json = await res.json();
       if (json.error) { setError(json.error); setData({ samples: [], mutations: [], experiments: [] }); }
       else setData(json as MutationDataset);
@@ -315,12 +316,12 @@ export default function MutationExplorer() {
               ))}
             </select>
           </label>
-          <label className="flex items-center gap-1.5 text-[11px] text-[var(--text-soft)]" title="Breseq parameter set. Each registry is one breseq run; the dataset can contain calls from multiple runs. Pick one to view at a time.">
+          <label className="flex items-center gap-1.5 text-[11px] text-[var(--text-soft)]" title={IS_STATIC ? 'In the public static build, each experiment shows its primary breseq run. Switching runs needs the interactive server build.' : 'Breseq parameter set. Each registry is one breseq run; the dataset can contain calls from multiple runs. Pick one to view at a time.'}>
             <span className="lims-label">Registry</span>
             <select
               value={registry}
               onChange={e => setRegistry(e.target.value)}
-              disabled={!data?.registries || data.registries.length <= 1}
+              disabled={IS_STATIC || !data?.registries || data.registries.length <= 1}
               className="lims-input !w-auto !py-1 !text-[11.5px] disabled:opacity-60 disabled:cursor-not-allowed font-mono"
             >
               <option value="">

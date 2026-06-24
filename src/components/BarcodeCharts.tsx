@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
+import { fetchData } from '../lib/dataSource';
 
 function cn(...inputs: ClassValue[]) { return twMerge(clsx(inputs)); }
 
@@ -464,7 +465,7 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
   const load = useCallback(async () => {
     setLoading(true); setError(null);
     try {
-      const r = await fetch('/api/barcode-counts');
+      const r = await fetchData('/api/barcode-counts');
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const j: BarcodeDataset = await r.json();
       setData(j);

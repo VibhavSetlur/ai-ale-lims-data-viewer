@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import DataTable from './DataTable';
 import MutationExplorer from './MutationExplorer';
+import { fetchData, IS_STATIC } from '../lib/dataSource';
 import {
   Database, Search, Sun, Moon, Table2, Dna,
   Server, HardDrive, RefreshCw, AlertCircle,
@@ -91,7 +92,9 @@ export default function Dashboard({ initialTables }: DashboardProps) {
   const [switching, setSwitching] = useState(false);
   const [switchError, setSwitchError] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState(false);
-  const [activeView, setActiveView] = useState<ActiveView>('tables');
+  // In the public static build the raw table browser is unavailable, so default
+  // to the Mutation Explorer (the curated public view).
+  const [activeView, setActiveView] = useState<ActiveView>(IS_STATIC ? 'mutations' : 'tables');
   const [mirrorInfo, setMirrorInfo] = useState<MirrorInfo | null>(null);
   const [showMirror, setShowMirror] = useState(false);
   const mirrorRef = useRef<HTMLDivElement>(null);
@@ -102,7 +105,8 @@ export default function Dashboard({ initialTables }: DashboardProps) {
       const c = localStorage.getItem(SIDEBAR_COLLAPSED_KEY);
       if (c === '1') setCollapsed(true);
       const v = localStorage.getItem(ACTIVE_VIEW_KEY);
-      if (v === 'mutations' || v === 'tables') setActiveView(v);
+      // Never restore the (unavailable) raw table browser in the static build.
+      if (v === 'mutations' || (v === 'tables' && !IS_STATIC)) setActiveView(v);
     } catch {}
   }, []);
 
@@ -139,8 +143,8 @@ export default function Dashboard({ initialTables }: DashboardProps) {
     setTablesLoading(true);
     try {
       const [cfgRes, tblRes] = await Promise.all([
-        fetch('/api/config'),
-        fetch('/api/tables?withCounts=1'),
+        fetchData('/api/config'),
+        fetchData('/api/tables?withCounts=1'),
       ]);
       const cfg = await cfgRes.json();
       const tbl = await tblRes.json();
@@ -167,7 +171,7 @@ export default function Dashboard({ initialTables }: DashboardProps) {
 
   const refreshMirror = async () => {
     try {
-      const r = await fetch('/api/mirror-info');
+      const r = await fetchData('/api/mirror-info');
       if (!r.ok) return;
       const j: MirrorInfo = await r.json();
       setMirrorInfo(j);
@@ -387,10 +391,12 @@ export default function Dashboard({ initialTables }: DashboardProps) {
                     <ChevronLeft className="w-3.5 h-3.5" />
                   </button>
                 </div>
-                <button onClick={() => setActiveView('tables')} data-active={activeView === 'tables'} className="lims-nav mb-0.5">
-                  <Database className="w-4 h-4 shrink-0" />
-                  <span className="flex-1">Database Tables</span>
-                </button>
+                {!IS_STATIC && (
+                  <button onClick={() => setActiveView('tables')} data-active={activeView === 'tables'} className="lims-nav mb-0.5">
+                    <Database className="w-4 h-4 shrink-0" />
+                    <span className="flex-1">Database Tables</span>
+                  </button>
+                )}
                 <button onClick={() => setActiveView('mutations')} data-active={activeView === 'mutations'} className="lims-nav">
                   <Dna className="w-4 h-4 shrink-0" />
                   <span className="flex-1">Mutation Explorer</span>
@@ -471,11 +477,13 @@ export default function Dashboard({ initialTables }: DashboardProps) {
               <button onClick={() => setCollapsed(false)} className="lims-btn lims-btn-ghost p-1.5" title="Expand sidebar">
                 <ChevronRight className="w-4 h-4" />
               </button>
-              <button onClick={() => setActiveView('tables')}
-                className={cn("p-1.5 rounded-md", activeView === 'tables' ? "text-[var(--accent-700)] bg-[var(--accent-50)]" : "text-[var(--text-faint)] hover:bg-[var(--surface-3)]")}
-                title="Database Tables">
-                <Database className="w-4 h-4" />
-              </button>
+              {!IS_STATIC && (
+                <button onClick={() => setActiveView('tables')}
+                  className={cn("p-1.5 rounded-md", activeView === 'tables' ? "text-[var(--accent-700)] bg-[var(--accent-50)]" : "text-[var(--text-faint)] hover:bg-[var(--surface-3)]")}
+                  title="Database Tables">
+                  <Database className="w-4 h-4" />
+                </button>
+              )}
               <button onClick={() => setActiveView('mutations')}
                 className={cn("p-1.5 rounded-md", activeView === 'mutations' ? "text-[var(--accent-700)] bg-[var(--accent-50)]" : "text-[var(--text-faint)] hover:bg-[var(--surface-3)]")}
                 title="Mutation Explorer">

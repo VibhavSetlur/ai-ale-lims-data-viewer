@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "prebake": "node scripts/prebake.mjs",
+    "build:static": "bash scripts/build-static.sh"
   },
   "dependencies": {
     "better-sqlite3": "^12.10.0",
