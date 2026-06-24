@@ -41,6 +41,7 @@ export interface RegistrySummary {
   polymorphism_frequency_cutoff: number | null;
   limit_fold_coverage: number | null;
   reference: string | null;
+  unregistered?: boolean;                   // referenced by mutations but absent from Breseq_registry (params/reference not synced yet)
 }
 
 export interface MutationDataset {
@@ -413,6 +414,23 @@ export async function GET(req: NextRequest) {
       : `${REGISTRY_COUNTS_SQL} GROUP BY m."Breseq_registry_ID", r."polymorphism_frequency_cutoff", r."limit_fold_coverage", r."reference" ORDER BY count DESC`;
     const regParams: (string | number | null)[] = experimentFilter ? [experimentFilter] : [];
     const registries = await runQuery<RegistrySummary>(regCountsSql, regParams);
+
+    // Flag registries that mutations reference but Breseq_registry has no row for:
+    // params + reference all come back NULL because the LEFT JOIN found nothing.
+    // These are runs not yet synced into the registry table (Natascha's pipeline
+    // op for TFMN4). Surface it honestly so the params panel reads "not registered
+    // yet" instead of silently blank.
+    for (const r of registries) {
+      r.unregistered = r.reference === null
+        && r.polymorphism_frequency_cutoff === null
+        && r.limit_fold_coverage === null;
+    }
+    const unregisteredCount = registries.filter(r => r.unregistered).length;
+    if (unregisteredCount > 0) {
+      warnings.push(
+        `${unregisteredCount} breseq run${unregisteredCount === 1 ? '' : 's'} ${unregisteredCount === 1 ? 'is' : 'are'} referenced by mutations but not yet in the Breseq_registry table, so their parameters and reference genome are not shown. The calls are real; the run metadata just has not been synced yet.`
+      );
+    }
 
     // Resolve the registry to filter by:
     //  - if caller passed ?registry=X and X is in the dataset, use it

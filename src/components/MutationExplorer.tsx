@@ -49,6 +49,7 @@ interface RegistrySummary {
   polymorphism_frequency_cutoff: number | null;
   limit_fold_coverage: number | null;
   reference: string | null;
+  unregistered?: boolean;
 }
 
 interface MutationDataset {
@@ -388,9 +389,10 @@ export default function MutationExplorer() {
                 const cutoff = r.polymorphism_frequency_cutoff !== null
                   ? ` · poly≥${r.polymorphism_frequency_cutoff}`
                   : '';
+                const tag = r.unregistered ? ' · params not registered yet' : cutoff;
                 return (
                   <option key={r.id} value={r.id}>
-                    {shortId}{cutoff} · {r.count.toLocaleString()} calls
+                    {shortId}{tag} · {r.count.toLocaleString()} calls
                   </option>
                 );
               })}
