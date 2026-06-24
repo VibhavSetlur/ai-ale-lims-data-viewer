@@ -58,6 +58,13 @@ npm run build:static     # -> out/  (basePath=/annotation/projects/aiale)
 ```
 Override the URL base path: `BASE_PATH=/annotation/projects/<name> npm run build:static`.
 
+LIVE (deployed 2026-06-24): https://modelseed.org/annotation/projects/aiale/
+Webroot: /scratch1/fliu/html/modelseed_annotation/projects/aiale/ (fliu owns it,
+group cels group-writable, vsetlur can write FILES in it - explicitly granted).
+CRITICAL: after copying files there, ALWAYS `find <webroot> -type f -exec chmod
+644` and `-type d -exec chmod 755` or nginx returns 403 (files default to 600).
+Full step-by-step re-deploy: docs/DEPLOY_RUNBOOK_LIVE.md.
+
 Key files:
 - `scripts/prebake.mjs` - snapshots live API responses to static artifacts (so
   static == server, no duplicated query logic). One artifact per experiment +
