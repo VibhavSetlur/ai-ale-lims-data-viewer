@@ -1739,7 +1739,7 @@ function CopyNumberPanel({
       )}
 
       {/* Trend chart */}
-      <div className="flex-1 min-h-0 overflow-auto p-4">
+      <div className="flex-1 min-h-0 overflow-hidden p-4">
         {series.length === 0 ? (
           <div className="flex items-center justify-center h-full text-[var(--text-faint)] text-sm">No measurements for this region.</div>
         ) : (
@@ -1792,6 +1792,9 @@ function CopyNumberChart({
   // clear. Hover dims the others so a single trajectory pops out of the bundle.
   const [isolated, setIsolated] = useState<string | null>(null);
   const [hovered, setHovered] = useState<string | null>(null);
+  // Legend search: with many lineages the legend is long, so let the user filter
+  // it to find a trajectory fast instead of scrolling a wall of chips.
+  const [legendQuery, setLegendQuery] = useState('');
   // Crosshair tooltip: nearest data point under the cursor.
   const [cursor, setCursor] = useState<{ px: number; py: number; lineage: string; name: string; x: number; value: number } | null>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
@@ -1862,6 +1865,14 @@ function CopyNumberChart({
   };
   const anyFocus = !!isolated || !!hovered;
 
+  // Filtered + sorted legend entries. Sort by latest copy-number value descending
+  // so the most-amplified lineages (usually what you're hunting for) sit at the
+  // top of the list; apply the search filter on top of that.
+  const legendEntries = series
+    .map(s => ({ s, last: s.points[s.points.length - 1] }))
+    .filter(({ s }) => !legendQuery || s.lineage.toLowerCase().includes(legendQuery.toLowerCase()))
+    .sort((a, b) => (b.last?.value ?? 0) - (a.last?.value ?? 0));
+
   // Nearest-point lookup for the crosshair tooltip.
   function handleMove(e: React.MouseEvent<SVGSVGElement>) {
     const svg = svgRef.current;
@@ -1886,129 +1897,168 @@ function CopyNumberChart({
   }
 
   return (
-    <div className="flex flex-col gap-3">
-      <div className="relative w-full max-w-3xl mx-auto">
-        <svg
-          ref={svgRef}
-          viewBox={`0 0 ${W} ${H}`}
-          className="w-full select-none"
-          role="img"
-          aria-label={`Copy number trend for ${regionLabel}`}
-          onMouseMove={handleMove}
-          onMouseLeave={() => setCursor(null)}
-        >
-          {/* gridlines + y labels */}
-          {yTicks.map(v => (
-            <g key={`y${v}`}>
-              <line x1={padL} x2={W - padR} y1={sy(v)} y2={sy(v)} stroke="var(--border)" strokeWidth="1" opacity="0.5" />
-              <text x={padL - 7} y={sy(v) + 3} textAnchor="end" className="text-[10px]" fill="var(--text-faint)">{v}</text>
-            </g>
-          ))}
-          {/* reference copy-number lines */}
-          {refLines.map(v => (
-            <g key={`ref${v}`}>
-              <line x1={padL} x2={W - padR} y1={sy(v)} y2={sy(v)} stroke="var(--data-cn)" strokeWidth="1" strokeDasharray="4 3" opacity="0.55" />
-              <text x={W - padR} y={sy(v) - 3} textAnchor="end" className="text-[9px]" fill="var(--data-cn)" opacity="0.85">{v}×</text>
-            </g>
-          ))}
-          {/* x axis labels */}
-          {xTicks.map(v => (
-            <text key={`x${v}`} x={sx(v)} y={H - padB + 16} textAnchor="middle" className="text-[10px]" fill="var(--text-faint)">
-              {hasTransfers ? `T${v}` : v}
-            </text>
-          ))}
-          <text x={padL + plotW / 2} y={H - 6} textAnchor="middle" className="text-[11px]" fill="var(--text-soft)">
-            {hasTransfers ? 'Transfer' : 'Sample (ordinal)'}
-          </text>
-          <text x={14} y={padT + plotH / 2} textAnchor="middle" transform={`rotate(-90 14 ${padT + plotH / 2})`} className="text-[11px]" fill="var(--text-soft)">
-            Copy number{logScale ? ' (log)' : ''}
-          </text>
-          {/* series */}
-          {drawn.map(s => {
-            const dim = isDim(s.lineage);
-            const focus = (isolated === s.lineage) || (hovered === s.lineage);
-            const path = s.pts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.sxv.toFixed(1)} ${p.syv.toFixed(1)}`).join(' ');
-            return (
-              <g key={s.lineage} opacity={dim ? 0.12 : 1} style={{ transition: 'opacity .12s' }}>
-                <path d={path} fill="none" stroke={s.color} strokeWidth={focus ? 2.6 : 1.7} strokeLinejoin="round" strokeLinecap="round" />
-                {(showPoints || focus) && s.pts.map((p, i) => (
-                  <circle key={i} cx={p.sxv} cy={p.syv} r={focus ? 3.2 : 2.4} fill={s.color} stroke="var(--surface)" strokeWidth="0.6" />
-                ))}
-                {/* endpoint value label when isolated/hovered */}
-                {focus && s.pts.length > 0 && (
-                  <text
-                    x={s.pts[s.pts.length - 1].sxv + 5}
-                    y={s.pts[s.pts.length - 1].syv + 3}
-                    className="text-[9.5px] font-mono"
-                    fill={s.color}
-                  >{s.pts[s.pts.length - 1].raw.value.toFixed(2)}×</text>
-                )}
-              </g>
-            );
-          })}
-          {/* crosshair + active point */}
-          {cursor && (
-            <g pointerEvents="none">
-              <line x1={cursor.px} x2={cursor.px} y1={padT} y2={padT + plotH} stroke="var(--text-faint)" strokeWidth="1" strokeDasharray="3 3" opacity="0.6" />
-              <circle cx={cursor.px} cy={cursor.py} r="4.5" fill="none" stroke="var(--data-cn)" strokeWidth="1.6" />
-            </g>
-          )}
-        </svg>
-        {/* floating tooltip */}
-        {cursor && (
-          <div
-            className="lims-popover absolute pointer-events-none px-2 py-1.5 text-[11px] z-10"
-            style={{
-              left: `${(cursor.px / W) * 100}%`,
-              top: `${(cursor.py / H) * 100}%`,
-              transform: 'translate(10px, -50%)',
-            }}
+    // Two-column layout: the chart stays put on the left and the (often long)
+    // lineage legend scrolls independently on the right. This is the fix for the
+    // "I hover a legend item far down the list but the graph has scrolled out of
+    // view" problem: the graph is ALWAYS visible while you scroll/hover the list.
+    <div className="flex flex-col lg:flex-row gap-4 h-full min-h-0">
+      {/* Chart column */}
+      <div className="relative flex-1 min-w-0 min-h-0 flex items-center justify-center">
+        <div className="relative w-full">
+          <svg
+            ref={svgRef}
+            viewBox={`0 0 ${W} ${H}`}
+            className="w-full select-none"
+            role="img"
+            aria-label={`Copy number trend for ${regionLabel}`}
+            onMouseMove={handleMove}
+            onMouseLeave={() => setCursor(null)}
           >
-            <div className="font-mono font-semibold text-[var(--text)]">{cursor.lineage}</div>
-            <div className="text-[var(--text-soft)]">{cursor.name}</div>
-            <div className="tabular-nums">
-              <span className="text-[var(--text-faint)]">{hasTransfers ? 'T' : '#'}{Number.isFinite(cursor.x) ? cursor.x : '?'}</span>
-              <span className="mx-1 text-[var(--text-faint)]">·</span>
-              <span className="font-semibold" style={{ color: 'var(--data-cn)' }}>CN {cursor.value.toFixed(2)}×</span>
+            {/* gridlines + y labels */}
+            {yTicks.map(v => (
+              <g key={`y${v}`}>
+                <line x1={padL} x2={W - padR} y1={sy(v)} y2={sy(v)} stroke="var(--border)" strokeWidth="1" opacity="0.5" />
+                <text x={padL - 7} y={sy(v) + 3} textAnchor="end" className="text-[10px]" fill="var(--text-faint)">{v}</text>
+              </g>
+            ))}
+            {/* reference copy-number lines */}
+            {refLines.map(v => (
+              <g key={`ref${v}`}>
+                <line x1={padL} x2={W - padR} y1={sy(v)} y2={sy(v)} stroke="var(--data-cn)" strokeWidth="1" strokeDasharray="4 3" opacity="0.55" />
+                <text x={W - padR} y={sy(v) - 3} textAnchor="end" className="text-[9px]" fill="var(--data-cn)" opacity="0.85">{v}×</text>
+              </g>
+            ))}
+            {/* x axis labels */}
+            {xTicks.map(v => (
+              <text key={`x${v}`} x={sx(v)} y={H - padB + 16} textAnchor="middle" className="text-[10px]" fill="var(--text-faint)">
+                {hasTransfers ? `T${v}` : v}
+              </text>
+            ))}
+            <text x={padL + plotW / 2} y={H - 6} textAnchor="middle" className="text-[11px]" fill="var(--text-soft)">
+              {hasTransfers ? 'Transfer' : 'Sample (ordinal)'}
+            </text>
+            <text x={14} y={padT + plotH / 2} textAnchor="middle" transform={`rotate(-90 14 ${padT + plotH / 2})`} className="text-[11px]" fill="var(--text-soft)">
+              Copy number{logScale ? ' (log)' : ''}
+            </text>
+            {/* series. When something is focused, draw dimmed lines first and the
+                focused line LAST so it paints on top of the bundle. When a
+                lineage is ISOLATED (clicked), we render ONLY that line, not 90+
+                ghosts at low opacity, because many faint lines still stack into a
+                visible haze. Hover keeps the others (dimmed) for context. */}
+            {[...drawn]
+              .filter(s => !isolated || s.lineage === isolated)
+              .sort((a, b) => {
+                const af = (isolated === a.lineage || hovered === a.lineage) ? 1 : 0;
+                const bf = (isolated === b.lineage || hovered === b.lineage) ? 1 : 0;
+                return af - bf;
+              })
+              .map(s => {
+                const dim = isDim(s.lineage);
+                const focus = (isolated === s.lineage) || (hovered === s.lineage);
+                // Hover dims the rest; isolation removes them entirely (above).
+                const dimOpacity = 0.12;
+                const path = s.pts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.sxv.toFixed(1)} ${p.syv.toFixed(1)}`).join(' ');
+                return (
+                  <g key={s.lineage} opacity={dim ? dimOpacity : 1} style={{ transition: 'opacity .12s' }}>
+                    <path d={path} fill="none" stroke={s.color} strokeWidth={focus ? 2.8 : 1.6} strokeLinejoin="round" strokeLinecap="round" />
+                    {(showPoints || focus) && s.pts.map((p, i) => (
+                      <circle key={i} cx={p.sxv} cy={p.syv} r={focus ? 3.2 : 2.2} fill={s.color} stroke="var(--surface)" strokeWidth="0.6" />
+                    ))}
+                    {/* endpoint value label when isolated/hovered */}
+                    {focus && s.pts.length > 0 && (
+                      <text
+                        x={s.pts[s.pts.length - 1].sxv + 5}
+                        y={s.pts[s.pts.length - 1].syv + 3}
+                        className="text-[9.5px] font-mono"
+                        fill={s.color}
+                      >{s.pts[s.pts.length - 1].raw.value.toFixed(2)}×</text>
+                    )}
+                  </g>
+                );
+              })}
+            {/* crosshair + active point */}
+            {cursor && (
+              <g pointerEvents="none">
+                <line x1={cursor.px} x2={cursor.px} y1={padT} y2={padT + plotH} stroke="var(--text-faint)" strokeWidth="1" strokeDasharray="3 3" opacity="0.6" />
+                <circle cx={cursor.px} cy={cursor.py} r="4.5" fill="none" stroke="var(--data-cn)" strokeWidth="1.6" />
+              </g>
+            )}
+          </svg>
+          {/* floating tooltip */}
+          {cursor && (
+            <div
+              className="lims-popover absolute pointer-events-none px-2 py-1.5 text-[11px] z-10"
+              style={{
+                left: `${(cursor.px / W) * 100}%`,
+                top: `${(cursor.py / H) * 100}%`,
+                transform: 'translate(10px, -50%)',
+              }}
+            >
+              <div className="font-mono font-semibold text-[var(--text)]">{cursor.lineage}</div>
+              <div className="text-[var(--text-soft)]">{cursor.name}</div>
+              <div className="tabular-nums">
+                <span className="text-[var(--text-faint)]">{hasTransfers ? 'T' : '#'}{Number.isFinite(cursor.x) ? cursor.x : '?'}</span>
+                <span className="mx-1 text-[var(--text-faint)]">·</span>
+                <span className="font-semibold" style={{ color: 'var(--data-cn)' }}>CN {cursor.value.toFixed(2)}×</span>
+              </div>
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
-      {/* interactive legend: click to isolate, hover to highlight */}
-      <div className="flex flex-wrap gap-x-3 gap-y-1.5 justify-center max-w-3xl mx-auto">
-        {isolated && (
-          <button
-            type="button"
-            onClick={() => setIsolated(null)}
-            className="lims-chip lims-chip-accent"
-            title="Clear isolation, show all lineages"
-          >clear filter ×</button>
-        )}
-        {series.map(s => {
-          const last = s.points[s.points.length - 1];
-          const active = isolated === s.lineage;
-          return (
+      {/* Legend column: fixed-width on desktop, its OWN scroll area, with a search
+          box pinned at top. Hovering any row highlights its line on the chart,
+          which never scrolls out of view because it lives in the other column. */}
+      <div className="lg:w-60 shrink-0 flex flex-col min-h-0 border-t lg:border-t-0 lg:border-l border-[var(--border)] lg:pl-3 pt-3 lg:pt-0">
+        <div className="flex items-center gap-2 mb-2">
+          <input
+            type="text"
+            value={legendQuery}
+            onChange={e => setLegendQuery(e.target.value)}
+            placeholder={`Filter ${series.length} lineages…`}
+            className="lims-input text-[11px] py-1 flex-1 min-w-0"
+          />
+          {isolated && (
             <button
-              key={s.lineage}
               type="button"
-              onClick={() => setIsolated(active ? null : s.lineage)}
-              onMouseEnter={() => setHovered(s.lineage)}
-              onMouseLeave={() => setHovered(null)}
-              className="flex items-center gap-1.5 text-[11px] px-1.5 py-0.5 rounded transition-colors"
-              style={{
-                color: 'var(--text-soft)',
-                background: active ? 'var(--data-cn-bg)' : 'transparent',
-                opacity: anyFocus && !active && hovered !== s.lineage && isolated ? 0.4 : 1,
-              }}
-              title={active ? 'Click to clear' : 'Click to isolate this lineage'}
-            >
-              <span className="inline-block w-3 h-0.5 rounded" style={{ backgroundColor: s.color }} />
-              <span className="font-mono">{s.lineage}</span>
-              {last && <span className="text-[var(--text-faint)] tabular-nums">{last.value.toFixed(2)}×</span>}
-            </button>
-          );
-        })}
+              onClick={() => setIsolated(null)}
+              className="lims-chip lims-chip-accent shrink-0"
+              title="Clear isolation, show all lineages"
+            >clear ×</button>
+          )}
+        </div>
+        <div className="text-[10px] text-[var(--text-faint)] mb-1 tabular-nums">
+          {legendEntries.length} of {series.length} · sorted by latest CN
+        </div>
+        <div className="flex-1 min-h-0 overflow-y-auto pr-1 flex flex-col gap-0.5">
+          {legendEntries.map(({ s, last }) => {
+            const active = isolated === s.lineage;
+            const isHover = hovered === s.lineage;
+            return (
+              <button
+                key={s.lineage}
+                type="button"
+                onClick={() => setIsolated(active ? null : s.lineage)}
+                onMouseEnter={() => setHovered(s.lineage)}
+                onMouseLeave={() => setHovered(null)}
+                className="flex items-center gap-1.5 text-[11px] px-1.5 py-1 rounded transition-colors text-left w-full"
+                style={{
+                  background: active || isHover ? 'var(--data-cn-bg)' : 'transparent',
+                  color: 'var(--text-soft)',
+                  opacity: anyFocus && !active && !isHover ? 0.45 : 1,
+                }}
+                title={active ? 'Click to clear' : 'Click to isolate this lineage'}
+              >
+                <span className="inline-block w-3 h-0.5 rounded shrink-0" style={{ backgroundColor: s.color }} />
+                <span className="font-mono truncate flex-1">{s.lineage}</span>
+                {last && <span className="text-[var(--text-faint)] tabular-nums shrink-0">{last.value.toFixed(2)}×</span>}
+              </button>
+            );
+          })}
+          {legendEntries.length === 0 && (
+            <div className="text-[11px] text-[var(--text-faint)] px-1.5 py-2">No lineage matches “{legendQuery}”.</div>
+          )}
+        </div>
       </div>
     </div>
   );
