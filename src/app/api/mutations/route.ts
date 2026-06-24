@@ -79,6 +79,7 @@ interface SeqSampleRow {
 interface MutationRawRow {
   seq_sample: string;
   experiment: string | null;
+  breseq_registry_id: string | null;
   type: string | null;
   snp_type: string | null;
   mutation_category: string | null;
@@ -274,8 +275,9 @@ function buildSamplesSql(opts: { experiment: boolean; registry: boolean }): stri
 
 const MUTATIONS_SQL = `
   SELECT
-    "Seq_sample"        AS seq_sample,
-    "Experiment"        AS experiment,
+    "Seq_sample"          AS seq_sample,
+    "Experiment"          AS experiment,
+    "Breseq_registry_ID"  AS breseq_registry_id,
     "type"              AS type,
     "snp_type"          AS snp_type,
     "mutation_category" AS mutation_category,
@@ -432,7 +434,7 @@ export async function GET(req: NextRequest) {
         selectedRegistry = registries[0].id;
         if (registries.length > 1) {
           warnings.push(
-            `Showing breseq registry ${registries[0].id} (${registries[0].count.toLocaleString()} calls). ${registries.length - 1} other registry set${registries.length - 1 === 1 ? ' is' : 's are'} available — use the Registry selector to switch.`
+            `Default view: each sample shows calls from its own primary breseq run. ${registries.length} registry sets exist across the dataset. Use the Registry selector or pick an experiment to pin one run.`
           );
         }
       }
@@ -441,9 +443,20 @@ export async function GET(req: NextRequest) {
     // The mutation CALLS are correctly scoped to (experiment?, registry?) — a
     // different breseq run yields different SNP calls, so the selected registry
     // matters for what mutations we show.
+    //
+    // DEFAULT-VIEW REGISTRY TRAP (fixed): when NO experiment and NO explicit
+    // registry are given, restricting the mutation pull to the single global
+    // top-count registry (registries[0]) showed TFMN1/TFMN4 samples against a
+    // reference they weren't called on, so each appeared with ~1 mutation
+    // instead of ~220 (a silent ~200x undercount). In that default view we now
+    // pull calls across ALL registries and keep, per seq_sample, only that
+    // sample's dominant (most-calls) registry — so every sample shows its true
+    // call set against its own reference. An explicit ?registry= or ?experiment=
+    // still scopes normally (the per-experiment best registry is correct there).
+    const usePerSampleRegistry = !experimentFilter && !registryParam;
     const mutParams: (string | number | null)[] = [];
     if (experimentFilter) mutParams.push(experimentFilter);
-    if (selectedRegistry) mutParams.push(selectedRegistry);
+    if (selectedRegistry && !usePerSampleRegistry) mutParams.push(selectedRegistry);
 
     // The SAMPLE LIST must NOT be silently scoped to a single breseq registry.
     // A sample's existence in the picker should not depend on which parameter
@@ -464,7 +477,7 @@ export async function GET(req: NextRequest) {
     });
     const mutSql = MUTATIONS_SQL
       + (experimentFilter ? ' AND "Experiment" = ?' : '')
-      + (selectedRegistry ? ' AND "Breseq_registry_ID" = ?' : '');
+      + ((selectedRegistry && !usePerSampleRegistry) ? ' AND "Breseq_registry_ID" = ?' : '');
 
     const [sampleRows, mutRows, allExperiments, odRows, curveRows, cnRows] = await Promise.all([
       runQuery<SeqSampleRow>(sampleSql, sampleParams),
@@ -552,6 +565,34 @@ export async function GET(req: NextRequest) {
 
     const sampleIds = new Set(samples.map(s => s.id));
 
+    // DEFAULT-VIEW per-sample registry resolution (see usePerSampleRegistry
+    // above). When we pulled calls across all registries, each seq_sample may
+    // have calls under several breseq runs; we keep only that sample's DOMINANT
+    // registry (the one with the most calls for it) so the sample is shown
+    // against a single, self-consistent reference instead of a mix. Without an
+    // experiment/registry filter this is what makes the default grid report the
+    // true ~220 calls/sample for TFMN1/TFMN4 instead of ~1.
+    const bestRegistryBySample = new Map<string, string>();
+    if (usePerSampleRegistry) {
+      const countsBySample = new Map<string, Map<string, number>>();
+      for (const r of mutRows) {
+        if (!sampleIds.has(r.seq_sample)) continue;
+        const reg = r.breseq_registry_id ?? '';
+        if (!reg) continue;
+        const byReg = countsBySample.get(r.seq_sample) ?? new Map<string, number>();
+        byReg.set(reg, (byReg.get(reg) ?? 0) + 1);
+        countsBySample.set(r.seq_sample, byReg);
+      }
+      for (const [sample, byReg] of countsBySample) {
+        let bestReg = ''; let bestN = -1;
+        for (const [reg, n] of byReg) {
+          // tie-break deterministically by registry id so results are stable
+          if (n > bestN || (n === bestN && reg < bestReg)) { bestN = n; bestReg = reg; }
+        }
+        if (bestReg) bestRegistryBySample.set(sample, bestReg);
+      }
+    }
+
     // Aggregate mutation calls into rows; take MAX frequency when breseq emits
     // multiple evidence rows for the same (sample, site) — they only differ by
     // a few hundredths, but MAX is the conservative researcher-friendly choice.
@@ -562,6 +603,12 @@ export async function GET(req: NextRequest) {
     for (const r of mutRows) {
       rowsScanned++;
       if (!sampleIds.has(r.seq_sample)) { droppedNoSampleMatch++; continue; }
+      // In the default view, drop calls from any registry that isn't this
+      // sample's dominant one (keeps each sample on a single reference).
+      if (usePerSampleRegistry) {
+        const best = bestRegistryBySample.get(r.seq_sample);
+        if (best && (r.breseq_registry_id ?? '') !== best) continue;
+      }
       const key = mutationKey(r);
       let row = byKey.get(key);
       if (!row) {
