@@ -33,6 +33,34 @@ export interface MutationRow {
   base_type?: string;      // raw breseq type: SNP / INS / DEL / SUB
   position?: number;
   gene_product?: string;
+  // Rich structural detail for the Comparative-view mutation popup. Captured from
+  // the first raw row that keys to this mutation (rows sharing a mutationKey share
+  // these fields; only frequency varies by sample and that lives in `values`).
+  detail?: MutationDetail;
+}
+
+export interface MutationDetail {
+  seq_id?: string;            // contig / reference sequence the coordinate sits on
+  position_start?: number;
+  position_end?: number;
+  ref_seq?: string;
+  new_seq?: string;
+  gene_strand?: string;
+  gene_position?: string;
+  locus_tag?: string;
+  aa_ref_seq?: string;
+  aa_new_seq?: string;
+  aa_position?: number;
+  codon_ref_seq?: string;
+  codon_new_seq?: string;
+  codon_number?: number;
+  size?: string;
+  repeat_seq?: string;
+  repeat_ref_copies?: number;
+  repeat_new_copies?: number;
+  genes_inactivated?: string;
+  genes_overlapping?: string;
+  genes_promoter?: string;
 }
 
 export interface RegistrySummary {
@@ -95,6 +123,21 @@ interface MutationRawRow {
   aa_new_seq: string | null;
   frequency: number | null;
   size: string | null;
+  // extra structural detail for the popup
+  seq_id: string | null;
+  position_start: number | null;
+  position_end: number | null;
+  gene_strand: string | null;
+  gene_position: string | null;
+  codon_ref_seq: string | null;
+  codon_new_seq: string | null;
+  codon_number: number | null;
+  repeat_seq: string | null;
+  repeat_ref_copies: number | null;
+  repeat_new_copies: number | null;
+  genes_inactivated: string | null;
+  genes_overlapping: string | null;
+  genes_promoter: string | null;
 }
 
 /* ---------- Helpers ---------- */
@@ -292,7 +335,21 @@ const MUTATIONS_SQL = `
     "aa_position"       AS aa_position,
     "aa_new_seq"        AS aa_new_seq,
     "frequency"         AS frequency,
-    "size"              AS size
+    "size"              AS size,
+    "seq_id"            AS seq_id,
+    "position_start"    AS position_start,
+    "position_end"      AS position_end,
+    "gene_strand"       AS gene_strand,
+    "gene_position"     AS gene_position,
+    "codon_ref_seq"     AS codon_ref_seq,
+    "codon_new_seq"     AS codon_new_seq,
+    "codon_number"      AS codon_number,
+    "repeat_seq"        AS repeat_seq,
+    "repeat_ref_copies" AS repeat_ref_copies,
+    "repeat_new_copies" AS repeat_new_copies,
+    "genes_inactivated" AS genes_inactivated,
+    "genes_overlapping" AS genes_overlapping,
+    "genes_promoter"    AS genes_promoter
   FROM Mutations
   WHERE deleted = 0
 `;
@@ -642,6 +699,29 @@ export async function GET(req: NextRequest) {
           base_type: r.type ?? undefined,
           position: r.position ?? undefined,
           gene_product: r.gene_product ?? undefined,
+          detail: {
+            seq_id: r.seq_id ?? undefined,
+            position_start: r.position_start ?? undefined,
+            position_end: r.position_end ?? undefined,
+            ref_seq: r.ref_seq ?? undefined,
+            new_seq: r.new_seq ?? undefined,
+            gene_strand: r.gene_strand ?? undefined,
+            gene_position: r.gene_position ?? undefined,
+            locus_tag: r.locus_tag ?? undefined,
+            aa_ref_seq: r.aa_ref_seq ?? undefined,
+            aa_new_seq: r.aa_new_seq ?? undefined,
+            aa_position: r.aa_position ?? undefined,
+            codon_ref_seq: r.codon_ref_seq ?? undefined,
+            codon_new_seq: r.codon_new_seq ?? undefined,
+            codon_number: r.codon_number ?? undefined,
+            size: r.size ?? undefined,
+            repeat_seq: r.repeat_seq ?? undefined,
+            repeat_ref_copies: r.repeat_ref_copies ?? undefined,
+            repeat_new_copies: r.repeat_new_copies ?? undefined,
+            genes_inactivated: r.genes_inactivated ?? undefined,
+            genes_overlapping: r.genes_overlapping ?? undefined,
+            genes_promoter: r.genes_promoter ?? undefined,
+          },
           _maxFreqBySample: new Map(),
         } as InternalRow;
         byKey.set(key, row);

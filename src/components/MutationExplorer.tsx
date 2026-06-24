@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   CheckSquare, Square, Search, X, AlertCircle, FlaskConical, GitCompare, RefreshCw,
-  ArrowUpDown, ArrowUp, ArrowDown, Filter, Download, Info,
+  ArrowUpDown, ArrowUp, ArrowDown, ArrowRight, Filter, Download, Info,
   ChevronDown, ChevronRight, ChevronUp, Eye, EyeOff, FoldVertical, UnfoldVertical,
   BarChart3, TrendingUp, Dna,
 } from 'lucide-react';
@@ -29,6 +29,34 @@ interface MutationSample {
   od_sources?: { type: string; source: string }[];
 }
 
+// Rich structural detail for the Comparative-view mutation popup. Mirrors the
+// MutationDetail shape the /api/mutations route already attaches to each row.
+// Every field is optional: different sample groups can be on different reference
+// genomes, so we always surface seq_id alongside positions to disambiguate.
+interface MutationDetail {
+  seq_id?: string;            // contig / reference sequence the coordinate sits on
+  position_start?: number;
+  position_end?: number;
+  ref_seq?: string;
+  new_seq?: string;
+  gene_strand?: string;
+  gene_position?: string;
+  locus_tag?: string;
+  aa_ref_seq?: string;
+  aa_new_seq?: string;
+  aa_position?: number;
+  codon_ref_seq?: string;
+  codon_new_seq?: string;
+  codon_number?: number;
+  size?: string;
+  repeat_seq?: string;
+  repeat_ref_copies?: number;
+  repeat_new_copies?: number;
+  genes_inactivated?: string;
+  genes_overlapping?: string;
+  genes_promoter?: string;
+}
+
 interface MutationRow {
   id: string;
   gene: string;
@@ -41,6 +69,7 @@ interface MutationRow {
   base_type?: string;
   position?: number;
   gene_product?: string;
+  detail?: MutationDetail;
 }
 
 interface RegistrySummary {
@@ -96,6 +125,8 @@ type CompareFilters = {
   sortKey: 'gene' | 'variant' | 'type' | 'position' | 'maxFreq' | 'spread' | 'presence' | null;
   sortDir: 'asc' | 'desc';
   groupOrder: string[]; // ordered, enabled column grouping levels (see GROUP_LEVELS)
+  selectedMutations: string[]; // serialized Set of MutationRow.id the user checked for the compare-subset
+  compareMutationsOnly: boolean; // when true, render only the checked subset
 };
 
 // Column grouping levels the biologist can pick from for the Comparative View.
@@ -162,6 +193,18 @@ function formatMetric(value: number | undefined, metric: string): string {
   if (metric === 'frequency') return `${Math.round(value * 100)}%`;
   if (metric === 'copy_number') return value.toFixed(1);
   return String(value);
+}
+
+// Badge color for a mutation class. nonsynonymous=amber, synonymous=slate,
+// nonsense/indel/large_deletion=red, intergenic=violet, everything else neutral.
+function snpTypeBadgeClass(snpType?: string): string {
+  const t = (snpType ?? '').toLowerCase();
+  if (t === 'nonsynonymous') return 'bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-900/30 dark:text-amber-300 dark:border-amber-700';
+  if (t === 'synonymous') return 'bg-slate-100 text-slate-700 border-slate-300 dark:bg-gray-700 dark:text-gray-300 dark:border-gray-600';
+  if (t === 'nonsense' || t === 'small_indel' || t === 'large_deletion' || t.includes('indel') || t.includes('deletion'))
+    return 'bg-red-100 text-red-700 border-red-300 dark:bg-red-900/30 dark:text-red-300 dark:border-red-700';
+  if (t === 'intergenic') return 'bg-violet-100 text-violet-700 border-violet-300 dark:bg-violet-900/30 dark:text-violet-300 dark:border-violet-700';
+  return 'bg-slate-100 text-slate-600 border-slate-300 dark:bg-gray-700 dark:text-gray-300 dark:border-gray-600';
 }
 
 function metricColor(value: number, metric: string): string {
@@ -1039,6 +1082,13 @@ function ComparativePanel({
   const [sortKey, setSortKey] = useState<SortKey>('maxFreq');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
   const [groupOrder, setGroupOrder] = useState<GroupLevelKey[]>(DEFAULT_GROUP_ORDER);
+  // User-curated subset of mutation rows (by MutationRow.id) plus a toggle that
+  // filters the rendered rows down to that subset. The selection persists when
+  // the toggle is off, so users can build a set then flip the view on and off.
+  const [selectedMutations, setSelectedMutations] = useState<Set<string>>(new Set());
+  const [compareMutationsOnly, setCompareMutationsOnly] = useState(false);
+  // The mutation whose name was clicked; drives the rich detail modal.
+  const [detailMutation, setDetailMutation] = useState<MutationRow | null>(null);
   const [filtersHydrated, setFiltersHydrated] = useState(false);
 
   // Rehydrate filters from localStorage on first mount. Once the user has
@@ -1065,6 +1115,8 @@ function ComparativePanel({
           );
           if (cleaned.length > 0) setGroupOrder(cleaned);
         }
+        if (Array.isArray(f.selectedMutations)) setSelectedMutations(new Set(f.selectedMutations.filter((x): x is string => typeof x === 'string')));
+        if (typeof f.compareMutationsOnly === 'boolean') setCompareMutationsOnly(f.compareMutationsOnly);
       }
     } catch {}
     setFiltersHydrated(true);
@@ -1076,10 +1128,11 @@ function ComparativePanel({
     try {
       const payload: CompareFilters = {
         mutFilter, metricFilter, snpTypes: [...snpTypes], minFreq, minPresence, hideEmpty, hideEmptySamples, sortKey, sortDir, groupOrder,
+        selectedMutations: [...selectedMutations], compareMutationsOnly,
       };
       localStorage.setItem(COMPARE_FILTERS_KEY, JSON.stringify(payload));
     } catch {}
-  }, [filtersHydrated, mutFilter, metricFilter, snpTypes, minFreq, minPresence, hideEmpty, hideEmptySamples, sortKey, sortDir, groupOrder]);
+  }, [filtersHydrated, mutFilter, metricFilter, snpTypes, minFreq, minPresence, hideEmpty, hideEmptySamples, sortKey, sortDir, groupOrder, selectedMutations, compareMutationsOnly]);
 
   const toggleSnpType = (t: string) => {
     const next = new Set(snpTypes);
@@ -1197,16 +1250,62 @@ function ComparativePanel({
     });
   }, [filteredMutations, sortKey, sortDir, selectedSamples]);
 
+  // Compose the curated-subset filter on TOP of the sorted/filtered list. When
+  // compareMutationsOnly is on we render only the rows the user checked (that
+  // still survive the active filters); otherwise we render all sorted rows.
+  const renderedMutations = useMemo(() => {
+    if (!compareMutationsOnly) return sortedMutations;
+    return sortedMutations.filter(m => selectedMutations.has(m.id));
+  }, [sortedMutations, compareMutationsOnly, selectedMutations]);
+
+  // How many of the currently-visible (filtered+sorted) rows are checked, plus
+  // an all/none helper for the header select-all affordance.
+  const checkedVisibleCount = useMemo(
+    () => sortedMutations.reduce((acc, m) => acc + (selectedMutations.has(m.id) ? 1 : 0), 0),
+    [sortedMutations, selectedMutations]
+  );
+  const allVisibleChecked = sortedMutations.length > 0 && checkedVisibleCount === sortedMutations.length;
+
+  const toggleMutation = (id: string) => {
+    setSelectedMutations(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+  // Select-all / clear over the currently filtered (sortedMutations) set.
+  const toggleAllMutations = () => {
+    setSelectedMutations(prev => {
+      if (sortedMutations.length > 0 && sortedMutations.every(m => prev.has(m.id))) {
+        // All filtered rows already checked -> clear only those.
+        const next = new Set(prev);
+        for (const m of sortedMutations) next.delete(m.id);
+        return next;
+      }
+      const next = new Set(prev);
+      for (const m of sortedMutations) next.add(m.id);
+      return next;
+    });
+  };
+
+  // Esc closes the detail modal (handled at panel level so it works regardless of focus).
+  useEffect(() => {
+    if (!detailMutation) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setDetailMutation(null); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [detailMutation]);
+
   // Hide empty columns: samples whose every visible mutation cell has no value.
-  // The "visible" set of mutations is sortedMutations (post-filter, post-sort).
-  // We only consult m.values, not styling — null cells are the ones to hide.
+  // The "visible" set of mutations is renderedMutations (post-filter, post-sort,
+  // post curated-subset). We only consult m.values, not styling.
   const visibleSamples = useMemo(() => {
     if (!hideEmptySamples) return selectedSamples;
-    if (sortedMutations.length === 0) return selectedSamples;
+    if (renderedMutations.length === 0) return selectedSamples;
     return selectedSamples.filter(s =>
-      sortedMutations.some(m => typeof m.values[s.id] === 'number')
+      renderedMutations.some(m => typeof m.values[s.id] === 'number')
     );
-  }, [selectedSamples, sortedMutations, hideEmptySamples]);
+  }, [selectedSamples, renderedMutations, hideEmptySamples]);
 
   const hiddenSampleCount = selectedSamples.length - visibleSamples.length;
 
@@ -1284,7 +1383,7 @@ function ComparativePanel({
     rows.push(['', '', '', '', 'condition', ...cols.map(s => s.condition ?? '')]);
     rows.push(['', '', '', '', 'transfer', ...cols.map(s => (typeof s.transfer === 'number' ? String(s.transfer) : ''))]);
     rows.push(['gene', 'variant', 'type', 'metric', 'sample →', ...cols.map(s => s.name)]);
-    for (const m of sortedMutations) {
+    for (const m of renderedMutations) {
       rows.push([
         m.gene, m.variant, m.type, m.metric, '',
         ...cols.map(s => {
@@ -1384,15 +1483,33 @@ function ComparativePanel({
 
         <div className="text-[11px] text-slate-500 dark:text-gray-400 ml-auto tabular-nums">
           {hiddenSampleCount > 0
-            ? <>{visibleSamples.length}/{selectedSamples.length} samples · {sortedMutations.length}/{mutations.length} mutations</>
-            : <>{selectedSamples.length} samples · {sortedMutations.length}/{mutations.length} mutations</>
+            ? <>{visibleSamples.length}/{selectedSamples.length} samples · {renderedMutations.length}/{mutations.length} mutations</>
+            : <>{selectedSamples.length} samples · {renderedMutations.length}/{mutations.length} mutations</>
           }
         </div>
+        <button
+          onClick={() => setCompareMutationsOnly(v => !v)}
+          disabled={selectedMutations.size === 0 && !compareMutationsOnly}
+          className={cn(
+            'flex items-center gap-1 px-2 py-1 text-[11px] rounded border transition-colors',
+            compareMutationsOnly
+              ? 'border-blue-400 dark:border-blue-600 bg-blue-600 text-white hover:bg-blue-700'
+              : 'border-slate-300 dark:border-gray-600 text-slate-600 dark:text-gray-300 hover:bg-slate-50 dark:hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed'
+          )}
+          title={compareMutationsOnly
+            ? 'Showing only the checked mutation subset. Click to show all (selection kept).'
+            : 'Show only the mutations you checked. Selection is kept when toggled off.'}
+        >
+          <GitCompare className="w-3 h-3" />
+          {compareMutationsOnly
+            ? <>Showing {renderedMutations.length} selected · show all</>
+            : <>Compare {selectedMutations.size} mutation{selectedMutations.size === 1 ? '' : 's'}</>}
+        </button>
         <button
           onClick={exportCsv}
           className="flex items-center gap-1 px-2 py-1 text-[11px] text-slate-600 dark:text-gray-300 border border-slate-300 dark:border-gray-600 rounded hover:bg-slate-50 dark:hover:bg-gray-700"
           title="Export the current comparison as CSV"
-          disabled={sortedMutations.length === 0}
+          disabled={renderedMutations.length === 0}
         >
           <Download className="w-3 h-3" />
           CSV
@@ -1582,8 +1699,29 @@ function ComparativePanel({
             <tr>
               <th className="sticky left-0 z-40 bg-white dark:bg-gray-800 border-b-2 border-r border-slate-200 dark:border-gray-700 px-2 py-1 text-left text-[10px] uppercase tracking-wider text-slate-500 dark:text-gray-400"
                   title="OD growth curves are scaled to a shared y-axis so they're directly comparable across columns.">
-                OD growth
-                <span className="ml-1 text-slate-300 dark:text-gray-600 font-normal normal-case">(max {curveScale.yMax.toFixed(2)})</span>
+                <div className="flex items-center justify-between gap-2">
+                  <span>
+                    OD growth
+                    <span className="ml-1 text-slate-300 dark:text-gray-600 font-normal normal-case">(max {curveScale.yMax.toFixed(2)})</span>
+                  </span>
+                  <span className="flex items-center gap-1 normal-case">
+                    <button
+                      onClick={toggleAllMutations}
+                      disabled={sortedMutations.length === 0}
+                      className="flex items-center justify-center w-5 h-5 rounded hover:bg-slate-100 dark:hover:bg-gray-700 disabled:opacity-30"
+                      title={allVisibleChecked ? 'Clear all checked (filtered)' : 'Check all (filtered)'}
+                    >
+                      {allVisibleChecked
+                        ? <CheckSquare className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                        : checkedVisibleCount > 0
+                          ? <CheckSquare className="w-3.5 h-3.5 text-blue-500/60 dark:text-blue-400/60" />
+                          : <Square className="w-3.5 h-3.5 text-slate-300 dark:text-gray-600" />}
+                    </button>
+                    {checkedVisibleCount > 0 && (
+                      <span className="text-[9px] tabular-nums font-normal text-slate-400 dark:text-gray-500">{checkedVisibleCount}</span>
+                    )}
+                  </span>
+                </div>
               </th>
               {visibleSamples.map(s => (
                 <th key={s.id} className="border-b-2 border-l border-slate-200 dark:border-gray-700 px-1 py-1 bg-white dark:bg-gray-800">
@@ -1605,31 +1743,58 @@ function ComparativePanel({
 
           {/* Scrollable mutation rows */}
           <tbody>
-            {sortedMutations.length === 0 && (
+            {renderedMutations.length === 0 && (
               <tr><td colSpan={visibleSamples.length + 1} className="px-4 py-8 text-center text-slate-400 dark:text-gray-500">
                 {mutations.length === 0
                   ? 'No mutations in the dataset.'
-                  : 'No mutations match the current filters.'}
+                  : compareMutationsOnly
+                    ? 'No checked mutations match the current filters. Check rows or toggle "show all".'
+                    : 'No mutations match the current filters.'}
               </td></tr>
             )}
-            {sortedMutations.map(m => (
-              <tr key={m.id} className="border-b border-slate-100 dark:border-gray-700/60 hover:bg-slate-50/60 dark:hover:bg-gray-700/30">
+            {renderedMutations.map(m => {
+              const isChecked = selectedMutations.has(m.id);
+              return (
+              <tr
+                key={m.id}
+                className={cn(
+                  'border-b border-slate-100 dark:border-gray-700/60',
+                  isChecked
+                    ? 'bg-blue-50/70 dark:bg-blue-900/20 ring-1 ring-inset ring-blue-300/50 dark:ring-blue-700/40'
+                    : 'hover:bg-slate-50/60 dark:hover:bg-gray-700/30'
+                )}
+              >
                 <th
-                  className="sticky left-0 z-10 bg-white dark:bg-gray-800 border-r border-slate-200 dark:border-gray-700 px-2 py-1 text-left whitespace-nowrap min-w-[200px] max-w-[280px]"
-                  title={[
-                    `${m.gene} ${m.variant}`,
-                    m.gene_product ? `Product: ${m.gene_product}` : null,
-                    m.position ? `Position: ${m.position}` : null,
-                    m.snp_type ? `Class: ${m.snp_type}` : null,
-                    m.base_type ? `Breseq type: ${m.base_type}` : null,
-                  ].filter(Boolean).join('\n')}
+                  className={cn(
+                    'sticky left-0 z-10 border-r border-slate-200 dark:border-gray-700 px-2 py-1 text-left whitespace-nowrap min-w-[200px] max-w-[280px]',
+                    isChecked ? 'bg-blue-50/90 dark:bg-blue-900/30' : 'bg-white dark:bg-gray-800'
+                  )}
                 >
-                  <div className="leading-tight">
-                    <div className="text-[12px] font-medium text-slate-800 dark:text-gray-100 truncate">{m.gene} <span className="font-normal text-slate-500 dark:text-gray-400">/ {m.variant}</span></div>
-                    <div className="text-[10px] text-slate-400 dark:text-gray-500 truncate">
-                      {m.type} · {m.metric}
-                      {m.gene_product ? <span className="ml-1 italic text-slate-500 dark:text-gray-400">— {m.gene_product}</span> : null}
-                    </div>
+                  <div className="flex items-start gap-1.5">
+                    <button
+                      onClick={(e) => { e.stopPropagation(); toggleMutation(m.id); }}
+                      className="mt-0.5 flex items-center justify-center shrink-0"
+                      title={isChecked ? 'Uncheck this mutation' : 'Check this mutation for comparison'}
+                      aria-pressed={isChecked}
+                    >
+                      {isChecked
+                        ? <CheckSquare className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                        : <Square className="w-4 h-4 text-slate-300 dark:text-gray-600 hover:text-slate-400 dark:hover:text-gray-500" />}
+                    </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setDetailMutation(m); }}
+                      className="leading-tight text-left min-w-0 group cursor-pointer"
+                      title="Click for details"
+                    >
+                      <div className="text-[12px] font-medium text-slate-800 dark:text-gray-100 truncate group-hover:text-blue-600 dark:group-hover:text-blue-400 group-hover:underline decoration-dotted underline-offset-2">
+                        {m.gene} <span className="font-normal text-slate-500 dark:text-gray-400 group-hover:text-blue-500 dark:group-hover:text-blue-400">/ {m.variant}</span>
+                      </div>
+                      <div className="text-[10px] text-slate-400 dark:text-gray-500 truncate">
+                        {m.type} · {m.metric}
+                        {m.detail?.seq_id ? <span className="ml-1 font-mono text-slate-400 dark:text-gray-500">{m.detail.seq_id}</span> : null}
+                        {m.gene_product ? <span className="ml-1 italic text-slate-500 dark:text-gray-400">· {m.gene_product}</span> : null}
+                      </div>
+                    </button>
                   </div>
                 </th>
                 {visibleSamples.map(s => {
@@ -1649,9 +1814,385 @@ function ComparativePanel({
                   );
                 })}
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
+      </div>
+      {detailMutation && (
+        <MutationDetailModal
+          mutation={detailMutation}
+          samples={visibleSamples}
+          groupOrder={groupOrder}
+          onClose={() => setDetailMutation(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+/* ---------------- Mutation detail modal ----------------
+   Large, scrollable rich popup opened by clicking a mutation name in the
+   Comparative View. Renders visual diagrams (genome-position bar, sequence
+   change, codon/AA protein change, per-sample frequency, gene context) instead
+   of a flat table. Every field is optional-guarded. Because different sample
+   groups can be on different reference genomes, every coordinate is labeled with
+   its seq_id (the reference contig the position sits on). */
+
+// Small labeled "ref -> new" colored mono blocks used for sequence and codon change.
+function ChangeBlocks({ from, to, fromLabel, toLabel }: { from?: string; to?: string; fromLabel?: string; toLabel?: string }) {
+  const show = (from && from.length > 0) || (to && to.length > 0);
+  if (!show) return null;
+  return (
+    <div className="flex items-center gap-2 flex-wrap">
+      <div className="flex flex-col items-center gap-0.5">
+        <span className="font-mono text-[15px] px-2 py-1 rounded bg-red-100 text-red-700 border border-red-200 dark:bg-red-900/30 dark:text-red-300 dark:border-red-800 break-all max-w-[260px]">
+          {from && from.length > 0 ? from : '·'}
+        </span>
+        {fromLabel ? <span className="text-[10px] text-[var(--text-soft)]">{fromLabel}</span> : null}
+      </div>
+      <ArrowRight className="w-4 h-4 text-[var(--text-soft)] shrink-0" />
+      <div className="flex flex-col items-center gap-0.5">
+        <span className="font-mono text-[15px] px-2 py-1 rounded bg-emerald-100 text-emerald-700 border border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-300 dark:border-emerald-800 break-all max-w-[260px]">
+          {to && to.length > 0 ? to : '·'}
+        </span>
+        {toLabel ? <span className="text-[10px] text-[var(--text-soft)]">{toLabel}</span> : null}
+      </div>
+    </div>
+  );
+}
+
+function ModalSection({ title, hint, children }: { title: string; hint?: string; children: React.ReactNode }) {
+  return (
+    <section className="border-t border-[var(--border)] pt-3">
+      <div className="flex items-baseline gap-2 mb-2">
+        <h4 className="text-[12px] font-semibold uppercase tracking-wider text-[var(--text-soft)]">{title}</h4>
+        {hint ? <span className="text-[10.5px] text-[var(--text-faint)]">{hint}</span> : null}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function MutationDetailModal({
+  mutation, samples, groupOrder, onClose,
+}: {
+  mutation: MutationRow;
+  samples: MutationSample[];
+  groupOrder: GroupLevelKey[];
+  onClose: () => void;
+}) {
+  const d = mutation.detail ?? {};
+  const snpType = mutation.snp_type ?? mutation.type;
+
+  // Genome window for the position diagram. We render a local window around the
+  // mutation rather than a whole-contig scale (coordinates can be in the
+  // millions) so the highlighted span is visible. start/end guard for points.
+  const posStart = typeof d.position_start === 'number' ? d.position_start : (typeof mutation.position === 'number' ? mutation.position : undefined);
+  const posEnd = typeof d.position_end === 'number' ? d.position_end : posStart;
+  const isPoint = posStart !== undefined && posEnd !== undefined && posStart === posEnd;
+  const strandRight = (d.gene_strand ?? '').includes('>') && !(d.gene_strand ?? '').includes('<');
+  const strandLeft = (d.gene_strand ?? '').includes('<') && !(d.gene_strand ?? '').includes('>');
+
+  // SVG diagram geometry.
+  const svgW = 640, svgH = 64, padX = 28, trackY = 38, trackH = 10;
+  let windowStart = 0, windowEnd = 1, markA = padX, markB = padX;
+  if (posStart !== undefined && posEnd !== undefined) {
+    const span = Math.max(1, posEnd - posStart);
+    const pad = Math.max(span * 3, 50);
+    windowStart = posStart - pad;
+    windowEnd = posEnd + pad;
+    const scale = (svgW - 2 * padX) / (windowEnd - windowStart);
+    markA = padX + (posStart - windowStart) * scale;
+    markB = padX + (posEnd - windowStart) * scale;
+  }
+  const hasPos = posStart !== undefined;
+
+  // Codon / AA coding change present?
+  const hasCodon = (d.codon_ref_seq && d.codon_ref_seq.length > 0) || (d.codon_new_seq && d.codon_new_seq.length > 0);
+  const hasAA = (d.aa_ref_seq && d.aa_ref_seq.length > 0) || (d.aa_new_seq && d.aa_new_seq.length > 0);
+  const isCoding = hasCodon || hasAA;
+
+  // Per-sample frequency, grouped by the same outer grouping levels used in the
+  // table so the user sees a familiar layout. We surface seq_id per group when
+  // groups differ (cross-genome caveat) -- but the mutation detail carries a
+  // single seq_id, so we annotate each group with the shared note.
+  const grouped = useMemo(() => {
+    const order = groupOrder.length > 0 ? [groupOrder[0]] : [];
+    const byKey = new Map<string, { label: string; samples: MutationSample[] }>();
+    for (const s of samples) {
+      const label = order.length > 0 ? (groupValue(s, order[0]) || '(none)') : 'All samples';
+      if (!byKey.has(label)) byKey.set(label, { label, samples: [] });
+      byKey.get(label)!.samples.push(s);
+    }
+    return [...byKey.values()];
+  }, [samples, groupOrder]);
+
+  const maxFreq = useMemo(() => {
+    let mx = 0;
+    for (const s of samples) {
+      const v = mutation.values[s.id];
+      if (typeof v === 'number' && v > mx) mx = v;
+    }
+    return mx;
+  }, [samples, mutation]);
+
+  const [showAllFields, setShowAllFields] = useState(false);
+
+  // All raw detail fields for the collapsible "all fields" section.
+  const rawFields: [string, string][] = [];
+  const pushField = (k: string, v: unknown) => {
+    if (v === undefined || v === null || v === '') return;
+    rawFields.push([k, String(v)]);
+  };
+  pushField('id', mutation.id);
+  pushField('gene', mutation.gene);
+  pushField('variant', mutation.variant);
+  pushField('type', mutation.type);
+  pushField('metric', mutation.metric);
+  pushField('snp_type', mutation.snp_type);
+  pushField('mutation_category', mutation.mutation_category);
+  pushField('base_type', mutation.base_type);
+  pushField('gene_product', mutation.gene_product);
+  pushField('seq_id', d.seq_id);
+  pushField('position_start', d.position_start);
+  pushField('position_end', d.position_end);
+  pushField('ref_seq', d.ref_seq);
+  pushField('new_seq', d.new_seq);
+  pushField('gene_strand', d.gene_strand);
+  pushField('gene_position', d.gene_position);
+  pushField('locus_tag', d.locus_tag);
+  pushField('aa_ref_seq', d.aa_ref_seq);
+  pushField('aa_new_seq', d.aa_new_seq);
+  pushField('aa_position', d.aa_position);
+  pushField('codon_ref_seq', d.codon_ref_seq);
+  pushField('codon_new_seq', d.codon_new_seq);
+  pushField('codon_number', d.codon_number);
+  pushField('size', d.size);
+  pushField('repeat_seq', d.repeat_seq);
+  pushField('repeat_ref_copies', d.repeat_ref_copies);
+  pushField('repeat_new_copies', d.repeat_new_copies);
+  pushField('genes_inactivated', d.genes_inactivated);
+  pushField('genes_overlapping', d.genes_overlapping);
+  pushField('genes_promoter', d.genes_promoter);
+
+  const posLabel = hasPos
+    ? (isPoint ? `${posStart!.toLocaleString()}` : `${posStart!.toLocaleString()} to ${posEnd!.toLocaleString()}`)
+    : 'n/a';
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+    >
+      <div
+        className="bg-[var(--surface)] text-[var(--text)] border border-[var(--border)] rounded-lg shadow-2xl w-full max-w-3xl max-h-[85vh] overflow-y-auto scroll-smooth"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header (sticky) */}
+        <div className="sticky top-0 z-10 bg-[var(--surface)] border-b border-[var(--border)] px-5 py-3 flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="font-mono text-[18px] font-semibold text-[var(--text)] break-all">{mutation.gene}</span>
+              {mutation.variant ? (
+                <span className="font-mono text-[13px] px-1.5 py-0.5 rounded bg-[var(--surface-3)] text-[var(--text-soft)] border border-[var(--border)]">{mutation.variant}</span>
+              ) : null}
+              <span className={cn('text-[11px] px-1.5 py-0.5 rounded border font-medium', snpTypeBadgeClass(snpType))}>{snpType || 'unknown'}</span>
+            </div>
+            {mutation.gene_product ? (
+              <div className="text-[12px] italic text-[var(--text-soft)] mt-1 truncate">{mutation.gene_product}</div>
+            ) : null}
+          </div>
+          <button
+            onClick={onClose}
+            className="shrink-0 p-1 rounded hover:bg-[var(--surface-3)] text-[var(--text-soft)] hover:text-[var(--text)]"
+            title="Close (Esc)"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <div className="px-5 py-4 space-y-4">
+          {/* Genome position diagram */}
+          <ModalSection
+            title="Genome position"
+            hint={d.seq_id ? `on reference ${d.seq_id}` : 'reference unknown'}
+          >
+            {hasPos ? (
+              <div>
+                <svg width="100%" viewBox={`0 0 ${svgW} ${svgH}`} className="block" role="img" aria-label={`Genome position ${posLabel} on ${d.seq_id ?? 'unknown reference'}`}>
+                  {/* track */}
+                  <rect x={padX} y={trackY} width={svgW - 2 * padX} height={trackH} rx={3} className="fill-[var(--surface-3)] stroke-[var(--border)]" />
+                  {/* window bound labels */}
+                  <text x={padX} y={trackY - 6} className="fill-[var(--text-faint)]" fontSize="9" textAnchor="start">{Math.round(windowStart).toLocaleString()}</text>
+                  <text x={svgW - padX} y={trackY - 6} className="fill-[var(--text-faint)]" fontSize="9" textAnchor="end">{Math.round(windowEnd).toLocaleString()}</text>
+                  {/* highlighted mutation span / tick */}
+                  {isPoint ? (
+                    <>
+                      <rect x={markA - 1.5} y={trackY - 6} width={3} height={trackH + 12} rx={1.5} className="fill-amber-500" />
+                      <circle cx={markA} cy={trackY - 10} r={3} className="fill-amber-500" />
+                    </>
+                  ) : (
+                    <rect x={Math.min(markA, markB)} y={trackY - 2} width={Math.max(3, Math.abs(markB - markA))} height={trackH + 4} rx={2} className="fill-amber-500/80 stroke-amber-600" />
+                  )}
+                  {/* strand arrow */}
+                  {(strandRight || strandLeft) && (
+                    <text x={svgW / 2} y={trackY + trackH + 16} fontSize="11" textAnchor="middle" className="fill-[var(--text-soft)]">
+                      {strandRight ? 'gene strand: 5\u2032 \u2192 3\u2032 (+)' : 'gene strand: 3\u2032 \u2190 5\u2032 (\u2212)'}
+                    </text>
+                  )}
+                </svg>
+                <div className="mt-1 text-[12px] text-[var(--text-soft)] flex flex-wrap gap-x-4 gap-y-1">
+                  <span>Coordinate: <span className="font-mono text-[var(--text)]">{posLabel}</span></span>
+                  <span>Reference (seq_id): <span className="font-mono text-[var(--text)]">{d.seq_id ?? 'n/a'}</span></span>
+                  {d.size ? <span>Size: <span className="font-mono text-[var(--text)]">{d.size}</span></span> : null}
+                  <span className="text-[var(--text-faint)]">{isPoint ? 'point mutation' : 'spans a range'}</span>
+                </div>
+              </div>
+            ) : (
+              <div className="text-[12px] text-[var(--text-faint)]">Position not available.</div>
+            )}
+          </ModalSection>
+
+          {/* Sequence change */}
+          <ModalSection title="Sequence change" hint={d.seq_id ? `ref ${d.seq_id}` : undefined}>
+            {(d.ref_seq || d.new_seq) ? (
+              <ChangeBlocks from={d.ref_seq} to={d.new_seq} fromLabel="reference" toLabel="observed" />
+            ) : (
+              <div className="text-[12px] text-[var(--text-faint)]">No base-level ref/new sequence recorded for this call.</div>
+            )}
+            {(d.repeat_seq || typeof d.repeat_ref_copies === 'number' || typeof d.repeat_new_copies === 'number') && (
+              <div className="mt-2 text-[12px] text-[var(--text-soft)]">
+                Repeat:{' '}
+                {d.repeat_seq ? <span className="font-mono text-[var(--text)]">{d.repeat_seq}</span> : <span className="font-mono">(seq n/a)</span>}
+                {' '}
+                <span className="font-mono text-[var(--text)]">{d.repeat_ref_copies ?? '?'}</span>
+                <ArrowRight className="inline w-3 h-3 mx-1 align-middle text-[var(--text-faint)]" />
+                <span className="font-mono text-[var(--text)]">{d.repeat_new_copies ?? '?'}</span>
+                {' '}copies
+              </div>
+            )}
+          </ModalSection>
+
+          {/* Protein / codon change */}
+          {isCoding ? (
+            <ModalSection title="Protein change">
+              <div className="flex flex-col gap-3">
+                {hasCodon && (
+                  <ChangeBlocks
+                    from={d.codon_ref_seq}
+                    to={d.codon_new_seq}
+                    fromLabel="codon (ref)"
+                    toLabel="codon (new)"
+                  />
+                )}
+                {hasAA && (
+                  <div className="text-[13px] text-[var(--text)]">
+                    Amino acid:{' '}
+                    <span className="font-mono px-1.5 py-0.5 rounded bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300">{d.aa_ref_seq ?? '?'}</span>
+                    <ArrowRight className="inline w-3.5 h-3.5 mx-1.5 align-middle text-[var(--text-soft)]" />
+                    <span className="font-mono px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">{d.aa_new_seq ?? '?'}</span>
+                    {typeof d.aa_position === 'number' ? <span className="ml-2 text-[var(--text-soft)]">at residue <span className="font-mono text-[var(--text)]">{d.aa_position}</span></span> : null}
+                  </div>
+                )}
+                {typeof d.codon_number === 'number' ? (
+                  <div className="text-[12px] text-[var(--text-soft)]">Codon number: <span className="font-mono text-[var(--text)]">{d.codon_number}</span></div>
+                ) : null}
+              </div>
+            </ModalSection>
+          ) : (
+            <ModalSection title="Protein change">
+              <div className="text-[12px] text-[var(--text-faint)]">Non-coding / intergenic: no codon or amino-acid change.</div>
+            </ModalSection>
+          )}
+
+          {/* Gene context */}
+          <ModalSection title="Gene context">
+            <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1.5 text-[12px]">
+              {d.locus_tag ? (<><dt className="text-[var(--text-soft)]">Locus tag</dt><dd className="font-mono text-[var(--text)] sm:text-right break-all">{d.locus_tag}</dd></>) : null}
+              {d.gene_position ? (<><dt className="text-[var(--text-soft)]">Gene position</dt><dd className="font-mono text-[var(--text)] sm:text-right break-all">{d.gene_position}</dd></>) : null}
+              {d.gene_strand ? (<><dt className="text-[var(--text-soft)]">Strand</dt><dd className="font-mono text-[var(--text)] sm:text-right">{d.gene_strand}</dd></>) : null}
+              {d.genes_inactivated ? (<><dt className="text-[var(--text-soft)]">Genes inactivated</dt><dd className="font-mono text-[var(--text)] sm:text-right break-all">{d.genes_inactivated}</dd></>) : null}
+              {d.genes_overlapping ? (<><dt className="text-[var(--text-soft)]">Genes overlapping</dt><dd className="font-mono text-[var(--text)] sm:text-right break-all">{d.genes_overlapping}</dd></>) : null}
+              {d.genes_promoter ? (<><dt className="text-[var(--text-soft)]">Promoter genes</dt><dd className="font-mono text-[var(--text)] sm:text-right break-all">{d.genes_promoter}</dd></>) : null}
+            </dl>
+            {!d.locus_tag && !d.gene_position && !d.gene_strand && !d.genes_inactivated && !d.genes_overlapping && !d.genes_promoter && (
+              <div className="text-[12px] text-[var(--text-faint)]">No additional gene context recorded.</div>
+            )}
+          </ModalSection>
+
+          {/* Per-sample frequency */}
+          <ModalSection
+            title={mutation.metric === 'copy_number' ? 'Per-sample copy number' : 'Per-sample frequency'}
+            hint={`${samples.length} sample${samples.length === 1 ? '' : 's'} in view`}
+          >
+            <div className="text-[11px] text-[var(--text-faint)] mb-2 flex items-center gap-1.5">
+              <Info className="w-3 h-3 shrink-0" />
+              <span>
+                Different sample groups may be called against different reference genomes; this mutation&apos;s coordinate
+                {d.seq_id ? <> sits on <span className="font-mono">{d.seq_id}</span></> : ' has no recorded reference'}.
+                A dash means no call in that sample (absent), distinct from a 0% value.
+              </span>
+            </div>
+            <div className="space-y-3">
+              {grouped.map(g => (
+                <div key={g.label}>
+                  {grouped.length > 1 && (
+                    <div className="text-[10.5px] uppercase tracking-wider text-[var(--text-soft)] mb-1">{g.label}</div>
+                  )}
+                  <div className="space-y-1">
+                    {g.samples.map(s => {
+                      const v = mutation.values[s.id];
+                      const has = typeof v === 'number' && !Number.isNaN(v);
+                      const pct = has ? (mutation.metric === 'frequency' ? Math.max(0, Math.min(1, v)) : (maxFreq > 0 ? v / maxFreq : 0)) : 0;
+                      return (
+                        <div key={s.id} className="flex items-center gap-2">
+                          <div className="w-40 shrink-0 truncate font-mono text-[11px] text-[var(--text)]" title={s.name}>{s.name}</div>
+                          <div className="flex-1 h-4 rounded bg-[var(--surface-3)] overflow-hidden relative">
+                            {has && (
+                              <div
+                                className={cn('h-full rounded', mutation.metric === 'copy_number' ? 'bg-emerald-500' : 'bg-blue-500')}
+                                style={{ width: `${Math.round(pct * 100)}%` }}
+                              />
+                            )}
+                          </div>
+                          <div className="w-16 shrink-0 text-right tabular-nums text-[11px] text-[var(--text)]">
+                            {has ? formatMetric(v, mutation.metric) : <span className="text-[var(--text-faint)]">- absent</span>}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </ModalSection>
+
+          {/* All fields (collapsible) */}
+          <ModalSection title="All fields">
+            <button
+              onClick={() => setShowAllFields(v => !v)}
+              className="flex items-center gap-1 text-[12px] text-[var(--text-soft)] hover:text-[var(--text)]"
+            >
+              {showAllFields ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+              {showAllFields ? 'Hide raw fields' : `Show all ${rawFields.length} raw fields`}
+            </button>
+            {showAllFields && (
+              <table className="mt-2 w-full text-[11.5px] border-collapse">
+                <tbody>
+                  {rawFields.map(([k, v]) => (
+                    <tr key={k} className="border-b border-[var(--border)]">
+                      <td className="py-1 pr-3 align-top text-[var(--text-soft)] font-mono whitespace-nowrap">{k}</td>
+                      <td className="py-1 align-top font-mono text-[var(--text)] break-all">{v}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </ModalSection>
+        </div>
       </div>
     </div>
   );
