@@ -94,7 +94,61 @@ type CompareFilters = {
   hideEmptySamples: boolean;
   sortKey: 'gene' | 'variant' | 'type' | 'position' | 'maxFreq' | 'spread' | 'presence' | null;
   sortDir: 'asc' | 'desc';
+  groupOrder: string[]; // ordered, enabled column grouping levels (see GROUP_LEVELS)
 };
+
+// Column grouping levels the biologist can pick from for the Comparative View.
+// Each level maps a stable key to the sample field it reads and a short label.
+// The ordered list of ENABLED keys (groupOrder) drives both the column sort and
+// the sticky header bands. 'transfer' sorts numerically (T1 < T6 < T11 < T25).
+const GROUP_LEVELS = [
+  { key: 'experiment', field: 'experiment', label: 'Experiment' },
+  { key: 'condition', field: 'condition', label: 'Condition' },
+  { key: 'strain', field: 'strain', label: 'Strain' },
+  { key: 'dna', field: 'donor_dna', label: 'DNA' },
+  { key: 'replicate', field: 'replicate', label: 'Replicate' },
+  { key: 'transfer', field: 'transfer', label: 'Transfer' },
+] as const;
+
+type GroupLevelKey = typeof GROUP_LEVELS[number]['key'];
+const GROUP_LEVEL_KEYS = GROUP_LEVELS.map(l => l.key) as GroupLevelKey[];
+const GROUP_LEVEL_BY_KEY = new Map(GROUP_LEVELS.map(l => [l.key, l]));
+// Default matches Natascha's example: experiment > condition > strain > dna > replicate.
+const DEFAULT_GROUP_ORDER: GroupLevelKey[] = ['experiment', 'condition', 'strain', 'dna', 'replicate'];
+
+// Read the value a sample contributes for a given grouping level, as a string
+// (used for grouping/labels) plus a numeric hint for transfer ordering.
+function groupValue(s: MutationSample, key: GroupLevelKey): string {
+  if (key === 'transfer') return typeof s.transfer === 'number' ? String(s.transfer) : '';
+  const level = GROUP_LEVEL_BY_KEY.get(key);
+  if (!level) return '';
+  const v = (s as unknown as Record<string, unknown>)[level.field];
+  return typeof v === 'string' ? v : (v == null ? '' : String(v));
+}
+
+// Build a comparator from an ordered list of grouping levels. Text levels use
+// localeCompare; transfer compares numerically so T1 < T6 < T11 < T25. After all
+// levels tie we fall back to transfer-number then name for stable ordering.
+function makeGroupComparator(order: GroupLevelKey[]) {
+  return (a: MutationSample, b: MutationSample): number => {
+    for (const key of order) {
+      if (key === 'transfer') {
+        const at = typeof a.transfer === 'number' ? a.transfer : Infinity;
+        const bt = typeof b.transfer === 'number' ? b.transfer : Infinity;
+        if (at !== bt) return at - bt;
+        continue;
+      }
+      const av = groupValue(a, key);
+      const bv = groupValue(b, key);
+      if (av !== bv) return av.localeCompare(bv);
+    }
+    // Stable fallbacks: transfer number, then name.
+    const at = typeof a.transfer === 'number' ? a.transfer : Infinity;
+    const bt = typeof b.transfer === 'number' ? b.transfer : Infinity;
+    if (at !== bt) return at - bt;
+    return a.name.localeCompare(b.name);
+  };
+}
 
 // Types we want to surface as filter pills, in research-priority order.
 const SNP_TYPE_OPTIONS = [
@@ -982,6 +1036,7 @@ function ComparativePanel({
   const [hideEmptySamples, setHideEmptySamples] = useState(false);
   const [sortKey, setSortKey] = useState<SortKey>('maxFreq');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
+  const [groupOrder, setGroupOrder] = useState<GroupLevelKey[]>(DEFAULT_GROUP_ORDER);
   const [filtersHydrated, setFiltersHydrated] = useState(false);
 
   // Rehydrate filters from localStorage on first mount. Once the user has
@@ -1000,6 +1055,14 @@ function ComparativePanel({
         if (typeof f.hideEmptySamples === 'boolean') setHideEmptySamples(f.hideEmptySamples);
         if (f.sortKey === null || ['gene','variant','type','position','maxFreq','spread','presence'].includes(f.sortKey as string)) setSortKey(f.sortKey as SortKey);
         if (f.sortDir === 'asc' || f.sortDir === 'desc') setSortDir(f.sortDir);
+        if (Array.isArray(f.groupOrder)) {
+          // Keep only known keys, de-duplicate, preserve the user's order.
+          const seen = new Set<string>();
+          const cleaned = f.groupOrder.filter((k): k is GroupLevelKey =>
+            GROUP_LEVEL_KEYS.includes(k as GroupLevelKey) && !seen.has(k) && (seen.add(k), true)
+          );
+          if (cleaned.length > 0) setGroupOrder(cleaned);
+        }
       }
     } catch {}
     setFiltersHydrated(true);
@@ -1010,11 +1073,11 @@ function ComparativePanel({
     if (!filtersHydrated) return;
     try {
       const payload: CompareFilters = {
-        mutFilter, metricFilter, snpTypes: [...snpTypes], minFreq, minPresence, hideEmpty, hideEmptySamples, sortKey, sortDir,
+        mutFilter, metricFilter, snpTypes: [...snpTypes], minFreq, minPresence, hideEmpty, hideEmptySamples, sortKey, sortDir, groupOrder,
       };
       localStorage.setItem(COMPARE_FILTERS_KEY, JSON.stringify(payload));
     } catch {}
-  }, [filtersHydrated, mutFilter, metricFilter, snpTypes, minFreq, minPresence, hideEmpty, hideEmptySamples, sortKey, sortDir]);
+  }, [filtersHydrated, mutFilter, metricFilter, snpTypes, minFreq, minPresence, hideEmpty, hideEmptySamples, sortKey, sortDir, groupOrder]);
 
   const toggleSnpType = (t: string) => {
     const next = new Set(snpTypes);
@@ -1044,10 +1107,13 @@ function ComparativePanel({
     return [...ordered, ...extras];
   }, [mutations]);
 
+  // Column order for the Comparative View is driven by the user's chosen
+  // grouping levels (groupOrder), NOT the global sortSamples used elsewhere.
   const selectedSamples = useMemo(() => {
     const map = new Map(samples.map(s => [s.id, s]));
-    return sortSamples([...selected].map(id => map.get(id)).filter(Boolean) as MutationSample[]);
-  }, [samples, selected]);
+    const picked = [...selected].map(id => map.get(id)).filter(Boolean) as MutationSample[];
+    return [...picked].sort(makeGroupComparator(groupOrder));
+  }, [samples, selected, groupOrder]);
 
   // shared y-max and x-extent so growth curves are visually comparable across columns.
   // Uses visibleSamples (declared below) — JS hoisting handles the cycle since
@@ -1142,31 +1208,57 @@ function ComparativePanel({
 
   const hiddenSampleCount = selectedSamples.length - visibleSamples.length;
 
-  // Column grouping for sticky header: (experiment + replicate) > donor_dna.
-  // Built from visibleSamples so hidden columns drop out cleanly, including
-  // collapsing their parent group bands when every member is hidden.
-  const columnGroups = useMemo(() => {
-    interface SubGroup { key: string; label: string; cols: MutationSample[] }
-    interface TopGroup { key: string; experiment: string; replicate: string; subs: SubGroup[]; colCount: number }
-    const top: TopGroup[] = [];
-    for (const s of visibleSamples) {
-      const tKey = `${s.experiment}||${s.replicate ?? ''}`;
-      let group = top[top.length - 1];
-      if (!group || group.key !== tKey) {
-        group = { key: tKey, experiment: s.experiment, replicate: s.replicate ?? '', subs: [], colCount: 0 };
-        top.push(group);
-      }
-      const sKey = s.donor_dna ?? '';
-      let sub = group.subs[group.subs.length - 1];
-      if (!sub || sub.key !== sKey) {
-        sub = { key: sKey, label: sKey, cols: [] };
-        group.subs.push(sub);
-      }
-      sub.cols.push(s);
-      group.colCount++;
-    }
-    return top;
-  }, [visibleSamples]);
+  // Column grouping for the sticky header: one band PER enabled level in
+  // groupOrder (outermost first). Adjacent columns that share the same value for
+  // ALL levels up to and including that band merge into one band cell (colSpan).
+  // Built from visibleSamples so hidden columns drop out and parent bands
+  // collapse when every member is hidden.
+  const columnBands = useMemo(() => {
+    interface BandCell { key: string; label: string; colCount: number }
+    // For each band level, walk visibleSamples and start a new cell whenever the
+    // composite key (this level + all outer levels) changes, so nesting is honored.
+    return groupOrder.map((levelKey, levelIdx) => {
+      const cells: BandCell[] = [];
+      let prevComposite: string | null = null;
+      visibleSamples.forEach((s, colIdx) => {
+        const composite = groupOrder
+          .slice(0, levelIdx + 1)
+          .map(k => groupValue(s, k))
+          .join('||');
+        const last = cells[cells.length - 1];
+        if (last && composite === prevComposite) {
+          last.colCount++;
+        } else {
+          const raw = groupValue(s, levelKey);
+          cells.push({ key: `${levelKey}:${colIdx}:${composite}`, label: raw, colCount: 1 });
+        }
+        prevComposite = composite;
+      });
+      const level = GROUP_LEVEL_BY_KEY.get(levelKey);
+      return { levelKey, levelLabel: level ? level.label : levelKey, cells };
+    });
+  }, [visibleSamples, groupOrder]);
+
+  // Grouping-level controls: move a level up/down within the active order,
+  // disable it (remove from order), or enable it (append to the order).
+  const moveGroupLevel = (key: GroupLevelKey, dir: -1 | 1) => {
+    setGroupOrder(prev => {
+      const idx = prev.indexOf(key);
+      if (idx < 0) return prev;
+      const swap = idx + dir;
+      if (swap < 0 || swap >= prev.length) return prev;
+      const next = [...prev];
+      [next[idx], next[swap]] = [next[swap], next[idx]];
+      return next;
+    });
+  };
+  const disableGroupLevel = (key: GroupLevelKey) => {
+    setGroupOrder(prev => (prev.length <= 1 ? prev : prev.filter(k => k !== key)));
+  };
+  const enableGroupLevel = (key: GroupLevelKey) => {
+    setGroupOrder(prev => (prev.includes(key) ? prev : [...prev, key]));
+  };
+  const disabledGroupLevels = GROUP_LEVEL_KEYS.filter(k => !groupOrder.includes(k));
 
   const toggleSort = (key: NonNullable<SortKey>) => {
     if (sortKey === key) setSortDir(sortDir === 'asc' ? 'desc' : 'asc');
@@ -1336,6 +1428,72 @@ function ComparativePanel({
         </div>
       )}
 
+      {/* Group by: ordered column-grouping levels with reorder + enable/disable */}
+      <div className="px-3 py-1.5 border-b border-slate-200 dark:border-gray-700 bg-slate-50/60 dark:bg-gray-800/60 flex items-center gap-1.5 text-[11px] text-slate-500 dark:text-gray-400 flex-wrap">
+        <span className="mr-1" title="Choose how sample columns are grouped and ordered (outermost level first).">Group columns by:</span>
+        {groupOrder.map((key, idx) => {
+          const level = GROUP_LEVEL_BY_KEY.get(key);
+          return (
+            <span
+              key={key}
+              className="inline-flex items-center gap-0.5 pl-1.5 pr-1 py-0.5 rounded border border-blue-300 dark:border-blue-700 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300"
+            >
+              <span className="text-[10px] tabular-nums opacity-60">{idx + 1}.</span>
+              <span className="text-[11px]">{level ? level.label : key}</span>
+              <button
+                onClick={() => moveGroupLevel(key, -1)}
+                disabled={idx === 0}
+                className="text-blue-500 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-200 disabled:opacity-30 disabled:cursor-default"
+                title="Move outward (higher priority)"
+              >
+                <ChevronUp className="w-3 h-3" />
+              </button>
+              <button
+                onClick={() => moveGroupLevel(key, 1)}
+                disabled={idx === groupOrder.length - 1}
+                className="text-blue-500 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-200 disabled:opacity-30 disabled:cursor-default"
+                title="Move inward (lower priority)"
+              >
+                <ChevronDown className="w-3 h-3" />
+              </button>
+              <button
+                onClick={() => disableGroupLevel(key)}
+                disabled={groupOrder.length <= 1}
+                className="text-blue-400 dark:text-blue-500 hover:text-red-500 disabled:opacity-30 disabled:cursor-default"
+                title="Remove this grouping level"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            </span>
+          );
+        })}
+        {disabledGroupLevels.length > 0 && (
+          <span className="inline-flex items-center gap-1 flex-wrap">
+            <span className="ml-1 text-slate-400 dark:text-gray-500">add:</span>
+            {disabledGroupLevels.map(key => {
+              const level = GROUP_LEVEL_BY_KEY.get(key);
+              return (
+                <button
+                  key={key}
+                  onClick={() => enableGroupLevel(key)}
+                  className="px-1.5 py-0.5 rounded border border-slate-200 dark:border-gray-600 hover:bg-slate-100 dark:hover:bg-gray-700 text-slate-600 dark:text-gray-300 text-[11px]"
+                  title={`Group columns by ${level ? level.label : key}`}
+                >
+                  + {level ? level.label : key}
+                </button>
+              );
+            })}
+          </span>
+        )}
+        <button
+          onClick={() => setGroupOrder(DEFAULT_GROUP_ORDER)}
+          className="ml-1 text-slate-400 dark:text-gray-500 hover:text-slate-700 dark:hover:text-gray-200"
+          title="Reset grouping to the default order"
+        >
+          reset
+        </button>
+      </div>
+
       {/* Sort chips */}
       <div className="px-3 py-1.5 border-b border-slate-200 dark:border-gray-700 bg-slate-50/60 dark:bg-gray-800/60 flex items-center gap-1.5 text-[11px] text-slate-500 dark:text-gray-400 flex-wrap">
         <span className="mr-1">Sort mutations by:</span>
@@ -1356,38 +1514,33 @@ function ComparativePanel({
         <table className="text-[12px] border-collapse">
           {/* Sticky top: column groups + sample info rows + growth curves */}
           <thead className="sticky top-0 z-30 bg-white dark:bg-gray-800">
-            {/* Experiment / Replicate band */}
-            <tr>
-              <th className="sticky left-0 z-40 bg-slate-100 dark:bg-gray-800 border-b border-r border-slate-200 dark:border-gray-700 px-2 py-1 text-left text-[10px] uppercase tracking-wider text-slate-500 dark:text-gray-400 min-w-[200px]">
-                Experiment / Replicate
-              </th>
-              {columnGroups.map(g => (
-                <th
-                  key={g.key}
-                  colSpan={g.colCount}
-                  className="border-b border-l border-slate-200 dark:border-gray-700 bg-slate-100 dark:bg-gray-800 px-2 py-1 text-[11px] font-semibold text-slate-700 dark:text-gray-200 whitespace-nowrap text-center"
-                >
-                  {g.experiment}{g.replicate ? ` · Rep ${g.replicate}` : ''}
+            {/* Grouping bands: one row per enabled grouping level (outermost first). */}
+            {columnBands.map((band, bandIdx) => (
+              <tr key={band.levelKey}>
+                <th className={cn(
+                  'sticky left-0 z-40 border-b border-r border-slate-200 dark:border-gray-700 px-2 py-1 text-left text-[10px] uppercase tracking-wider text-slate-500 dark:text-gray-400',
+                  bandIdx === 0
+                    ? 'bg-slate-100 dark:bg-gray-800 min-w-[200px]'
+                    : 'bg-slate-50 dark:bg-gray-800/70'
+                )}>
+                  {band.levelLabel}
                 </th>
-              ))}
-            </tr>
-            {/* Donor DNA band */}
-            <tr>
-              <th className="sticky left-0 z-40 bg-slate-50 dark:bg-gray-800/70 border-b border-r border-slate-200 dark:border-gray-700 px-2 py-1 text-left text-[10px] uppercase tracking-wider text-slate-500 dark:text-gray-400">
-                Donor DNA
-              </th>
-              {columnGroups.flatMap(g =>
-                g.subs.map(sub => (
+                {band.cells.map(cell => (
                   <th
-                    key={g.key + '|' + sub.key}
-                    colSpan={sub.cols.length}
-                    className="border-b border-l border-slate-200 dark:border-gray-700 bg-slate-50 dark:bg-gray-800/70 px-2 py-1 text-[11px] font-medium text-slate-600 dark:text-gray-300 whitespace-nowrap text-center"
+                    key={cell.key}
+                    colSpan={cell.colCount}
+                    className={cn(
+                      'border-b border-l border-slate-200 dark:border-gray-700 px-2 py-1 text-[11px] whitespace-nowrap text-center',
+                      bandIdx === 0
+                        ? 'bg-slate-100 dark:bg-gray-800 font-semibold text-slate-700 dark:text-gray-200'
+                        : 'bg-slate-50 dark:bg-gray-800/70 font-medium text-slate-600 dark:text-gray-300'
+                    )}
                   >
-                    {sub.label || '—'}
+                    {cell.label || '—'}
                   </th>
-                ))
-              )}
-            </tr>
+                ))}
+              </tr>
+            ))}
             {/* Sample name + transfer */}
             <tr>
               <th className="sticky left-0 z-40 bg-white dark:bg-gray-800 border-b border-r border-slate-200 dark:border-gray-700 px-2 py-1 text-left text-[10px] uppercase tracking-wider text-slate-500 dark:text-gray-400">
