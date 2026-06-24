@@ -138,13 +138,14 @@ interface ChartProps {
   candidateFilter: Set<string>;
   topN: number;            // 0 = no rollup, else collapse the rest into "other"
   pinnedCand: string | null;
+  hoverCand?: string | null;  // transient highlight (e.g. sidebar row hover); no persistent stroke
   height: number;          // SVG inner height target
   onPickCandidate?: (cand: string) => void;
 }
 
 function ChartCard({
   chart, stats, colorMode, normalize, aColors, bColors, candColors,
-  candidateFilter, topN, pinnedCand, height, onPickCandidate,
+  candidateFilter, topN, pinnedCand, hoverCand, height, onPickCandidate,
 }: ChartProps) {
   // Hover tooltip state — managed in React so we get instant feedback
   // and rich content (multi-line, color swatch). SVG <title> stays as a
@@ -208,8 +209,10 @@ function ChartCard({
 
   const yTicks = 4;
   const tickValues = Array.from({ length: yTicks + 1 }, (_, i) => (maxY * i) / yTicks);
+  // hoverCand (transient) takes precedence for emphasis; pinnedCand is persistent.
+  const focusCand = hoverCand ?? pinnedCand;
   const isPinned = (cand: string) => pinnedCand !== null && pinnedCand === cand;
-  const isDimmed = (cand: string) => pinnedCand !== null && pinnedCand !== cand;
+  const isDimmed = (cand: string) => focusCand !== null && focusCand !== cand;
 
   return (
     <div className="rounded-lg border border-slate-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-sm overflow-hidden h-full flex flex-col">
@@ -227,12 +230,23 @@ function ChartCard({
         <span className="text-slate-600 dark:text-gray-300">Rep {chart.replicate}</span>
         <div className="ml-auto flex items-center gap-2 text-[10.5px] tabular-nums text-slate-500 dark:text-gray-400">
           {stats.flipped && (
-            <span className="px-1 py-0.5 rounded bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800 font-semibold uppercase tracking-wider" title={`Dominant flipped: ${stats.dominantAtFirst} → ${stats.dominantAtLast}`}>
+            <span className="px-1 py-0.5 rounded bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800 font-semibold uppercase tracking-wider" title={`Flip: dominant A-B candidate changed between the first and last transfer (${stats.dominantAtFirst} to ${stats.dominantAtLast})`}>
               flip
             </span>
           )}
-          <span>{stats.uniqueCandidates} cands</span>
-          <span>· {stats.totalReads.toLocaleString()} reads</span>
+          {/* Make degenerate charts read as intentional, not broken/placeholder. */}
+          {chart.transfers.length === 1 && (
+            <span className="px-1 py-0.5 rounded bg-slate-100 dark:bg-gray-700 text-slate-500 dark:text-gray-400 border border-slate-200 dark:border-gray-600" title="This well has a single sequenced transfer, so the chart shows one bar.">
+              1 transfer
+            </span>
+          )}
+          {stats.uniqueCandidates === 1 && (
+            <span className="px-1 py-0.5 rounded bg-slate-100 dark:bg-gray-700 text-slate-500 dark:text-gray-400 border border-slate-200 dark:border-gray-600" title="Only one candidate is present, so the bar is a single solid block by design.">
+              single candidate
+            </span>
+          )}
+          <span title="Distinct A-B candidates in this chart">{stats.uniqueCandidates} cands</span>
+          <span title="Total reads across all transfers">· {stats.totalReads.toLocaleString()} reads</span>
         </div>
       </div>
 
@@ -365,7 +379,8 @@ function ChartCard({
 }
 
 // Tiny sparkline thumbnail used in the wall view.
-function ThumbChart({ chart, stats, candColors, pinnedCand }: { chart: BarcodeChart; stats: ChartStats; candColors: Record<string, string>; pinnedCand: string | null }) {
+function ThumbChart({ chart, stats, candColors, pinnedCand, hoverCand }: { chart: BarcodeChart; stats: ChartStats; candColors: Record<string, string>; pinnedCand: string | null; hoverCand?: string | null }) {
+  const focusCand = hoverCand ?? pinnedCand;
   const W = 130, H = 60;
   const PAD_L = 10, PAD_R = 4, PAD_T = 4, PAD_B = 12;
   const innerW = W - PAD_L - PAD_R, innerH = H - PAD_T - PAD_B;
@@ -391,7 +406,7 @@ function ThumbChart({ chart, stats, candColors, pinnedCand }: { chart: BarcodeCh
               const h = (v / maxY) * innerH;
               const y = baseY - acc - h;
               acc += h;
-              const dim = pinnedCand !== null && pinnedCand !== cand;
+              const dim = focusCand !== null && focusCand !== cand;
               return <rect key={cand} x={x} y={y} width={barW} height={Math.max(0.5, h)} fill={candColors[cand] || '#888'} opacity={dim ? 0.2 : 1} />;
             })}
             {/* "other" rollup as grey */}
@@ -401,7 +416,7 @@ function ThumbChart({ chart, stats, candColors, pinnedCand }: { chart: BarcodeCh
               if (other <= 0) return null;
               const h = (other / maxY) * innerH;
               const y = baseY - acc - h;
-              return <rect x={x} y={y} width={barW} height={Math.max(0.5, h)} fill="#94a3b8" opacity={pinnedCand ? 0.2 : 0.7} />;
+              return <rect x={x} y={y} width={barW} height={Math.max(0.5, h)} fill="#94a3b8" opacity={focusCand ? 0.2 : 0.7} />;
             })()}
           </g>
         );
@@ -445,6 +460,9 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
   const [sortKey, setSortKey] = useState<SortKey>('natural');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
   const [pinnedCand, setPinnedCand] = useState<string | null>(null);
+  // Transient hover highlight: hovering a candidate row in the sidebar lights up
+  // that candidate's segments across every visible chart (without committing a pin).
+  const [hoveredCand, setHoveredCand] = useState<string | null>(null);
   const [focusKey, setFocusKey] = useState<string | null>(null);
   const [showSidebar, setShowSidebar] = useState(true);
   // Compare view defaults to no sidebar — the chart area needs the room.
@@ -669,20 +687,48 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
           {showSidebar ? <ChevronLeft className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
         </button>
         <BarChart3 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-        {data && (
-          <span className={cn(
-            'inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider',
-            data.source === 'mock'
-              ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 border border-amber-300/60 dark:border-amber-700/60'
-              : 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 border border-emerald-300/60 dark:border-emerald-700/60'
-          )}>
-            <Sparkles className="w-3 h-3" />
-            {data.source === 'mock' ? 'Mock' : 'LIMS'}
+        {/* Source badge. Mock stays loud (amber warning) because it means the
+            view is NOT showing real LIMS data. The normal 'lims' source is
+            rendered small and quiet so it stops competing for attention. */}
+        {data && (data.source === 'mock' ? (
+          <span
+            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 border border-amber-300/60 dark:border-amber-700/60"
+            title="Showing MOCK data, not live LIMS data"
+          >
+            <AlertTriangle className="w-3 h-3" />
+            Mock
           </span>
-        )}
-        <span className="text-[11px] text-slate-500 dark:text-gray-400 tabular-nums">
-          {visibleCharts.length}/{data?.charts.length ?? 0}
-        </span>
+        ) : (
+          <span
+            className="inline-flex items-center gap-1 text-[10px] font-medium uppercase tracking-wide text-slate-400 dark:text-gray-500"
+            title="Live data from LIMS"
+          >
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+            LIMS
+          </span>
+        ))}
+        {/* Labeled shown/total counter. When a filter trims the set, it turns
+            blue/accent and reads "N of TOTAL" so it's obvious charts are hidden. */}
+        {(() => {
+          const total = data?.charts.length ?? 0;
+          const shown = visibleCharts.length;
+          const isFiltered = shown < total;
+          return (
+            <span
+              className={cn(
+                'text-[11px] tabular-nums px-1.5 py-0.5 rounded',
+                isFiltered
+                  ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-200 font-semibold border border-blue-200 dark:border-blue-800'
+                  : 'text-slate-500 dark:text-gray-400'
+              )}
+              title={isFiltered
+                ? `${shown} of ${total} charts shown (filters are hiding ${total - shown})`
+                : `All ${total} charts shown`}
+            >
+              {shown} of {total} charts{isFiltered ? ' shown' : ''}
+            </span>
+          );
+        })()}
 
         {/* View mode */}
         <div className="flex items-center border border-slate-200 dark:border-gray-600 rounded overflow-hidden ml-1">
@@ -783,11 +829,16 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
                   <input type="number" min={0} max={50} value={topN} onChange={e => setTopN(parseInt(e.target.value || '0'))}
                     className="w-14 px-1 py-0.5 text-[11.5px] border border-slate-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 dark:text-gray-100 outline-none tabular-nums" />
                 </label>
-                <label className="flex items-center gap-1.5 text-[11.5px]">
+                <label className="flex items-center gap-1.5 text-[11.5px]" title="Show only charts where the dominant A-B candidate at the first transfer differs from the one at the last transfer (a 'flip').">
                   <input type="checkbox" checked={onlyFlipped} onChange={e => setOnlyFlipped(e.target.checked)} />
                   <span>only flipped</span>
+                  <Info className="w-3 h-3 text-slate-400" />
                 </label>
               </div>
+              {/* One-line definition so the amber "flip" badge on charts is never a mystery. */}
+              <p className="-mt-1 mb-2 text-[10.5px] leading-snug text-slate-500 dark:text-gray-400">
+                A chart is &quot;flipped&quot; when its dominant A-B candidate changes between the first and last transfer.
+              </p>
 
               {/* Transfers */}
               {transferRange && allTransferValues.length > 1 && (
@@ -864,6 +915,29 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
         </div>
 
         <div className="ml-auto flex items-center gap-1">
+          {/* Persistent pinned-candidate chip. Visible in every view (even when the
+              sidebar is hidden) so a pin is never silently active. Click X to unpin. */}
+          {pinnedCand && (
+            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-mono font-semibold bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-200 border border-blue-200 dark:border-blue-800"
+              title={`Pinned: ${pinnedCand} is highlighted across all charts. Click X to unpin.`}>
+              <Pin className="w-3 h-3" fill="currentColor" />
+              {pinnedCand}
+              <button onClick={() => setPinnedCand(null)} className="ml-0.5 hover:text-blue-900 dark:hover:text-white" title="Unpin">
+                <X className="w-3 h-3" />
+              </button>
+            </span>
+          )}
+          {/* Restrict chip (candidate filter) mirrored to the toolbar too. */}
+          {candidateFilter.size > 0 && (
+            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-medium bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-200 border border-emerald-200 dark:border-emerald-800"
+              title={`Charts restricted to ${candidateFilter.size} candidate${candidateFilter.size === 1 ? '' : 's'}. Click X to clear.`}>
+              <Filter className="w-3 h-3" />
+              {candidateFilter.size} restricted
+              <button onClick={() => setCandidateFilter(new Set())} className="ml-0.5 hover:text-emerald-900 dark:hover:text-white" title="Clear restriction">
+                <X className="w-3 h-3" />
+              </button>
+            </span>
+          )}
           <button onClick={() => data && downloadBlob('barcode-counts.csv', toCsv(visibleCharts))}
             disabled={!data || visibleCharts.length === 0}
             className="flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded border border-slate-200 dark:border-gray-600 text-slate-600 dark:text-gray-300 hover:bg-slate-100 dark:hover:bg-gray-700 disabled:opacity-50"
@@ -893,6 +967,7 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
             candColors={candColors}
             pinnedCand={pinnedCand}
             setPinnedCand={setPinnedCand}
+            setHoveredCand={setHoveredCand}
             candidateFilter={candidateFilter}
             setCandidateFilter={setCandidateFilter}
             candidateIndex={candidateIndex}
@@ -977,12 +1052,12 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
                           ? <span className="font-mono font-bold text-slate-700 dark:text-gray-200">{c.well}</span>
                           : <span className="font-mono font-bold text-slate-700 dark:text-gray-200">r{c.replicate}</span>}
                         <span className="font-mono text-slate-500 dark:text-gray-400 truncate" title={c.library}>{c.library}</span>
-                        {stats.flipped && <span className="ml-auto text-[8.5px] font-bold uppercase text-amber-600">flip</span>}
+                        {stats.flipped && <span className="ml-auto text-[8.5px] font-bold uppercase text-amber-600" title="Flip: dominant candidate changed from first to last transfer">flip</span>}
                       </div>
-                      <ThumbChart chart={c} stats={stats} candColors={candColors} pinnedCand={pinnedCand} />
+                      <ThumbChart chart={c} stats={stats} candColors={candColors} pinnedCand={pinnedCand} hoverCand={hoveredCand} />
                       <div className="px-1.5 py-0.5 text-[9.5px] text-slate-500 dark:text-gray-400 tabular-nums flex justify-between border-t border-slate-200/50 dark:border-gray-700/50">
-                        <span>rep {c.replicate} · {c.transfers.length}T</span>
-                        <span>{stats.totalReads.toLocaleString()}</span>
+                        <span title={`Replicate ${c.replicate} · ${c.transfers.length} transfer${c.transfers.length === 1 ? '' : 's'}`}>rep {c.replicate} · {c.transfers.length}T</span>
+                        <span title={`${stats.totalReads.toLocaleString()} total reads`}>{stats.totalReads.toLocaleString()} reads</span>
                       </div>
                     </div>
                   );
@@ -1008,6 +1083,7 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
               candidateFilter={candidateFilter} topN={topN}
               pinnedCand={pinnedCand} onPickCandidate={(c) => setPinnedCand(p => p === c ? null : c)}
               onBack={() => setView('grid')}
+              hoveredCand={hoveredCand}
               onAddToCompare={(k) => setComparing(prev => prev.includes(k) ? prev : prev.length >= COMPARE_MAX ? [...prev.slice(1), k] : [...prev, k])}
               isInCompare={comparing.includes(chartKey(focusedChart))}
             />
@@ -1023,6 +1099,7 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
               candidateFilter={candidateFilter} topN={topN}
               pinnedCand={pinnedCand} onPickCandidate={(c) => setPinnedCand(p => p === c ? null : c)}
               onBack={() => setView('grid')}
+              hoveredCand={hoveredCand}
               onRemove={(k) => setComparing(prev => prev.filter(x => x !== k))}
             />
           )}
@@ -1042,6 +1119,7 @@ interface CandidatesSidebarProps {
   candColors: Record<string, string>;
   pinnedCand: string | null;
   setPinnedCand: React.Dispatch<React.SetStateAction<string | null>>;
+  setHoveredCand: React.Dispatch<React.SetStateAction<string | null>>;
   candidateFilter: Set<string>;
   setCandidateFilter: React.Dispatch<React.SetStateAction<Set<string>>>;
   candidateIndex: Map<string, { charts: number; total: number }>;
@@ -1176,7 +1254,9 @@ function CandidatesSidebar(p: CandidatesSidebarProps) {
                     'group flex items-center gap-2 px-2.5 py-1.5 text-[12px] border-b border-slate-100/70 dark:border-gray-700/40 transition-colors',
                     isPinned ? 'bg-blue-100 dark:bg-blue-900/40' : 'hover:bg-slate-100 dark:hover:bg-gray-700/60'
                   )}
-                  title={`${cand} — appears in ${charts} chart${charts === 1 ? '' : 's'}, ${total.toLocaleString()} total reads`}
+                  onMouseEnter={() => p.setHoveredCand(cand)}
+                  onMouseLeave={() => p.setHoveredCand(null)}
+                  title={`${cand}: appears in ${charts} chart${charts === 1 ? '' : 's'}, ${total.toLocaleString()} total reads. Hover highlights it across all charts; click the name to pin, tick the box to restrict.`}
                 >
                   <input
                     type="checkbox"
@@ -1334,13 +1414,14 @@ interface FocusViewProps {
   pinnedCand: string | null;
   onPickCandidate: (c: string) => void;
   onBack: () => void;
+  hoveredCand?: string | null;
   onAddToCompare: (k: string) => void;
   isInCompare: boolean;
 }
 function FocusView(props: FocusViewProps) {
   const { charts, focusKey, setFocusKey, chart, stats, colorMode, normalize,
     aColors, bColors, candColors, candidateFilter, topN, pinnedCand, onPickCandidate,
-    onBack, onAddToCompare, isInCompare } = props;
+    onBack, hoveredCand, onAddToCompare, isInCompare } = props;
   const idx = charts.findIndex(c => chartKey(c) === focusKey);
   const prev = idx > 0 ? charts[idx - 1] : null;
   const next = idx >= 0 && idx < charts.length - 1 ? charts[idx + 1] : null;
@@ -1416,6 +1497,22 @@ function FocusView(props: FocusViewProps) {
         <span className="ml-auto text-[10.5px] text-slate-400 dark:text-gray-500 hidden md:inline">← / → navigate · Esc back to grid</span>
       </div>
 
+      {/* Full, untruncated identity for the focused chart (the dropdown above can
+          clip long library names; this line always shows them in full). */}
+      <div className="px-3 py-1 border-b border-slate-200 dark:border-gray-700 bg-slate-50/60 dark:bg-gray-800/60 text-[11.5px] flex flex-wrap items-center gap-x-2 gap-y-0.5 shrink-0">
+        {chart.well && <span className="font-mono font-semibold text-slate-800 dark:text-gray-100">{chart.well}</span>}
+        <span className="font-mono text-slate-700 dark:text-gray-200">{chart.strain}</span>
+        <span className="text-slate-400">|</span>
+        <span className="font-mono text-slate-700 dark:text-gray-200">{chart.library}</span>
+        <span className="text-slate-400">|</span>
+        <span className="text-slate-600 dark:text-gray-300">Rep {chart.replicate}</span>
+        <span className="text-slate-400">|</span>
+        <span className="font-mono text-slate-500 dark:text-gray-400">{chart.experiment}</span>
+        <span className="ml-auto tabular-nums text-slate-500 dark:text-gray-400">
+          {stats.uniqueCandidates} candidate{stats.uniqueCandidates === 1 ? '' : 's'} · {stats.totalReads.toLocaleString()} reads · {chart.transfers.length} transfer{chart.transfers.length === 1 ? '' : 's'}
+        </span>
+      </div>
+
       {/* Body: chart fills left, legend column on right (legend scrolls, chart doesn't) */}
       <div className="flex-1 min-h-0 flex overflow-hidden">
         <div ref={containerRef} className="flex-1 min-w-0 min-h-0 p-2 flex">
@@ -1426,6 +1523,7 @@ function FocusView(props: FocusViewProps) {
               aColors={aColors} bColors={bColors} candColors={candColors}
               candidateFilter={candidateFilter} topN={topN}
               pinnedCand={pinnedCand} height={chartHeight}
+              hoverCand={hoveredCand}
               onPickCandidate={onPickCandidate}
             />
           </div>
@@ -1455,11 +1553,12 @@ interface CompareViewProps {
   pinnedCand: string | null;
   onPickCandidate: (c: string) => void;
   onBack: () => void;
+  hoveredCand?: string | null;
   onRemove: (k: string) => void;
 }
 function CompareView(props: CompareViewProps) {
   const { keys, charts, statsByKey, colorMode, normalize, aColors, bColors,
-    candColors, candidateFilter, topN, pinnedCand, onPickCandidate, onBack, onRemove } = props;
+    candColors, candidateFilter, topN, pinnedCand, onPickCandidate, onBack, hoveredCand, onRemove } = props;
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onBack(); };
@@ -1505,6 +1604,7 @@ function CompareView(props: CompareViewProps) {
                     aColors={aColors} bColors={bColors} candColors={candColors}
                     candidateFilter={candidateFilter} topN={topN}
                     pinnedCand={pinnedCand} height={resolved.length <= 2 ? 320 : 240}
+                    hoverCand={hoveredCand}
                     onPickCandidate={onPickCandidate}
                   />
                 </div>
@@ -1518,4 +1618,4 @@ function CompareView(props: CompareViewProps) {
 }
 
 // keep imports referenced even if not used in some builds
-void Maximize2; void Minimize2; void ArrowDown; void ArrowUp; void List; void Rows3; void Target;
+void Maximize2; void Minimize2; void ArrowDown; void ArrowUp; void List; void Rows3; void Target; void Sparkles;
