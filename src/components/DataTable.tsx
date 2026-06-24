@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
+import { IS_STATIC } from '../lib/dataSource';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -226,6 +227,24 @@ export default function DataTable({ tableName }: DataTableProps) {
       setLoading(true);
       setError(null);
       try {
+        if (IS_STATIC) {
+          // Static build: run the query in the browser against the real DB via
+          // sql.js-httpvfs (deep filter/sort/search, no server).
+          const { queryTableStatic } = await import('../lib/staticTable');
+          const json = await queryTableStatic({
+            tableName, page, pageSize, sortBy: sortBy || undefined, sortDirection,
+            filters: appliedFilters, globalSearch: globalSearch || undefined, filterLogic,
+            includeDeleted: showDeleted,
+          });
+          if (cancelled) return;
+          setSchema(json.schema);
+          setData(json.rows);
+          setTotalCount(json.totalCount);
+          setTotalPages(json.totalPages);
+          setPageJumpVal(page.toString());
+          setLoading(false);
+          return;
+        }
         const params = buildQueryString(true);
         const res = await fetch(`/api/data/${encodeURIComponent(tableName)}?${params.toString()}`);
         if (cancelled) return;
@@ -243,7 +262,7 @@ export default function DataTable({ tableName }: DataTableProps) {
       }
     })();
     return () => { cancelled = true; };
-  }, [tableName, buildQueryString, fetchKey, page]);
+  }, [tableName, buildQueryString, fetchKey, page, appliedFilters, sortBy, sortDirection, globalSearch, filterLogic, showDeleted, pageSize]);
 
   // Close popups on outside click
   useEffect(() => {
@@ -365,6 +384,12 @@ export default function DataTable({ tableName }: DataTableProps) {
     if (!column || distinctCache[column] || distinctLoading[column]) return;
     setDistinctLoading(p => ({ ...p, [column]: true }));
     try {
+      if (IS_STATIC) {
+        const { distinctStatic } = await import('../lib/staticTable');
+        const values = await distinctStatic(tableName, column, 200);
+        setDistinctCache(p => ({ ...p, [column]: { values, truncated: values.length >= 200 } }));
+        return;
+      }
       const res = await fetch(`/api/distinct/${encodeURIComponent(tableName)}?column=${encodeURIComponent(column)}&limit=200`);
       const json = await res.json();
       if (!res.ok) return;
@@ -377,9 +402,35 @@ export default function DataTable({ tableName }: DataTableProps) {
   const exportCsv = async () => {
     setExporting(true);
     try {
+      const visible = visibleCols.map(c => c.name);
+      if (IS_STATIC) {
+        // Build the CSV in the browser from a SQL query (same filters/sort).
+        const { queryTableStatic } = await import('../lib/staticTable');
+        const res = await queryTableStatic({
+          tableName, page: 1, pageSize: 100000, sortBy: sortBy || undefined, sortDirection,
+          filters: appliedFilters, globalSearch: globalSearch || undefined, filterLogic,
+          includeDeleted: showDeleted,
+        });
+        const cols = (visible.length > 0 && visible.length !== schema.length) ? visible : res.schema.map(c => c.name);
+        const esc = (v: unknown) => {
+          let s = v === null || v === undefined ? '' : String(v);
+          // OWASP CSV-injection guard (matches server export route).
+          if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
+          if (/[",\r\n]/.test(s)) s = `"${s.replace(/"/g, '""')}"`;
+          return s;
+        };
+        const lines = [cols.map(esc).join(',')];
+        for (const row of res.rows) lines.push(cols.map(c => esc((row as Record<string, unknown>)[c])).join(','));
+        const blob = new Blob([lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `${tableName}.csv`;
+        document.body.appendChild(a); a.click(); a.remove();
+        URL.revokeObjectURL(a.href);
+        return;
+      }
       const params = buildQueryString(false);
       params.set('limit', '10000');
-      const visible = visibleCols.map(c => c.name);
       if (visible.length > 0 && visible.length !== schema.length) {
         params.set('columns', visible.join(','));
       }

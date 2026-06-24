@@ -34,29 +34,43 @@ export PATH="$HOME/.local/bin:$PATH"
 # 1. confirm the server is up (prebake reads it)
 curl -s -o /dev/null -w "%{http_code}\n" http://localhost:3457/api/health   # 200
 
-# 2. bake fresh data artifacts from the current DB
+# 2. bake fresh curated-view data artifacts from the current DB
 npm run prebake
 
-# 3. build the static bundle with the production base path
-rm -rf out
-BASE_PATH=/annotation/projects/aiale npm run build:static     # -> out/
+# 3. build the client-queryable SQLite for the raw Tables browser (sql.js-httpvfs)
+bash scripts/prepare-httpvfs-db.sh        # -> public/db/lims.db + worker + wasm + config
 
-# 4. publish into Filipe's webroot
+# 4. build the static bundle with the production base path
+rm -rf out
+BASE_PATH=/annotation/projects/aiale npm run build:static     # -> out/  (~241MB incl DB)
+
+# 5. publish into Filipe's webroot (clear old, copy new)
 DST=/scratch1/fliu/html/modelseed_annotation/projects/aiale
-# (optional clean: rm -rf "$DST"/* to drop stale chunks - safe, we own the files)
+find "$DST" -mindepth 1 -delete 2>/dev/null || rm -rf "$DST"/* "$DST"/.[!.]*
 cp -r out/. "$DST"/
 
-# 5. MANDATORY perms fix (or nginx 403s)
+# 6. MANDATORY perms fix (or nginx 403s)
 find "$DST" -type d -exec chmod 755 {} \; 2>/dev/null
 find "$DST" -type f -exec chmod 644 {} \;
 
-# 6. verify the live URL
+# 7. verify the live URL (root, curated data, AND the DB range request)
 curl -s -o /dev/null -w "root: %{http_code}\n" https://modelseed.org/annotation/projects/aiale/
 curl -s -o /dev/null -w "data: %{http_code}\n" https://modelseed.org/annotation/projects/aiale/data/manifest.json
+curl -s -D - -o /dev/null -H "Range: bytes=0-99" https://modelseed.org/annotation/projects/aiale/db/lims.db | grep -i "206\|content-range"
 ```
-Expect HTTP 200 for both, and the page should show 755 samples / 3,200 mutations
-(numbers change with the DB). Confirm in a browser: Mutation Explorer, Copy
-Number chart, Barcode Charts all render, no console errors.
+Expect 200 for root + data, and "206 Partial Content" for the DB range request
+(this is what makes the deep table querying work). The page should show the
+curated views AND a Database Tables browser where you can deep-filter/sort/search
+any table, including 223k-row Mutations.
+
+## How the deep table querying works (sql.js-httpvfs)
+The raw Database Tables browser runs REAL SQL in the browser against
+`db/lims.db` via sql.js-httpvfs, which fetches only the byte ranges (DB pages) a
+query touches over HTTP range requests. The DB ships with 14 indexes and 64KB
+pages so deep queries touch few pages. REQUIRES the host to serve the .db file
+with `Accept-Ranges: bytes` (verified on modelseed.org/annotation: returns 206).
+If a future host does NOT support range requests, the table browser breaks (it
+would try to download the whole 220MB) - check with the Range curl above.
 
 ## Guardrail note
 Writing into /scratch1/fliu/... is normally OFF LIMITS. It is allowed HERE only

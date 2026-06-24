@@ -105,8 +105,7 @@ export default function Dashboard({ initialTables }: DashboardProps) {
       const c = localStorage.getItem(SIDEBAR_COLLAPSED_KEY);
       if (c === '1') setCollapsed(true);
       const v = localStorage.getItem(ACTIVE_VIEW_KEY);
-      // Never restore the (unavailable) raw table browser in the static build.
-      if (v === 'mutations' || (v === 'tables' && !IS_STATIC)) setActiveView(v);
+      if (v === 'mutations' || v === 'tables') setActiveView(v);
     } catch {}
   }, []);
 
@@ -391,12 +390,10 @@ export default function Dashboard({ initialTables }: DashboardProps) {
                     <ChevronLeft className="w-3.5 h-3.5" />
                   </button>
                 </div>
-                {!IS_STATIC && (
-                  <button onClick={() => setActiveView('tables')} data-active={activeView === 'tables'} className="lims-nav mb-0.5">
-                    <Database className="w-4 h-4 shrink-0" />
-                    <span className="flex-1">Database Tables</span>
-                  </button>
-                )}
+                <button onClick={() => setActiveView('tables')} data-active={activeView === 'tables'} className="lims-nav mb-0.5">
+                  <Database className="w-4 h-4 shrink-0" />
+                  <span className="flex-1">Database Tables</span>
+                </button>
                 <button onClick={() => setActiveView('mutations')} data-active={activeView === 'mutations'} className="lims-nav">
                   <Dna className="w-4 h-4 shrink-0" />
                   <span className="flex-1">Mutation Explorer</span>
@@ -477,13 +474,11 @@ export default function Dashboard({ initialTables }: DashboardProps) {
               <button onClick={() => setCollapsed(false)} className="lims-btn lims-btn-ghost p-1.5" title="Expand sidebar">
                 <ChevronRight className="w-4 h-4" />
               </button>
-              {!IS_STATIC && (
-                <button onClick={() => setActiveView('tables')}
-                  className={cn("p-1.5 rounded-md", activeView === 'tables' ? "text-[var(--accent-700)] bg-[var(--accent-50)]" : "text-[var(--text-faint)] hover:bg-[var(--surface-3)]")}
-                  title="Database Tables">
-                  <Database className="w-4 h-4" />
-                </button>
-              )}
+              <button onClick={() => setActiveView('tables')}
+                className={cn("p-1.5 rounded-md", activeView === 'tables' ? "text-[var(--accent-700)] bg-[var(--accent-50)]" : "text-[var(--text-faint)] hover:bg-[var(--surface-3)]")}
+                title="Database Tables">
+                <Database className="w-4 h-4" />
+              </button>
               <button onClick={() => setActiveView('mutations')}
                 className={cn("p-1.5 rounded-md", activeView === 'mutations' ? "text-[var(--accent-700)] bg-[var(--accent-50)]" : "text-[var(--text-faint)] hover:bg-[var(--surface-3)]")}
                 title="Mutation Explorer">
