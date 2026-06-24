@@ -207,24 +207,23 @@ function snpTypeBadgeClass(snpType?: string): string {
   return 'bg-slate-100 text-slate-600 border-slate-300 dark:bg-gray-700 dark:text-gray-300 dark:border-gray-600';
 }
 
-function metricColor(value: number, metric: string): string {
-  if (metric === 'frequency') {
-    if (value >= 0.9) return 'bg-blue-600 text-white';
-    if (value >= 0.7) return 'bg-blue-500 text-white';
-    if (value >= 0.5) return 'bg-blue-400 text-white';
-    if (value >= 0.3) return 'bg-blue-300 text-blue-900';
-    if (value >= 0.1) return 'bg-blue-200 text-blue-900';
-    if (value > 0)    return 'bg-blue-100 text-blue-900';
-    return 'bg-slate-50 text-slate-500 dark:bg-gray-800 dark:text-gray-500';
-  }
-  if (metric === 'copy_number') {
-    if (value >= 2.0) return 'bg-emerald-500 text-white';
-    if (value >= 1.5) return 'bg-emerald-400 text-white';
-    if (value >= 1.2) return 'bg-emerald-300 text-emerald-900';
-    if (value >= 0.9) return 'bg-emerald-100 text-emerald-900';
-    return 'bg-slate-50 text-slate-500 dark:bg-gray-800 dark:text-gray-500';
-  }
-  return 'bg-slate-100 text-slate-700 dark:bg-gray-800 dark:text-gray-300';
+// Continuous heatmap color scaled to a [min,max] domain rather than fixed
+// thresholds, so the gradient always spans the actual values on screen. Returns
+// inline style (bg + readable text) so a researcher can tell apart, say, CN 3.1
+// vs 4.6 even when both would have been the same fixed bucket. `t` is the
+// normalized position 0..1 of the value within its domain.
+function rampStyle(value: number, min: number, max: number, metric: string): React.CSSProperties {
+  if (!Number.isFinite(value)) return {};
+  const span = max - min;
+  const t = span > 1e-9 ? Math.max(0, Math.min(1, (value - min) / span)) : (value > 0 ? 1 : 0);
+  // frequency -> blue scale, copy_number -> emerald scale, others -> slate.
+  const hue = metric === 'copy_number' ? 160 : metric === 'frequency' ? 214 : 215;
+  const sat = metric === 'other' ? 8 : 70;
+  // lightness from 96% (low) to 38% (high) so high values are saturated/dark.
+  const light = 96 - t * 58;
+  const bg = `hsl(${hue} ${sat}% ${light}%)`;
+  const text = light < 62 ? '#ffffff' : metric === 'copy_number' ? '#064e3b' : '#1e3a5f';
+  return { backgroundColor: bg, color: text };
 }
 
 function GrowthCurveSparkline({
@@ -1087,6 +1086,10 @@ function ComparativePanel({
   // the toggle is off, so users can build a set then flip the view on and off.
   const [selectedMutations, setSelectedMutations] = useState<Set<string>>(new Set());
   const [compareMutationsOnly, setCompareMutationsOnly] = useState(false);
+  // Compact headers collapse the per-sample metadata rows (condition + growth
+  // sparkline) so the heatmap gets more vertical room. The grouping bands stay
+  // (they carry experiment/condition/strain context) but condition/OD rows hide.
+  const [compactHeaders, setCompactHeaders] = useState(false);
   // The mutation whose name was clicked; drives the rich detail modal.
   const [detailMutation, setDetailMutation] = useState<MutationRow | null>(null);
   const [filtersHydrated, setFiltersHydrated] = useState(false);
@@ -1216,9 +1219,8 @@ function ComparativePanel({
   }, [mutations, mutFilter, metricFilter, snpTypes, minFreq, minPresence, hideEmpty, selectedSamples]);
 
   const sortedMutations = useMemo(() => {
-    if (!sortKey) return filteredMutations;
     const dir = sortDir === 'asc' ? 1 : -1;
-    return [...filteredMutations].sort((a, b) => {
+    const base = !sortKey ? [...filteredMutations] : [...filteredMutations].sort((a, b) => {
       if (sortKey === 'gene') return dir * (a.gene.localeCompare(b.gene) || a.variant.localeCompare(b.variant));
       if (sortKey === 'variant') return dir * a.variant.localeCompare(b.variant);
       if (sortKey === 'type') return dir * a.type.localeCompare(b.type);
@@ -1248,6 +1250,13 @@ function ComparativePanel({
       }
       return 0;
     });
+    // Copy-number rows always pin to the TOP (a researcher reads amplification
+    // first), keeping their own relative order; everything else follows in the
+    // chosen sort. Stable partition preserves order within each group.
+    const cn: MutationRow[] = [];
+    const rest: MutationRow[] = [];
+    for (const m of base) (m.metric === 'copy_number' ? cn : rest).push(m);
+    return cn.length ? [...cn, ...rest] : base;
   }, [filteredMutations, sortKey, sortDir, selectedSamples]);
 
   // Compose the curated-subset filter on TOP of the sorted/filtered list. When
@@ -1308,6 +1317,35 @@ function ComparativePanel({
   }, [selectedSamples, renderedMutations, hideEmptySamples]);
 
   const hiddenSampleCount = selectedSamples.length - visibleSamples.length;
+
+  // Per-COLUMN (sample) min/max of frequency values across the rendered rows, so
+  // each sample column's heatmap gradient spans that column's own value range
+  // (the user asked the color to represent the selected samples' min/max per
+  // column). Copy-number rows scale per-ROW instead (rowRange), since
+  // amplification is read across samples within a region.
+  const columnFreqRange = useMemo(() => {
+    const range = new Map<string, { min: number; max: number }>();
+    for (const s of visibleSamples) {
+      let min = Infinity, max = -Infinity;
+      for (const m of renderedMutations) {
+        if (m.metric !== 'frequency') continue;
+        const v = m.values[s.id];
+        if (typeof v === 'number' && !Number.isNaN(v)) { if (v < min) min = v; if (v > max) max = v; }
+      }
+      range.set(s.id, Number.isFinite(min) ? { min, max } : { min: 0, max: 1 });
+    }
+    return range;
+  }, [visibleSamples, renderedMutations]);
+
+  // Per-ROW min/max (copy_number rows) across the visible samples.
+  const rowRange = (m: MutationRow): { min: number; max: number } => {
+    let min = Infinity, max = -Infinity;
+    for (const s of visibleSamples) {
+      const v = m.values[s.id];
+      if (typeof v === 'number' && !Number.isNaN(v)) { if (v < min) min = v; if (v > max) max = v; }
+    }
+    return Number.isFinite(min) ? { min, max } : { min: 0, max: 1 };
+  };
 
   // Column grouping for the sticky header: one band PER enabled level in
   // groupOrder (outermost first). Adjacent columns that share the same value for
@@ -1626,6 +1664,16 @@ function ComparativePanel({
         {sortKey && (
           <button onClick={() => setSortKey(null)} className="ml-1 text-slate-400 dark:text-gray-500 hover:text-slate-700 dark:hover:text-gray-200">unsort</button>
         )}
+        <button
+          onClick={() => setCompactHeaders(c => !c)}
+          className={cn('ml-auto flex items-center gap-1 px-2 py-0.5 rounded border text-[11px] font-medium',
+            compactHeaders
+              ? 'border-emerald-300 dark:border-emerald-700 bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300'
+              : 'border-slate-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-slate-600 dark:text-gray-300 hover:bg-slate-50 dark:hover:bg-gray-600')}
+          title="Compact headers: hide the per-sample condition and growth-curve rows to give the heatmap more vertical room. Copy number rows stay pinned at the top."
+        >
+          {compactHeaders ? 'Compact headers: on' : 'Compact headers: off'}
+        </button>
       </div>
 
       {/* Comparison table */}
@@ -1633,8 +1681,9 @@ function ComparativePanel({
         <table className="text-[12px] border-collapse">
           {/* Sticky top: column groups + sample info rows + growth curves */}
           <thead className="sticky top-0 z-30 bg-white dark:bg-gray-800">
-            {/* Grouping bands: one row per enabled grouping level (outermost first). */}
-            {columnBands.map((band, bandIdx) => (
+            {/* Grouping bands: one row per enabled grouping level (outermost first).
+                Compact mode shows ONLY the outermost band to reclaim vertical space. */}
+            {(compactHeaders ? columnBands.slice(0, 1) : columnBands).map((band, bandIdx) => (
               <tr key={band.levelKey}>
                 <th className={cn(
                   'sticky left-0 z-40 border-b border-r border-slate-200 dark:border-gray-700 px-2 py-1 text-left text-[10px] uppercase tracking-wider text-slate-500 dark:text-gray-400',
@@ -1684,7 +1733,8 @@ function ComparativePanel({
                 </th>
               ))}
             </tr>
-            {/* Condition */}
+            {/* Condition (hidden in compact mode) */}
+            {!compactHeaders && (
             <tr>
               <th className="sticky left-0 z-40 bg-white dark:bg-gray-800 border-b border-r border-slate-200 dark:border-gray-700 px-2 py-1 text-left text-[10px] uppercase tracking-wider text-slate-500 dark:text-gray-400">
                 Condition
@@ -1695,6 +1745,7 @@ function ComparativePanel({
                 </th>
               ))}
             </tr>
+            )}
             {/* Growth curve sparklines */}
             <tr>
               <th className="sticky left-0 z-40 bg-white dark:bg-gray-800 border-b-2 border-r border-slate-200 dark:border-gray-700 px-2 py-1 text-left text-[10px] uppercase tracking-wider text-slate-500 dark:text-gray-400"
@@ -1725,17 +1776,19 @@ function ComparativePanel({
               </th>
               {visibleSamples.map(s => (
                 <th key={s.id} className="border-b-2 border-l border-slate-200 dark:border-gray-700 px-1 py-1 bg-white dark:bg-gray-800">
-                  <div className="flex justify-center">
-                    <GrowthCurveSparkline
-                      data={s.growth_curve}
-                      odSources={s.od_sources}
-                      width={84}
-                      height={36}
-                      yMaxOverride={curveScale.yMax}
-                      xMinOverride={curveScale.xMin}
-                      xMaxOverride={curveScale.xMax}
-                    />
-                  </div>
+                  {!compactHeaders && (
+                    <div className="flex justify-center">
+                      <GrowthCurveSparkline
+                        data={s.growth_curve}
+                        odSources={s.od_sources}
+                        width={84}
+                        height={36}
+                        yMaxOverride={curveScale.yMax}
+                        xMinOverride={curveScale.xMin}
+                        xMaxOverride={curveScale.xMax}
+                      />
+                    </div>
+                  )}
                 </th>
               ))}
             </tr>
@@ -1754,20 +1807,23 @@ function ComparativePanel({
             )}
             {renderedMutations.map(m => {
               const isChecked = selectedMutations.has(m.id);
+              // Copy-number rows scale their color by the ROW's own min/max across
+              // samples; frequency cells scale per-COLUMN (see columnFreqRange).
+              const cnRange = m.metric === 'copy_number' ? rowRange(m) : null;
               return (
               <tr
                 key={m.id}
                 className={cn(
                   'border-b border-slate-100 dark:border-gray-700/60',
                   isChecked
-                    ? 'bg-blue-50/70 dark:bg-blue-900/20 ring-1 ring-inset ring-blue-300/50 dark:ring-blue-700/40'
+                    ? 'bg-amber-50/80 dark:bg-amber-900/20 outline outline-2 -outline-offset-2 outline-amber-400 dark:outline-amber-500'
                     : 'hover:bg-slate-50/60 dark:hover:bg-gray-700/30'
                 )}
               >
                 <th
                   className={cn(
                     'sticky left-0 z-10 border-r border-slate-200 dark:border-gray-700 px-2 py-1 text-left whitespace-nowrap min-w-[200px] max-w-[280px]',
-                    isChecked ? 'bg-blue-50/90 dark:bg-blue-900/30' : 'bg-white dark:bg-gray-800'
+                    isChecked ? 'bg-amber-50 dark:bg-amber-900/30' : 'bg-white dark:bg-gray-800'
                   )}
                 >
                   <div className="flex items-start gap-1.5">
@@ -1778,7 +1834,7 @@ function ComparativePanel({
                       aria-pressed={isChecked}
                     >
                       {isChecked
-                        ? <CheckSquare className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                        ? <CheckSquare className="w-4 h-4 text-amber-600 dark:text-amber-400" />
                         : <Square className="w-4 h-4 text-slate-300 dark:text-gray-600 hover:text-slate-400 dark:hover:text-gray-500" />}
                     </button>
                     <button
@@ -1787,6 +1843,7 @@ function ComparativePanel({
                       title="Click for details"
                     >
                       <div className="text-[12px] font-medium text-slate-800 dark:text-gray-100 truncate group-hover:text-blue-600 dark:group-hover:text-blue-400 group-hover:underline decoration-dotted underline-offset-2">
+                        {m.metric === 'copy_number' && <span className="mr-1 px-1 rounded bg-violet-100 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300 text-[9px] font-semibold uppercase align-middle" title="Copy number region (pinned to top)">CN</span>}
                         {m.gene} <span className="font-normal text-slate-500 dark:text-gray-400 group-hover:text-blue-500 dark:group-hover:text-blue-400">/ {m.variant}</span>
                       </div>
                       <div className="text-[10px] text-slate-400 dark:text-gray-500 truncate">
@@ -1800,14 +1857,18 @@ function ComparativePanel({
                 {visibleSamples.map(s => {
                   const v = m.values[s.id];
                   const hasVal = typeof v === 'number' && !Number.isNaN(v);
+                  // Scaled gradient: per-row range for CN, per-column range for freq.
+                  const range = cnRange ?? columnFreqRange.get(s.id) ?? { min: 0, max: 1 };
+                  const style = hasVal ? rampStyle(v, range.min, range.max, m.metric) : undefined;
                   return (
                     <td
                       key={s.id}
+                      style={style}
                       className={cn(
                         'border-l border-slate-100 dark:border-gray-700/60 px-1.5 py-1 text-center tabular-nums text-[11.5px]',
-                        hasVal ? metricColor(v, m.metric) : 'text-slate-300 dark:text-gray-600'
+                        !hasVal && 'text-slate-300 dark:text-gray-600 bg-slate-50/50 dark:bg-gray-800/40'
                       )}
-                      title={hasVal ? `${m.gene} ${m.variant} in ${s.name}: ${formatMetric(v, m.metric)}${m.metric === 'frequency' ? ` (raw ${v.toFixed(3)})` : ''}` : `${m.gene} ${m.variant} in ${s.name}: no data`}
+                      title={hasVal ? `${m.gene} ${m.variant} in ${s.name}: ${formatMetric(v, m.metric)}${m.metric === 'frequency' ? ` (raw ${v.toFixed(3)})` : ''} · color scaled to ${m.metric === 'copy_number' ? 'this row' : 'this column'} range ${range.min.toFixed(m.metric === 'copy_number' ? 1 : 2)} to ${range.max.toFixed(m.metric === 'copy_number' ? 1 : 2)}` : `${m.gene} ${m.variant} in ${s.name}: no data`}
                     >
                       {hasVal ? formatMetric(v, m.metric) : '—'}
                     </td>
@@ -1833,11 +1894,79 @@ function ComparativePanel({
 
 /* ---------------- Mutation detail modal ----------------
    Large, scrollable rich popup opened by clicking a mutation name in the
-   Comparative View. Renders visual diagrams (genome-position bar, sequence
-   change, codon/AA protein change, per-sample frequency, gene context) instead
-   of a flat table. Every field is optional-guarded. Because different sample
-   groups can be on different reference genomes, every coordinate is labeled with
-   its seq_id (the reference contig the position sits on). */
+   Comparative View. Renders a genome-browser-style track plus richer biological
+   diagrams (coordinate axis, directional gene track, variant lollipop/span,
+   codon/amino-acid change, indel/repeat schematic, protein-position schematic,
+   clean per-sample frequency) instead of a flat table. Every field is
+   optional-guarded. Because different sample groups can be on different reference
+   genomes, every coordinate is labeled with its seq_id (the reference contig the
+   position sits on). All heavy SVG geometry is memoized so the modal opens
+   instantly and stays responsive while scrolling. Self-contained SVG, no libs. */
+
+// 1-letter -> 3-letter amino acid names (germline data uses single-letter codes;
+// '*' is a stop codon). Used by the codon / AA change visual.
+const AA_THREE: Record<string, string> = {
+  A: 'Ala', R: 'Arg', N: 'Asn', D: 'Asp', C: 'Cys', E: 'Glu', Q: 'Gln',
+  G: 'Gly', H: 'His', I: 'Ile', L: 'Leu', K: 'Lys', M: 'Met', F: 'Phe',
+  P: 'Pro', S: 'Ser', T: 'Thr', W: 'Trp', Y: 'Tyr', V: 'Val', '*': 'Stop',
+};
+function aaThree(a?: string): string {
+  if (!a) return '?';
+  return AA_THREE[a.toUpperCase()] ?? a;
+}
+
+// Classify a coding SNP for codon visual coloring. Falls back to comparing the
+// AA codes when snp_type is missing.
+function aaEffect(aaRef?: string, aaNew?: string, snpType?: string): 'synonymous' | 'missense' | 'nonsense' | 'unknown' {
+  const t = (snpType ?? '').toLowerCase();
+  if (t === 'synonymous') return 'synonymous';
+  if (t === 'nonsense') return 'nonsense';
+  if (t === 'nonsynonymous') return aaNew === '*' ? 'nonsense' : 'missense';
+  if (aaRef && aaNew) {
+    if (aaNew === '*') return 'nonsense';
+    return aaRef === aaNew ? 'synonymous' : 'missense';
+  }
+  return 'unknown';
+}
+
+// Parse the germline gene_position string into structured residue/nt context for
+// the protein-position schematic. Handles the observed shapes:
+//   "263"                          -> coding nt position, no length
+//   "coding (354..355/963 nt)"     -> coding nt span + gene length
+//   "coding (246-248/1890 nt)"     -> coding nt span + gene length
+//   "pseudogene (610/891 nt)"      -> pseudogene nt + length
+//   "intergenic (+6/-537)"         -> distances to flanking genes (no length)
+type GenePosInfo = {
+  kind: 'coding' | 'pseudogene' | 'intergenic' | 'plain' | 'unknown';
+  ntStart?: number;     // 1-based nt position within the gene
+  ntEnd?: number;
+  ntLength?: number;    // total gene length in nt
+  upstream?: number;    // intergenic distance to the left flanking gene
+  downstream?: number;  // intergenic distance to the right flanking gene
+  raw?: string;
+};
+function parseGenePosition(gp?: string): GenePosInfo {
+  if (!gp) return { kind: 'unknown' };
+  const raw = gp.trim();
+  // intergenic (+6/-537)
+  const ig = raw.match(/intergenic\s*\(([+-]?\d+)\s*\/\s*([+-]?\d+)\)/i);
+  if (ig) {
+    return { kind: 'intergenic', upstream: Number(ig[1]), downstream: Number(ig[2]), raw };
+  }
+  // coding / pseudogene (start[..|-]end / length nt)  or (pos / length nt)
+  const cd = raw.match(/(coding|pseudogene)\s*\((\d+)(?:[.\-]+(\d+))?\s*\/\s*(\d+)\s*nt\)/i);
+  if (cd) {
+    const start = Number(cd[2]);
+    const end = cd[3] ? Number(cd[3]) : start;
+    return {
+      kind: cd[1].toLowerCase() === 'pseudogene' ? 'pseudogene' : 'coding',
+      ntStart: start, ntEnd: end, ntLength: Number(cd[4]), raw,
+    };
+  }
+  // plain integer (coding nt position, no length)
+  if (/^\d+$/.test(raw)) return { kind: 'plain', ntStart: Number(raw), ntEnd: Number(raw), raw };
+  return { kind: 'unknown', raw };
+}
 
 // Small labeled "ref -> new" colored mono blocks used for sequence and codon change.
 function ChangeBlocks({ from, to, fromLabel, toLabel }: { from?: string; to?: string; fromLabel?: string; toLabel?: string }) {
@@ -1874,6 +2003,366 @@ function ModalSection({ title, hint, children }: { title: string; hint?: string;
   );
 }
 
+/* ---- Genome-browser-style track ----------------------------------------
+   Self-contained SVG. Draws (top to bottom): a coordinate AXIS with bp tick
+   marks for a local window around the mutation, a directional GENE TRACK
+   (arrow-shaped block respecting gene_strand; both flanking genes for
+   intergenic calls), and a VARIANT TRACK (amber lollipop for a point SNP,
+   shaded red span for an indel/deletion) aligned to the axis. Hover tooltips
+   (native <title>) on the gene and variant elements. All geometry is computed
+   from the memoized `geom` object so the component itself stays cheap. */
+type GenomeGeom = {
+  hasPos: boolean;
+  isPoint: boolean;
+  isIntergenic: boolean;
+  windowStart: number;
+  windowEnd: number;
+  ticks: number[];
+  scale: number;
+  padX: number;
+  innerW: number;
+  markA: number;       // px of variant start
+  markB: number;       // px of variant end
+  strandRight: boolean;
+  strandLeft: boolean;
+  // intergenic flanking strands (left/right gene direction)
+  leftStrandRight?: boolean;
+  rightStrandRight?: boolean;
+  geneName?: string;
+  leftGene?: string;
+  rightGene?: string;
+};
+
+function GenomeBrowserTrack({
+  geom, seqId, posLabel, refSeq, newSeq, sizeStr, snpType,
+}: {
+  geom: GenomeGeom;
+  seqId?: string;
+  posLabel: string;
+  refSeq?: string;
+  newSeq?: string;
+  sizeStr?: string;
+  snpType?: string;
+}) {
+  const W = 680, H = 168;
+  const axisY = 36;
+  const geneY = 74, geneH = 26;
+  const varY = 128;
+  const { padX, scale, windowStart, ticks, markA, markB, isPoint, isIntergenic } = geom;
+  const variantIsSpan = !isPoint;
+  const varColor = variantIsSpan ? 'fill-red-500' : 'fill-amber-500';
+  const varStroke = variantIsSpan ? 'stroke-red-600' : 'stroke-amber-600';
+  const x = (bp: number) => padX + (bp - windowStart) * scale;
+  const changeText = `${refSeq && refSeq.length ? refSeq : '\u00B7'} \u2192 ${newSeq && newSeq.length ? newSeq : '\u00B7'}`;
+
+  // Directional gene block as an arrow polygon (points the way of the strand).
+  const geneArrow = (gx0: number, gx1: number, pointsRight: boolean, label?: string, key?: string) => {
+    const tip = Math.min(12, Math.max(4, (gx1 - gx0) * 0.18));
+    const top = geneY, bot = geneY + geneH;
+    const pts = pointsRight
+      ? `${gx0},${top} ${gx1 - tip},${top} ${gx1},${(top + bot) / 2} ${gx1 - tip},${bot} ${gx0},${bot}`
+      : `${gx1},${top} ${gx0 + tip},${top} ${gx0},${(top + bot) / 2} ${gx0 + tip},${bot} ${gx1},${bot}`;
+    const labelX = (gx0 + gx1) / 2;
+    return (
+      <g key={key}>
+        <polygon points={pts} className="fill-blue-500/25 stroke-blue-500 dark:fill-blue-400/20 dark:stroke-blue-400" strokeWidth={1.5}>
+          {label ? <title>{label} ({pointsRight ? "5' to 3' (+)" : "3' to 5' (-)"})</title> : null}
+        </polygon>
+        {label && (gx1 - gx0) > 46 ? (
+          <text x={labelX} y={geneY + geneH / 2 + 4} textAnchor="middle" fontSize="11" className="fill-[var(--text)] font-mono pointer-events-none">{label}</text>
+        ) : null}
+      </g>
+    );
+  };
+
+  return (
+    <div>
+      <svg width="100%" viewBox={`0 0 ${W} ${H}`} className="block select-none" role="img"
+           aria-label={`Genome browser track: ${posLabel} on ${seqId ?? 'unknown reference'}, ${changeText}`}>
+        {/* reference / contig label */}
+        <text x={padX} y={16} fontSize="11" className="fill-[var(--text-soft)] font-mono">
+          {seqId ?? 'reference unknown'}
+        </text>
+        <text x={W - padX} y={16} textAnchor="end" fontSize="10" className="fill-[var(--text-faint)]">bp (reference coordinates)</text>
+
+        {/* axis baseline */}
+        <line x1={padX} y1={axisY} x2={W - padX} y2={axisY} className="stroke-[var(--border)]" strokeWidth={1} />
+        {ticks.map((t) => (
+          <g key={t}>
+            <line x1={x(t)} y1={axisY} x2={x(t)} y2={axisY + 5} className="stroke-[var(--text-faint)]" strokeWidth={1} />
+            <text x={x(t)} y={axisY - 5} textAnchor="middle" fontSize="9" className="fill-[var(--text-faint)]">{Math.round(t).toLocaleString()}</text>
+          </g>
+        ))}
+
+        {/* gene track */}
+        <text x={padX} y={geneY - 6} fontSize="9" className="fill-[var(--text-faint)] uppercase tracking-wider">gene</text>
+        {isIntergenic ? (
+          <>
+            {/* left flanking gene fills from window start to just before the variant */}
+            {geneArrow(padX, Math.max(padX + 8, markA - 18), geom.leftStrandRight ?? true, geom.leftGene, 'lg')}
+            {/* right flanking gene from just after the variant to window end */}
+            {geneArrow(Math.min(W - padX - 8, markB + 18), W - padX, geom.rightStrandRight ?? true, geom.rightGene, 'rg')}
+            {/* intergenic gap label */}
+            <text x={(markA + markB) / 2} y={geneY + geneH + 14} textAnchor="middle" fontSize="9" className="fill-[var(--text-faint)]">intergenic</text>
+          </>
+        ) : (
+          geneArrow(padX, W - padX, geom.strandRight || !geom.strandLeft, geom.geneName, 'g')
+        )}
+
+        {/* variant track */}
+        <text x={padX} y={varY - 14} fontSize="9" className="fill-[var(--text-faint)] uppercase tracking-wider">variant</text>
+        {/* connector from gene/axis down to variant */}
+        {variantIsSpan ? (
+          <>
+            <rect x={Math.min(markA, markB)} y={geneY - 4} width={Math.max(3, Math.abs(markB - markA))} height={varY - geneY + 8}
+                  className={cn(varColor, 'opacity-20')} />
+            <rect x={Math.min(markA, markB)} y={varY - 6} width={Math.max(3, Math.abs(markB - markA))} height={12} rx={2}
+                  className={cn(varColor, varStroke)} strokeWidth={1}>
+              <title>{posLabel}{sizeStr ? ` (${sizeStr} bp)` : ''}: {changeText}</title>
+            </rect>
+            <text x={(markA + markB) / 2} y={varY + 22} textAnchor="middle" fontSize="10" className="fill-[var(--text)] font-mono">{changeText}</text>
+          </>
+        ) : (
+          <>
+            <line x1={markA} y1={geneY - 4} x2={markA} y2={varY} className={varStroke} strokeWidth={1.5} strokeDasharray="2 2" />
+            <line x1={markA} y1={varY} x2={markA} y2={varY - 16} className={varStroke} strokeWidth={2} />
+            <circle cx={markA} cy={varY - 20} r={6} className={cn(varColor, varStroke)} strokeWidth={1.5}>
+              <title>{posLabel}: {changeText}</title>
+            </circle>
+            <text x={markA} y={varY + 18} textAnchor="middle" fontSize="10" className="fill-[var(--text)] font-mono">{changeText}</text>
+          </>
+        )}
+      </svg>
+
+      {/* legend */}
+      <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-[10.5px] text-[var(--text-soft)]">
+        <span className="inline-flex items-center gap-1">
+          <span className="inline-block w-3 h-3 rounded-sm border border-blue-500 bg-blue-500/25 dark:bg-blue-400/20" /> gene (arrow = strand)
+        </span>
+        <span className="inline-flex items-center gap-1">
+          <span className="inline-block w-2.5 h-2.5 rounded-full bg-amber-500" /> point SNP
+        </span>
+        <span className="inline-flex items-center gap-1">
+          <span className="inline-block w-3 h-2.5 rounded-sm bg-red-500" /> indel / deletion span
+        </span>
+        <span className="text-[var(--text-faint)]">window {Math.round(geom.windowStart).toLocaleString()} to {Math.round(geom.windowEnd).toLocaleString()} bp</span>
+      </div>
+    </div>
+  );
+}
+
+/* ---- Codon / amino-acid change visual ----------------------------------
+   Shows the 3-base codon as boxes with the changed base(s) highlighted, then
+   the amino acid before -> after with 3-letter names. Colored by effect:
+   synonymous = slate, missense = amber, nonsense = red. */
+function CodonChangeViz({
+  codonRef, codonNew, aaRef, aaNew, aaPosition, snpType,
+}: {
+  codonRef?: string; codonNew?: string; aaRef?: string; aaNew?: string; aaPosition?: number; snpType?: string;
+}) {
+  const effect = aaEffect(aaRef, aaNew, snpType);
+  const effClasses =
+    effect === 'synonymous' ? 'bg-slate-100 text-slate-700 border-slate-300 dark:bg-gray-700 dark:text-gray-200 dark:border-gray-600'
+    : effect === 'nonsense' ? 'bg-red-100 text-red-700 border-red-300 dark:bg-red-900/30 dark:text-red-300 dark:border-red-700'
+    : 'bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-900/30 dark:text-amber-300 dark:border-amber-700';
+  const effLabel =
+    effect === 'synonymous' ? 'synonymous (silent)'
+    : effect === 'nonsense' ? 'nonsense (premature stop)'
+    : effect === 'missense' ? 'missense (nonsynonymous)'
+    : 'amino-acid change';
+
+  const cr = (codonRef ?? '').toUpperCase();
+  const cn0 = (codonNew ?? '').toUpperCase();
+  const len = Math.max(cr.length, cn0.length, 0);
+  const codonBox = (seq: string, otherSeq: string, role: 'ref' | 'new') => {
+    if (!seq) return <span className="font-mono text-[13px] text-[var(--text-faint)]">codon n/a</span>;
+    return (
+      <div className="flex gap-1">
+        {Array.from({ length: len }).map((_, i) => {
+          const ch = seq[i] ?? '\u00B7';
+          const changed = (seq[i] ?? '') !== (otherSeq[i] ?? '');
+          const base = role === 'ref' ? 'bg-red-50 text-red-700 border-red-300 dark:bg-red-900/20 dark:text-red-300 dark:border-red-800'
+                                       : 'bg-emerald-50 text-emerald-700 border-emerald-300 dark:bg-emerald-900/20 dark:text-emerald-300 dark:border-emerald-800';
+          const hi = role === 'ref' ? 'bg-red-500 text-white border-red-600'
+                                    : 'bg-emerald-500 text-white border-emerald-600';
+          return (
+            <span key={i} className={cn('w-7 h-8 grid place-items-center rounded border font-mono text-[15px] font-semibold', changed ? hi : base)}>
+              {ch}
+            </span>
+          );
+        })}
+      </div>
+    );
+  };
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex items-end gap-3 flex-wrap">
+        <div className="flex flex-col items-center gap-1">
+          {codonBox(cr, cn0, 'ref')}
+          <span className="text-[10px] text-[var(--text-soft)]">codon (ref)</span>
+        </div>
+        <ArrowRight className="w-4 h-4 mb-3 text-[var(--text-soft)] shrink-0" />
+        <div className="flex flex-col items-center gap-1">
+          {codonBox(cn0, cr, 'new')}
+          <span className="text-[10px] text-[var(--text-soft)]">codon (new)</span>
+        </div>
+      </div>
+
+      {(aaRef || aaNew) && (
+        <div className="flex items-center gap-2 flex-wrap text-[14px]">
+          <span className="font-mono px-2 py-1 rounded bg-red-100 text-red-700 border border-red-200 dark:bg-red-900/30 dark:text-red-300 dark:border-red-800">
+            {aaThree(aaRef)} ({aaRef ?? '?'})
+          </span>
+          <ArrowRight className="w-4 h-4 text-[var(--text-soft)] shrink-0" />
+          <span className="font-mono px-2 py-1 rounded bg-emerald-100 text-emerald-700 border border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-300 dark:border-emerald-800">
+            {aaThree(aaNew)} ({aaNew ?? '?'})
+          </span>
+          {typeof aaPosition === 'number' ? (
+            <span className="text-[12px] text-[var(--text-soft)]">at residue <span className="font-mono text-[var(--text)]">{aaPosition}</span></span>
+          ) : null}
+        </div>
+      )}
+      <span className={cn('self-start text-[11px] px-1.5 py-0.5 rounded border font-medium', effClasses)}>{effLabel}</span>
+    </div>
+  );
+}
+
+/* ---- Indel / deletion schematic ----------------------------------------
+   For small indels and large deletions: draws the reference bases with the
+   deleted span struck through (red) or the inserted bases highlighted (green).
+   Robust when only a size is known (no explicit ref/new sequence). */
+function IndelSchematic({
+  refSeq, newSeq, sizeStr, snpType,
+}: { refSeq?: string; newSeq?: string; sizeStr?: string; snpType?: string }) {
+  const r = refSeq ?? '';
+  const n = newSeq ?? '';
+  const isDeletion = r.length > n.length || (snpType ?? '').toLowerCase().includes('deletion');
+  const isInsertion = n.length > r.length;
+  const seqRow = (seq: string, role: 'del' | 'ins' | 'ref') => {
+    if (!seq) return null;
+    const cls =
+      role === 'del' ? 'bg-red-100 text-red-700 border-red-300 line-through dark:bg-red-900/30 dark:text-red-300 dark:border-red-700'
+      : role === 'ins' ? 'bg-emerald-100 text-emerald-700 border-emerald-300 dark:bg-emerald-900/30 dark:text-emerald-300 dark:border-emerald-700'
+      : 'bg-[var(--surface-3)] text-[var(--text)] border-[var(--border)]';
+    return (
+      <div className="flex flex-wrap gap-0.5">
+        {seq.split('').map((c, i) => (
+          <span key={i} className={cn('w-6 h-7 grid place-items-center rounded border font-mono text-[13px]', cls)}>{c}</span>
+        ))}
+      </div>
+    );
+  };
+  return (
+    <div className="flex flex-col gap-2">
+      {r ? (
+        <div className="flex items-center gap-2">
+          <span className="w-20 shrink-0 text-[11px] text-[var(--text-soft)]">reference</span>
+          {seqRow(r, isDeletion ? 'del' : 'ref')}
+        </div>
+      ) : null}
+      <div className="flex items-center gap-2">
+        <span className="w-20 shrink-0 text-[11px] text-[var(--text-soft)]">observed</span>
+        {n ? seqRow(n, isInsertion ? 'ins' : 'ref') : <span className="font-mono text-[13px] text-[var(--text-faint)]">(bases removed)</span>}
+      </div>
+      <div className="text-[11.5px] text-[var(--text-soft)]">
+        {isDeletion ? 'Deletion' : isInsertion ? 'Insertion' : 'Indel'}
+        {sizeStr ? <> of <span className="font-mono text-[var(--text)]">{sizeStr}</span> bp</> : null}
+        {' '}(reference bases struck through were removed; highlighted bases were inserted).
+      </div>
+    </div>
+  );
+}
+
+/* ---- Repeat expansion / contraction schematic --------------------------
+   Draws the repeat unit as a row of blocks for ref copies vs new copies so
+   expansion/contraction is visible at a glance. */
+function RepeatSchematic({
+  unit, refCopies, newCopies,
+}: { unit?: string; refCopies?: number; newCopies?: number }) {
+  const rc = typeof refCopies === 'number' ? refCopies : undefined;
+  const nc = typeof newCopies === 'number' ? newCopies : undefined;
+  const cap = 24; // never render more than this many blocks per row
+  const row = (count: number | undefined, role: 'ref' | 'new') => {
+    if (count === undefined) return <span className="font-mono text-[12px] text-[var(--text-faint)]">?</span>;
+    const shown = Math.min(count, cap);
+    const cls = role === 'ref'
+      ? 'bg-red-100 text-red-700 border-red-300 dark:bg-red-900/30 dark:text-red-300 dark:border-red-700'
+      : 'bg-emerald-100 text-emerald-700 border-emerald-300 dark:bg-emerald-900/30 dark:text-emerald-300 dark:border-emerald-700';
+    return (
+      <div className="flex items-center gap-0.5 flex-wrap">
+        {Array.from({ length: shown }).map((_, i) => (
+          <span key={i} className={cn('h-6 px-1 grid place-items-center rounded-sm border font-mono text-[11px]', cls)}>
+            {unit ?? '\u25A0'}
+          </span>
+        ))}
+        {count > cap ? <span className="text-[11px] text-[var(--text-soft)]">+{count - cap} more</span> : null}
+      </div>
+    );
+  };
+  const delta = (rc !== undefined && nc !== undefined) ? nc - rc : undefined;
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center gap-2">
+        <span className="w-20 shrink-0 text-[11px] text-[var(--text-soft)]">ref ({rc ?? '?'}x)</span>
+        {row(rc, 'ref')}
+      </div>
+      <div className="flex items-center gap-2">
+        <span className="w-20 shrink-0 text-[11px] text-[var(--text-soft)]">new ({nc ?? '?'}x)</span>
+        {row(nc, 'new')}
+      </div>
+      <div className="text-[11.5px] text-[var(--text-soft)]">
+        {unit ? <>Repeat unit <span className="font-mono text-[var(--text)]">{unit}</span>. </> : null}
+        {delta !== undefined ? (delta > 0 ? `Expansion of +${delta} copies.` : delta < 0 ? `Contraction of ${delta} copies.` : 'No copy-number change.') : 'Copy-number change.'}
+      </div>
+    </div>
+  );
+}
+
+/* ---- Protein / gene-length position schematic --------------------------
+   A horizontal gene-length bar with the mutated residue/nt marked, so the user
+   can see WHERE in the protein/gene the change falls. Uses parsed gene_position
+   (nt span + total length). Falls back gracefully when length is unknown. */
+function ProteinSchematic({ info, aaPosition }: { info: GenePosInfo; aaPosition?: number }) {
+  const W = 680, H = 52, padX = 28, barY = 18, barH = 16;
+  const innerW = W - 2 * padX;
+  const length = info.ntLength;
+  const hasLength = typeof length === 'number' && length > 0;
+  const start = info.ntStart ?? (typeof aaPosition === 'number' ? aaPosition * 3 - 2 : undefined);
+  const end = info.ntEnd ?? start;
+  if (!hasLength || start === undefined || end === undefined) {
+    return (
+      <div className="text-[12px] text-[var(--text-soft)]">
+        {info.raw ? <>Gene position: <span className="font-mono text-[var(--text)]">{info.raw}</span>{!hasLength ? ' (gene length unknown, no scaled schematic)' : ''}</> : 'Gene length not available.'}
+      </div>
+    );
+  }
+  const scale = innerW / length;
+  const mx0 = padX + (Math.max(1, start) - 1) * scale;
+  const mx1 = padX + Math.min(length, end) * scale;
+  const aaTotal = Math.round(length / 3);
+  const aaPos = typeof aaPosition === 'number' ? aaPosition : Math.ceil(start / 3);
+  return (
+    <div>
+      <svg width="100%" viewBox={`0 0 ${W} ${H}`} className="block select-none" role="img"
+           aria-label={`Protein position: residue ${aaPos} of ${aaTotal}`}>
+        <rect x={padX} y={barY} width={innerW} height={barH} rx={3}
+              className="fill-blue-500/15 stroke-blue-500/60 dark:fill-blue-400/10 dark:stroke-blue-400/50" strokeWidth={1} />
+        {/* mutation marker */}
+        <rect x={mx0} y={barY - 3} width={Math.max(3, mx1 - mx0)} height={barH + 6} rx={2} className="fill-amber-500 stroke-amber-600" strokeWidth={1}>
+          <title>residue {aaPos} of {aaTotal}</title>
+        </rect>
+        {/* end labels */}
+        <text x={padX} y={barY - 4} fontSize="9" textAnchor="start" className="fill-[var(--text-faint)]">N-term (1)</text>
+        <text x={W - padX} y={barY - 4} fontSize="9" textAnchor="end" className="fill-[var(--text-faint)]">{aaTotal} aa (C-term)</text>
+        <text x={Math.min(W - padX, Math.max(padX, (mx0 + mx1) / 2))} y={barY + barH + 14} fontSize="10" textAnchor="middle" className="fill-[var(--text)]">
+          residue {aaPos}
+        </text>
+      </svg>
+    </div>
+  );
+}
+
 function MutationDetailModal({
   mutation, samples, groupOrder, onClose,
 }: {
@@ -1885,45 +2374,106 @@ function MutationDetailModal({
   const d = mutation.detail ?? {};
   const snpType = mutation.snp_type ?? mutation.type;
 
-  // Genome window for the position diagram. We render a local window around the
-  // mutation rather than a whole-contig scale (coordinates can be in the
-  // millions) so the highlighted span is visible. start/end guard for points.
-  const posStart = typeof d.position_start === 'number' ? d.position_start : (typeof mutation.position === 'number' ? mutation.position : undefined);
-  const posEnd = typeof d.position_end === 'number' ? d.position_end : posStart;
-  const isPoint = posStart !== undefined && posEnd !== undefined && posStart === posEnd;
-  const strandRight = (d.gene_strand ?? '').includes('>') && !(d.gene_strand ?? '').includes('<');
-  const strandLeft = (d.gene_strand ?? '').includes('<') && !(d.gene_strand ?? '').includes('>');
+  // Close on Esc. Listener is added once per open modal; cheap and responsive.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
 
-  // SVG diagram geometry.
-  const svgW = 640, svgH = 64, padX = 28, trackY = 38, trackH = 10;
-  let windowStart = 0, windowEnd = 1, markA = padX, markB = padX;
-  if (posStart !== undefined && posEnd !== undefined) {
-    const span = Math.max(1, posEnd - posStart);
-    const pad = Math.max(span * 3, 50);
-    windowStart = posStart - pad;
-    windowEnd = posEnd + pad;
-    const scale = (svgW - 2 * padX) / (windowEnd - windowStart);
-    markA = padX + (posStart - windowStart) * scale;
-    markB = padX + (posEnd - windowStart) * scale;
-  }
-  const hasPos = posStart !== undefined;
+  const [showAllFields, setShowAllFields] = useState(false);
 
-  // Codon / AA coding change present?
-  const hasCodon = (d.codon_ref_seq && d.codon_ref_seq.length > 0) || (d.codon_new_seq && d.codon_new_seq.length > 0);
-  const hasAA = (d.aa_ref_seq && d.aa_ref_seq.length > 0) || (d.aa_new_seq && d.aa_new_seq.length > 0);
-  const isCoding = hasCodon || hasAA;
+  // ---- Memoized derived facts (cheap, but keep them stable across renders). ----
+  const facts = useMemo(() => {
+    const posStart = typeof d.position_start === 'number' ? d.position_start : (typeof mutation.position === 'number' ? mutation.position : undefined);
+    const posEnd = typeof d.position_end === 'number' ? d.position_end : posStart;
+    const hasPos = posStart !== undefined;
+    const isPoint = posStart !== undefined && posEnd !== undefined && posStart === posEnd;
+    const gp = parseGenePosition(d.gene_position);
+    const isIntergenic = gp.kind === 'intergenic'
+      || (mutation.gene ?? '').includes('/')
+      || (snpType ?? '').toLowerCase() === 'intergenic';
+    const hasCodon = !!((d.codon_ref_seq && d.codon_ref_seq.length > 0) || (d.codon_new_seq && d.codon_new_seq.length > 0));
+    const hasAA = !!((d.aa_ref_seq && d.aa_ref_seq.length > 0) || (d.aa_new_seq && d.aa_new_seq.length > 0));
+    const isCoding = (hasCodon || hasAA) && !isIntergenic;
+    const t = (snpType ?? '').toLowerCase();
+    const sizeStr = typeof d.size === 'string' ? d.size.replace(/\.0$/, '') : (d.size != null ? String(d.size) : undefined);
+    const isIndel = t.includes('indel') || t.includes('deletion') || t.includes('insertion')
+      || (!isPoint && hasPos)
+      || (typeof d.repeat_ref_copies === 'number' && typeof d.repeat_new_copies === 'number');
+    const hasRepeat = !!(d.repeat_seq || typeof d.repeat_ref_copies === 'number' || typeof d.repeat_new_copies === 'number');
+    const posLabel = hasPos
+      ? (isPoint ? `${posStart!.toLocaleString()}` : `${posStart!.toLocaleString()} to ${posEnd!.toLocaleString()}`)
+      : 'n/a';
+    return { posStart, posEnd, hasPos, isPoint, gp, isIntergenic, hasCodon, hasAA, isCoding, sizeStr, isIndel, hasRepeat, posLabel };
+  }, [d, mutation.position, mutation.gene, snpType]);
 
-  // Per-sample frequency, grouped by the same outer grouping levels used in the
-  // table so the user sees a familiar layout. We surface seq_id per group when
-  // groups differ (cross-genome caveat) -- but the mutation detail carries a
-  // single seq_id, so we annotate each group with the shared note.
+  const { posStart, posEnd, hasPos, isPoint, gp, isIntergenic, hasCodon, hasAA, isCoding, sizeStr, isIndel, hasRepeat, posLabel } = facts;
+
+  // ---- Memoized genome-browser geometry (the heaviest derived object). ----
+  const geom = useMemo<GenomeGeom>(() => {
+    const padX = 28, W = 680;
+    const innerW = W - 2 * padX;
+    if (posStart === undefined || posEnd === undefined) {
+      return {
+        hasPos: false, isPoint: false, isIntergenic, windowStart: 0, windowEnd: 1,
+        ticks: [], scale: 1, padX, innerW, markA: padX, markB: padX,
+        strandRight: false, strandLeft: false,
+      };
+    }
+    const span = Math.max(0, posEnd - posStart);
+    // Window scales with feature size: +/- ~60 bp for a point, a few x the span for indels.
+    const pad = isPoint ? 60 : Math.max(span * 2, 40);
+    const windowStart = posStart - pad;
+    const windowEnd = posEnd + pad;
+    const scale = innerW / Math.max(1, windowEnd - windowStart);
+    const markA = padX + (posStart - windowStart) * scale;
+    const markB = padX + (posEnd - windowStart) * scale;
+
+    // Nice-ish tick marks: aim for ~6 ticks at a rounded step.
+    const rangeBp = windowEnd - windowStart;
+    const rawStep = rangeBp / 6;
+    const mag = Math.pow(10, Math.floor(Math.log10(Math.max(1, rawStep))));
+    const norm = rawStep / mag;
+    const niceMul = norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 5 ? 5 : 10;
+    const step = Math.max(1, niceMul * mag);
+    const ticks: number[] = [];
+    const first = Math.ceil(windowStart / step) * step;
+    for (let t = first; t <= windowEnd && ticks.length < 12; t += step) ticks.push(t);
+
+    // Strand parsing. For intergenic ("></<" etc) split into left/right.
+    const gs = d.gene_strand ?? '';
+    const strandRight = gs.includes('>') && !gs.includes('<');
+    const strandLeft = gs.includes('<') && !gs.includes('>');
+    let leftStrandRight: boolean | undefined;
+    let rightStrandRight: boolean | undefined;
+    if (gs.includes('/')) {
+      const [l, r] = gs.split('/');
+      leftStrandRight = (l ?? '').includes('>');
+      rightStrandRight = (r ?? '').includes('>');
+    }
+    const geneParts = (mutation.gene ?? '').split('/');
+    const leftGene = geneParts[0]?.trim() || undefined;
+    const rightGene = geneParts[1]?.trim() || undefined;
+
+    return {
+      hasPos: true, isPoint, isIntergenic, windowStart, windowEnd, ticks, scale, padX, innerW,
+      markA, markB, strandRight, strandLeft, leftStrandRight, rightStrandRight,
+      geneName: isIntergenic ? undefined : (mutation.gene ?? d.locus_tag),
+      leftGene, rightGene,
+    };
+  }, [posStart, posEnd, isPoint, isIntergenic, d.gene_strand, d.locus_tag, mutation.gene]);
+
+  // Per-sample frequency, grouped by the first outer grouping level used in the
+  // table so the user sees a familiar layout. Single pass over samples (O(n)).
   const grouped = useMemo(() => {
     const order = groupOrder.length > 0 ? [groupOrder[0]] : [];
     const byKey = new Map<string, { label: string; samples: MutationSample[] }>();
     for (const s of samples) {
       const label = order.length > 0 ? (groupValue(s, order[0]) || '(none)') : 'All samples';
-      if (!byKey.has(label)) byKey.set(label, { label, samples: [] });
-      byKey.get(label)!.samples.push(s);
+      let entry = byKey.get(label);
+      if (!entry) { entry = { label, samples: [] }; byKey.set(label, entry); }
+      entry.samples.push(s);
     }
     return [...byKey.values()];
   }, [samples, groupOrder]);
@@ -1935,50 +2485,47 @@ function MutationDetailModal({
       if (typeof v === 'number' && v > mx) mx = v;
     }
     return mx;
-  }, [samples, mutation]);
+  }, [samples, mutation.values]);
 
-  const [showAllFields, setShowAllFields] = useState(false);
-
-  // All raw detail fields for the collapsible "all fields" section.
-  const rawFields: [string, string][] = [];
-  const pushField = (k: string, v: unknown) => {
-    if (v === undefined || v === null || v === '') return;
-    rawFields.push([k, String(v)]);
-  };
-  pushField('id', mutation.id);
-  pushField('gene', mutation.gene);
-  pushField('variant', mutation.variant);
-  pushField('type', mutation.type);
-  pushField('metric', mutation.metric);
-  pushField('snp_type', mutation.snp_type);
-  pushField('mutation_category', mutation.mutation_category);
-  pushField('base_type', mutation.base_type);
-  pushField('gene_product', mutation.gene_product);
-  pushField('seq_id', d.seq_id);
-  pushField('position_start', d.position_start);
-  pushField('position_end', d.position_end);
-  pushField('ref_seq', d.ref_seq);
-  pushField('new_seq', d.new_seq);
-  pushField('gene_strand', d.gene_strand);
-  pushField('gene_position', d.gene_position);
-  pushField('locus_tag', d.locus_tag);
-  pushField('aa_ref_seq', d.aa_ref_seq);
-  pushField('aa_new_seq', d.aa_new_seq);
-  pushField('aa_position', d.aa_position);
-  pushField('codon_ref_seq', d.codon_ref_seq);
-  pushField('codon_new_seq', d.codon_new_seq);
-  pushField('codon_number', d.codon_number);
-  pushField('size', d.size);
-  pushField('repeat_seq', d.repeat_seq);
-  pushField('repeat_ref_copies', d.repeat_ref_copies);
-  pushField('repeat_new_copies', d.repeat_new_copies);
-  pushField('genes_inactivated', d.genes_inactivated);
-  pushField('genes_overlapping', d.genes_overlapping);
-  pushField('genes_promoter', d.genes_promoter);
-
-  const posLabel = hasPos
-    ? (isPoint ? `${posStart!.toLocaleString()}` : `${posStart!.toLocaleString()} to ${posEnd!.toLocaleString()}`)
-    : 'n/a';
+  // All raw detail fields for the collapsible "all fields" section (memoized).
+  const rawFields = useMemo<[string, string][]>(() => {
+    const out: [string, string][] = [];
+    const push = (k: string, v: unknown) => {
+      if (v === undefined || v === null || v === '') return;
+      out.push([k, String(v)]);
+    };
+    push('id', mutation.id);
+    push('gene', mutation.gene);
+    push('variant', mutation.variant);
+    push('type', mutation.type);
+    push('metric', mutation.metric);
+    push('snp_type', mutation.snp_type);
+    push('mutation_category', mutation.mutation_category);
+    push('base_type', mutation.base_type);
+    push('gene_product', mutation.gene_product);
+    push('seq_id', d.seq_id);
+    push('position_start', d.position_start);
+    push('position_end', d.position_end);
+    push('ref_seq', d.ref_seq);
+    push('new_seq', d.new_seq);
+    push('gene_strand', d.gene_strand);
+    push('gene_position', d.gene_position);
+    push('locus_tag', d.locus_tag);
+    push('aa_ref_seq', d.aa_ref_seq);
+    push('aa_new_seq', d.aa_new_seq);
+    push('aa_position', d.aa_position);
+    push('codon_ref_seq', d.codon_ref_seq);
+    push('codon_new_seq', d.codon_new_seq);
+    push('codon_number', d.codon_number);
+    push('size', d.size);
+    push('repeat_seq', d.repeat_seq);
+    push('repeat_ref_copies', d.repeat_ref_copies);
+    push('repeat_new_copies', d.repeat_new_copies);
+    push('genes_inactivated', d.genes_inactivated);
+    push('genes_overlapping', d.genes_overlapping);
+    push('genes_promoter', d.genes_promoter);
+    return out;
+  }, [mutation, d]);
 
   return (
     <div
@@ -2015,96 +2562,72 @@ function MutationDetailModal({
         </div>
 
         <div className="px-5 py-4 space-y-4">
-          {/* Genome position diagram */}
+          {/* Genome browser track (centerpiece) */}
           <ModalSection
-            title="Genome position"
-            hint={d.seq_id ? `on reference ${d.seq_id}` : 'reference unknown'}
+            title="Genome browser"
+            hint={d.seq_id ? `reference ${d.seq_id}` : 'reference unknown'}
           >
             {hasPos ? (
-              <div>
-                <svg width="100%" viewBox={`0 0 ${svgW} ${svgH}`} className="block" role="img" aria-label={`Genome position ${posLabel} on ${d.seq_id ?? 'unknown reference'}`}>
-                  {/* track */}
-                  <rect x={padX} y={trackY} width={svgW - 2 * padX} height={trackH} rx={3} className="fill-[var(--surface-3)] stroke-[var(--border)]" />
-                  {/* window bound labels */}
-                  <text x={padX} y={trackY - 6} className="fill-[var(--text-faint)]" fontSize="9" textAnchor="start">{Math.round(windowStart).toLocaleString()}</text>
-                  <text x={svgW - padX} y={trackY - 6} className="fill-[var(--text-faint)]" fontSize="9" textAnchor="end">{Math.round(windowEnd).toLocaleString()}</text>
-                  {/* highlighted mutation span / tick */}
-                  {isPoint ? (
-                    <>
-                      <rect x={markA - 1.5} y={trackY - 6} width={3} height={trackH + 12} rx={1.5} className="fill-amber-500" />
-                      <circle cx={markA} cy={trackY - 10} r={3} className="fill-amber-500" />
-                    </>
-                  ) : (
-                    <rect x={Math.min(markA, markB)} y={trackY - 2} width={Math.max(3, Math.abs(markB - markA))} height={trackH + 4} rx={2} className="fill-amber-500/80 stroke-amber-600" />
-                  )}
-                  {/* strand arrow */}
-                  {(strandRight || strandLeft) && (
-                    <text x={svgW / 2} y={trackY + trackH + 16} fontSize="11" textAnchor="middle" className="fill-[var(--text-soft)]">
-                      {strandRight ? 'gene strand: 5\u2032 \u2192 3\u2032 (+)' : 'gene strand: 3\u2032 \u2190 5\u2032 (\u2212)'}
-                    </text>
-                  )}
-                </svg>
-                <div className="mt-1 text-[12px] text-[var(--text-soft)] flex flex-wrap gap-x-4 gap-y-1">
-                  <span>Coordinate: <span className="font-mono text-[var(--text)]">{posLabel}</span></span>
-                  <span>Reference (seq_id): <span className="font-mono text-[var(--text)]">{d.seq_id ?? 'n/a'}</span></span>
-                  {d.size ? <span>Size: <span className="font-mono text-[var(--text)]">{d.size}</span></span> : null}
-                  <span className="text-[var(--text-faint)]">{isPoint ? 'point mutation' : 'spans a range'}</span>
-                </div>
-              </div>
+              <GenomeBrowserTrack
+                geom={geom}
+                seqId={d.seq_id}
+                posLabel={posLabel}
+                refSeq={d.ref_seq}
+                newSeq={d.new_seq}
+                sizeStr={sizeStr}
+                snpType={snpType}
+              />
             ) : (
-              <div className="text-[12px] text-[var(--text-faint)]">Position not available.</div>
+              <div className="text-[12px] text-[var(--text-faint)]">Position not available for this call, so the genome track cannot be drawn.</div>
             )}
+            <div className="mt-2 text-[12px] text-[var(--text-soft)] flex flex-wrap gap-x-4 gap-y-1">
+              <span>Coordinate: <span className="font-mono text-[var(--text)]">{posLabel}</span></span>
+              <span>Reference (seq_id): <span className="font-mono text-[var(--text)]">{d.seq_id ?? 'n/a'}</span></span>
+              {sizeStr ? <span>Size: <span className="font-mono text-[var(--text)]">{sizeStr} bp</span></span> : null}
+              <span className="text-[var(--text-faint)]">{isIntergenic ? 'intergenic' : isPoint ? 'point mutation' : 'spans a range'}</span>
+            </div>
           </ModalSection>
 
           {/* Sequence change */}
           <ModalSection title="Sequence change" hint={d.seq_id ? `ref ${d.seq_id}` : undefined}>
-            {(d.ref_seq || d.new_seq) ? (
+            {isIndel && (d.ref_seq || d.new_seq || sizeStr) ? (
+              <IndelSchematic refSeq={d.ref_seq} newSeq={d.new_seq} sizeStr={sizeStr} snpType={snpType} />
+            ) : (d.ref_seq || d.new_seq) ? (
               <ChangeBlocks from={d.ref_seq} to={d.new_seq} fromLabel="reference" toLabel="observed" />
             ) : (
               <div className="text-[12px] text-[var(--text-faint)]">No base-level ref/new sequence recorded for this call.</div>
             )}
-            {(d.repeat_seq || typeof d.repeat_ref_copies === 'number' || typeof d.repeat_new_copies === 'number') && (
-              <div className="mt-2 text-[12px] text-[var(--text-soft)]">
-                Repeat:{' '}
-                {d.repeat_seq ? <span className="font-mono text-[var(--text)]">{d.repeat_seq}</span> : <span className="font-mono">(seq n/a)</span>}
-                {' '}
-                <span className="font-mono text-[var(--text)]">{d.repeat_ref_copies ?? '?'}</span>
-                <ArrowRight className="inline w-3 h-3 mx-1 align-middle text-[var(--text-faint)]" />
-                <span className="font-mono text-[var(--text)]">{d.repeat_new_copies ?? '?'}</span>
-                {' '}copies
+            {hasRepeat && (
+              <div className="mt-3">
+                <div className="text-[10.5px] uppercase tracking-wider text-[var(--text-soft)] mb-1.5">Tandem repeat</div>
+                <RepeatSchematic unit={d.repeat_seq} refCopies={d.repeat_ref_copies} newCopies={d.repeat_new_copies} />
               </div>
             )}
           </ModalSection>
 
           {/* Protein / codon change */}
           {isCoding ? (
-            <ModalSection title="Protein change">
-              <div className="flex flex-col gap-3">
-                {hasCodon && (
-                  <ChangeBlocks
-                    from={d.codon_ref_seq}
-                    to={d.codon_new_seq}
-                    fromLabel="codon (ref)"
-                    toLabel="codon (new)"
-                  />
-                )}
-                {hasAA && (
-                  <div className="text-[13px] text-[var(--text)]">
-                    Amino acid:{' '}
-                    <span className="font-mono px-1.5 py-0.5 rounded bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300">{d.aa_ref_seq ?? '?'}</span>
-                    <ArrowRight className="inline w-3.5 h-3.5 mx-1.5 align-middle text-[var(--text-soft)]" />
-                    <span className="font-mono px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">{d.aa_new_seq ?? '?'}</span>
-                    {typeof d.aa_position === 'number' ? <span className="ml-2 text-[var(--text-soft)]">at residue <span className="font-mono text-[var(--text)]">{d.aa_position}</span></span> : null}
-                  </div>
-                )}
-                {typeof d.codon_number === 'number' ? (
-                  <div className="text-[12px] text-[var(--text-soft)]">Codon number: <span className="font-mono text-[var(--text)]">{d.codon_number}</span></div>
-                ) : null}
-              </div>
+            <ModalSection title="Protein change" hint={typeof d.codon_number === 'number' ? `codon ${d.codon_number}` : undefined}>
+              <CodonChangeViz
+                codonRef={d.codon_ref_seq}
+                codonNew={d.codon_new_seq}
+                aaRef={d.aa_ref_seq}
+                aaNew={d.aa_new_seq}
+                aaPosition={d.aa_position}
+                snpType={snpType}
+              />
+              {(gp.kind === 'coding' || gp.kind === 'pseudogene' || gp.kind === 'plain' || typeof d.aa_position === 'number') && (
+                <div className="mt-3">
+                  <div className="text-[10.5px] uppercase tracking-wider text-[var(--text-soft)] mb-1.5">Position in protein</div>
+                  <ProteinSchematic info={gp} aaPosition={d.aa_position} />
+                </div>
+              )}
             </ModalSection>
           ) : (
             <ModalSection title="Protein change">
-              <div className="text-[12px] text-[var(--text-faint)]">Non-coding / intergenic: no codon or amino-acid change.</div>
+              <div className="text-[12px] text-[var(--text-faint)]">
+                {isIntergenic ? 'Intergenic: between genes, no codon or amino-acid change.' : 'Non-coding: no codon or amino-acid change.'}
+              </div>
             </ModalSection>
           )}
 
@@ -2113,7 +2636,10 @@ function MutationDetailModal({
             <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1.5 text-[12px]">
               {d.locus_tag ? (<><dt className="text-[var(--text-soft)]">Locus tag</dt><dd className="font-mono text-[var(--text)] sm:text-right break-all">{d.locus_tag}</dd></>) : null}
               {d.gene_position ? (<><dt className="text-[var(--text-soft)]">Gene position</dt><dd className="font-mono text-[var(--text)] sm:text-right break-all">{d.gene_position}</dd></>) : null}
-              {d.gene_strand ? (<><dt className="text-[var(--text-soft)]">Strand</dt><dd className="font-mono text-[var(--text)] sm:text-right">{d.gene_strand}</dd></>) : null}
+              {d.gene_strand ? (<><dt className="text-[var(--text-soft)]">Strand</dt><dd className="font-mono text-[var(--text)] sm:text-right">{d.gene_strand}{geom.strandRight ? ' (+ / forward)' : geom.strandLeft ? ' (- / reverse)' : ''}</dd></>) : null}
+              {gp.kind === 'intergenic' && (typeof gp.upstream === 'number' || typeof gp.downstream === 'number') ? (
+                <><dt className="text-[var(--text-soft)]">Flanking distance</dt><dd className="font-mono text-[var(--text)] sm:text-right">{gp.upstream} / {gp.downstream} bp</dd></>
+              ) : null}
               {d.genes_inactivated ? (<><dt className="text-[var(--text-soft)]">Genes inactivated</dt><dd className="font-mono text-[var(--text)] sm:text-right break-all">{d.genes_inactivated}</dd></>) : null}
               {d.genes_overlapping ? (<><dt className="text-[var(--text-soft)]">Genes overlapping</dt><dd className="font-mono text-[var(--text)] sm:text-right break-all">{d.genes_overlapping}</dd></>) : null}
               {d.genes_promoter ? (<><dt className="text-[var(--text-soft)]">Promoter genes</dt><dd className="font-mono text-[var(--text)] sm:text-right break-all">{d.genes_promoter}</dd></>) : null}
