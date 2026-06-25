@@ -87,6 +87,7 @@ export interface MutationDataset {
     cnRegionCount: number;      // distinct copy-number regions present
     cnSampleCount: number;      // distinct samples with at least one copy-number value
     curveCount: number;         // samples with a numeric OD growth curve (>=2 points)
+    hasBarcodes: boolean;       // verAB_barcodes table exists AND has rows (drives Barcode tab visibility)
   };
 }
 
@@ -800,6 +801,20 @@ export async function GET(req: NextRequest) {
       warnings.push(`Loaded copy number data for ${cnSamplesSeen} samples across ${copyNumberRows.length} region${copyNumberRows.length === 1 ? '' : 's'} (Copy_numbers). Switch the Comparative metric to "copy number" to view.`);
     }
 
+    // Data-driven view gating: the Barcode Charts tab only makes sense when the
+    // verAB_barcodes table exists AND carries rows. The TFMN1 publication snapshot
+    // DB omits this table, so the tab auto-hides there while the full internal DB
+    // keeps it. One codebase, behavior driven by what is in the database.
+    let hasBarcodes = false;
+    try {
+      const bc = await runQuery<{ n: number }>(
+        "SELECT COUNT(*) AS n FROM verAB_barcodes"
+      );
+      hasBarcodes = (bc[0]?.n ?? 0) > 0;
+    } catch {
+      hasBarcodes = false; // table absent -> no barcode tab
+    }
+
     return NextResponse.json({
       samples,
       mutations,
@@ -815,6 +830,7 @@ export async function GET(req: NextRequest) {
         cnRegionCount: copyNumberRows.length,
         cnSampleCount: cnSamplesSeen,
         curveCount: samplesWithCurve,
+        hasBarcodes,
       },
     } satisfies MutationDataset);
   } catch (e) {

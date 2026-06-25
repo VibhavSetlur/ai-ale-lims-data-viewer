@@ -95,6 +95,7 @@ interface MutationDataset {
     cnRegionCount: number;
     cnSampleCount: number;
     curveCount: number;
+    hasBarcodes?: boolean;
   };
 }
 
@@ -480,6 +481,14 @@ export default function MutationExplorer() {
 
   useEffect(() => { try { localStorage.setItem(SELECTED_KEY, JSON.stringify([...selected])); } catch {} }, [selected]);
   useEffect(() => { try { localStorage.setItem(TAB_KEY, tab); } catch {} }, [tab]);
+  // If the active dataset has no barcode data (e.g. the TFMN1 publication snapshot
+  // DB omits verAB_barcodes), the Barcode tab is hidden; make sure we are not
+  // stranded ON it (e.g. restored from a prior session) showing a blank pane.
+  useEffect(() => {
+    if (tab === 'barcodes' && data && data.stats && !data.stats.hasBarcodes) {
+      setTab('compare');
+    }
+  }, [tab, data]);
   useEffect(() => { try { localStorage.setItem(EXPERIMENT_KEY, experiment); } catch {} }, [experiment]);
   useEffect(() => { try { localStorage.setItem(REGISTRY_KEY, registry); } catch {} }, [registry]);
 
@@ -541,9 +550,11 @@ export default function MutationExplorer() {
               <span className="ml-1.5 px-1.5 py-0.5 rounded text-[10px] tabular-nums lims-pill-cn">{data!.stats!.cnRegionCount}</span>
             )}
           </TabButton>
-          <TabButton active={tab === 'barcodes'} onClick={() => setTab('barcodes')} icon={<BarChart3 className="w-3.5 h-3.5" />}>
-            Barcode Charts
-          </TabButton>
+          {data?.stats?.hasBarcodes && (
+            <TabButton active={tab === 'barcodes'} onClick={() => setTab('barcodes')} icon={<BarChart3 className="w-3.5 h-3.5" />}>
+              Barcode Charts
+            </TabButton>
+          )}
         </div>
         <div className="flex items-center gap-1.5 pr-1">
           <label className="flex items-center gap-1.5 text-[11px] text-[var(--text-soft)]">
