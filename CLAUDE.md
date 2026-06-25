@@ -58,11 +58,40 @@ npm run build:static     # -> out/  (basePath=/annotation/projects/aiale)
 ```
 Override the URL base path: `BASE_PATH=/annotation/projects/<name> npm run build:static`.
 
-LIVE (deployed 2026-06-24): https://modelseed.org/annotation/projects/aiale/
-Webroot: /scratch1/fliu/html/modelseed_annotation/projects/aiale/ (fliu owns it,
-group cels group-writable, vsetlur can write FILES in it - explicitly granted).
-CRITICAL: after copying files there, ALWAYS `find <webroot> -type f -exec chmod
-644` and `-type d -exec chmod 755` or nginx returns 403 (files default to 600).
+## TWO static deployments (same codebase, different basePath) - 2026-06-25
+There are now TWO live static deployments built from this ONE viewer codebase,
+differing only by build-time `BASE_PATH`:
+
+1. PUBLIC (what everyone sees): https://modelseed.org/annotation/projects/aiale/
+   Webroot: /scratch1/fliu/html/modelseed_annotation/projects/aiale/
+2. PRIVATE / unlisted (Dr. Henry wants a separate, less-noticeable link shared
+   only by URL): https://modelseed.org/annotation/projects/aiale-06-25-2026/
+   Webroot: /scratch1/fliu/html/modelseed_annotation/projects/aiale-06-25-2026/
+   (fliu created this folder 2026-06-25.) This is the WORKING / version-control
+   copy - the one to actually iterate on. The poplar:3457 server instance stays
+   up but is not really used day to day.
+
+Build + deploy EACH with its own base path (data is shared/baked the same):
+```
+# build for a target folder
+BASE_PATH=/annotation/projects/aiale            npm run build:static  # public
+BASE_PATH=/annotation/projects/aiale-06-25-2026 npm run build:static  # private
+# then copy out/. into that folder's webroot and FIX PERMS:
+find <webroot> -type d -exec chmod 755 {} \; ; find <webroot> -type f -exec chmod 644 {} \;
+```
+RIGHT NOW both URLs are intentionally IDENTICAL (same viewer, same data).
+
+FUTURE PLAN (do NOT implement yet, just know it): one viewer codebase, but each
+deployment shows different client-side views purely based on WHICH baked
+data/tables EXIST in that deployment (version-control style). E.g. a build without
+Barcode Charts, or showing only certain samples, in one version vs another. The
+viewer should auto-hide a view when its data is absent (data-driven gating), so we
+ship the same viewer everywhere and differentiate by the baked artifacts. Not
+built yet.
+
+Both fliu webroots: fliu owns them, group cels group-writable, vsetlur can write
+FILES (explicitly granted). CRITICAL: after copying, ALWAYS chmod 644 files + 755
+dirs or nginx returns 403 (files default to 600).
 Full step-by-step re-deploy: docs/DEPLOY_RUNBOOK_LIVE.md.
 
 Key files:
