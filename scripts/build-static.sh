@@ -30,6 +30,13 @@ restore() {
     mv "$API_STASH" "$API_DIR"
     echo "restored $API_DIR"
   fi
+  # The export build leaves a STATIC-export .next (export-marker.json + trailingSlash)
+  # that, if a later `npm start` reuses it, breaks SERVER mode: API routes 308-redirect
+  # to a trailing slash and 404. So always drop .next after a static build; the next
+  # `npm run build` (server) will produce a clean server .next. This prevents the
+  # "viewer connected to the DB is broken / API 404s" class of bug.
+  rm -rf .next
+  echo "cleared .next (static-export artifact) so server mode rebuilds clean"
 }
 trap restore EXIT
 

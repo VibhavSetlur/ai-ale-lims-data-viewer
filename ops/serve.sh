@@ -52,9 +52,18 @@ if ss -tln 2>/dev/null | grep -q ":${PORT} "; then
   exit 1
 fi
 
-# --- build if .next is missing (build happens inside the conda env) ---
+# --- build if .next is missing OR is a stale static-export build ---
+# A static export (npm run build:static) produces a .next whose export-marker has
+# "exportTrailingSlash": true; if the server (`npm start`) runs on THAT, every API
+# route 308-redirects to a trailing slash and 404s (the "viewer is broken / DB not
+# loading" bug). A normal server build also writes export-marker.json but with
+# exportTrailingSlash:false, which is fine, so we key on the trailing-slash flag.
 if [[ ! -d .next ]]; then
   echo "No .next build found; building first..."
+  bash -lc "source /scratch/vsetlur/anaconda3/etc/profile.d/conda.sh && conda activate ${CONDA_ENV} && cd '${HERE}' && npm run build"
+elif grep -q '"exportTrailingSlash": true' .next/export-marker.json 2>/dev/null; then
+  echo "Detected a static-export .next (would break API routes in server mode); rebuilding clean..."
+  rm -rf .next
   bash -lc "source /scratch/vsetlur/anaconda3/etc/profile.d/conda.sh && conda activate ${CONDA_ENV} && cd '${HERE}' && npm run build"
 fi
 
