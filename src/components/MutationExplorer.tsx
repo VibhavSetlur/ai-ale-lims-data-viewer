@@ -1713,7 +1713,7 @@ function ComparativePanel({
                   'sticky left-0 z-40 border-b border-r border-slate-200 dark:border-gray-700 px-2 py-1 text-left text-[10px] uppercase tracking-wider text-slate-500 dark:text-gray-400',
                   bandIdx === 0
                     ? 'bg-slate-100 dark:bg-gray-800 min-w-[200px]'
-                    : 'bg-slate-50 dark:bg-gray-800/70'
+                    : 'bg-slate-50 dark:bg-gray-900'
                 )}>
                   {band.levelLabel}
                 </th>
@@ -1725,7 +1725,7 @@ function ComparativePanel({
                       'border-b border-l border-slate-200 dark:border-gray-700 px-2 py-1 text-[11px] whitespace-nowrap text-center',
                       bandIdx === 0
                         ? 'bg-slate-100 dark:bg-gray-800 font-semibold text-slate-700 dark:text-gray-200'
-                        : 'bg-slate-50 dark:bg-gray-800/70 font-medium text-slate-600 dark:text-gray-300'
+                        : 'bg-slate-50 dark:bg-gray-900 font-medium text-slate-600 dark:text-gray-300'
                     )}
                   >
                     {cell.label || '—'}
@@ -1739,9 +1739,9 @@ function ComparativePanel({
                 Sample
               </th>
               {visibleSamples.map(s => (
-                <th key={s.id} className="border-b border-l border-slate-200 dark:border-gray-700 px-1.5 py-1 whitespace-nowrap min-w-[88px] bg-white dark:bg-gray-800">
+                <th key={s.id} className="border-b border-l border-slate-200 dark:border-gray-700 px-1.5 py-1 whitespace-nowrap min-w-[88px] max-w-[160px] overflow-hidden bg-white dark:bg-gray-800">
                   <div className="flex items-start justify-between gap-1">
-                    <div className="text-[11px] font-mono text-slate-800 dark:text-gray-100 leading-tight">{s.name}</div>
+                    <div className="text-[11px] font-mono text-slate-800 dark:text-gray-100 leading-tight truncate" title={s.name}>{s.name}</div>
                     <button
                       onClick={() => { const next = new Set(selected); next.delete(s.id); setSelected(next); }}
                       className="text-slate-300 dark:text-gray-600 hover:text-red-500"
@@ -1846,8 +1846,8 @@ function ComparativePanel({
               >
                 <th
                   className={cn(
-                    'sticky left-0 z-10 border-r border-slate-200 dark:border-gray-700 px-2 py-1 text-left whitespace-nowrap min-w-[200px] max-w-[280px]',
-                    isChecked ? 'bg-amber-50 dark:bg-amber-900/30' : 'bg-white dark:bg-gray-800'
+                    'sticky left-0 z-20 border-r border-slate-200 dark:border-gray-700 px-2 py-1 text-left whitespace-nowrap min-w-[200px] max-w-[280px]',
+                    isChecked ? 'bg-amber-50 dark:bg-amber-950' : 'bg-white dark:bg-gray-800'
                   )}
                 >
                   <div className="flex items-start gap-1.5">
