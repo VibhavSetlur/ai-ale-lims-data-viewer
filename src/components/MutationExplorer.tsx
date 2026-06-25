@@ -690,28 +690,52 @@ function SampleSelectionPanel({
     return m;
   }, [mutations]);
 
-  // Chip options come from the full sample set (not the filtered set) so the
-  // option list doesn't disappear after a user picks one.
+  // Faceted chip options: each facet lists only values that still have matching
+  // samples given the OTHER active facets (cross-filtering), so picking one factor
+  // hides now-irrelevant choices in the others. A facet never hides its own
+  // siblings, and a currently-selected value is always kept visible.
   const chipOptions = useMemo(() => {
-    const counts: Record<ChipKey, Map<string, number>> = {
-      experiment: new Map(), replicate: new Map(), donor_dna: new Map(),
-      strain: new Map(), condition: new Map(),
+    const keys: ChipKey[] = ['experiment', 'replicate', 'donor_dna', 'strain', 'condition'];
+    const sel: Record<ChipKey, Set<string>> = {
+      experiment: new Set(filters.chips.experiment),
+      replicate: new Set(filters.chips.replicate),
+      donor_dna: new Set(filters.chips.donor_dna),
+      strain: new Set(filters.chips.strain),
+      condition: new Set(filters.chips.condition),
     };
-    for (const s of samples) {
-      const bump = (k: ChipKey, v: string | undefined | null) => {
-        if (!v) return;
-        counts[k].set(v, (counts[k].get(v) ?? 0) + 1);
-      };
-      bump('experiment', s.experiment);
-      bump('replicate', s.replicate);
-      bump('donor_dna', s.donor_dna);
-      bump('strain', s.strain);
-      bump('condition', s.condition);
-    }
-    const toList = (k: ChipKey) =>
-      [...counts[k].entries()]
+    const fieldVal = (s: MutationSample, k: ChipKey): string =>
+      k === 'experiment' ? s.experiment
+      : k === 'replicate' ? (s.replicate ?? '')
+      : k === 'donor_dna' ? (s.donor_dna ?? '')
+      : k === 'strain' ? (s.strain ?? '')
+      : (s.condition ?? '');
+    // A sample matches the chip filters, OPTIONALLY ignoring one facet (so each
+    // facet's own selection doesn't hide its sibling options). This is faceted
+    // search: picking TFMN1 narrows the strain/DNA/replicate/condition lists to
+    // what TFMN1 actually used, while the experiment list itself stays complete.
+    const matchesExcept = (s: MutationSample, except: ChipKey): boolean => {
+      for (const k of keys) {
+        if (k === except) continue;
+        if (sel[k].size > 0 && !sel[k].has(fieldVal(s, k))) return false;
+      }
+      return true;
+    };
+    const toList = (k: ChipKey) => {
+      const counts = new Map<string, number>();
+      for (const s of samples) {
+        if (!matchesExcept(s, k)) continue;
+        const v = fieldVal(s, k);
+        if (!v) continue;
+        counts.set(v, (counts.get(v) ?? 0) + 1);
+      }
+      // Always keep an option that is itself currently selected, even if the
+      // cross-filter would otherwise drop it (so a selection never silently
+      // vanishes from view); show it with its narrowed count (0 if none remain).
+      for (const v of sel[k]) if (!counts.has(v)) counts.set(v, 0);
+      return [...counts.entries()]
         .map(([value, count]) => ({ value, count }))
         .sort((a, b) => b.count - a.count || a.value.localeCompare(b.value));
+    };
     return {
       experiment: toList('experiment'),
       replicate: toList('replicate'),
@@ -719,7 +743,7 @@ function SampleSelectionPanel({
       strain: toList('strain'),
       condition: toList('condition'),
     };
-  }, [samples]);
+  }, [samples, filters.chips]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
