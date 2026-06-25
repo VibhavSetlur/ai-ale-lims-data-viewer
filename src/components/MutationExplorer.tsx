@@ -226,32 +226,143 @@ function rampStyle(value: number, min: number, max: number, metric: string): Rea
   return { backgroundColor: bg, color: text };
 }
 
+/* ---- Growth-curve metrics -------------------------------------------------
+   Pure helper that extracts the standard parameters a microbiologist reads off
+   an OD600-vs-time curve. This is a SIMPLE, model-free estimator (point-to-point
+   slopes on the log curve), NOT a Gompertz/Richards/logistic fit. The numbers
+   are honest descriptive statistics of the observed points, useful for ranking
+   and comparison, but should not be presented as fitted kinetic constants.
+
+   Heuristics (documented honestly, do not overclaim):
+   - maxOD (carrying capacity K): the maximum observed OD600. Real K would be the
+     asymptote of a fitted model; with sparse points we use the observed max.
+   - muMax (max specific growth rate, per hour): the largest slope of ln(OD)
+     between two consecutive measured points, i.e. max over i of
+     (ln(od[i+1]) - ln(od[i])) / (t[i+1] - t[i]). This is the steepest single
+     interval, so it is sensitive to noise on closely spaced points; it is a
+     lower-effort stand-in for a sliding-window regression.
+   - doublingTimeH: ln(2)/muMax (undefined when muMax <= 0).
+   - lagTimeH: a robust heuristic, NOT a tangent-line intercept. We take the
+     first time at which OD has risen to >= 2x the initial/baseline OD (the
+     minimum of the first few points). This approximates the end of the lag
+     phase; it is coarser than the classic geometric lag definition.
+   - aucod: area under the OD-vs-time curve by the trapezoid rule (OD*hours).
+   - expIdx: index i of the steepest ln-OD interval (so the modal can highlight
+     which points produced muMax). The exponential window is points [i, i+1].
+*/
+type GrowthMetrics = {
+  maxOD: number | null;
+  muMax: number | null;
+  doublingTimeH: number | null;
+  lagTimeH: number | null;
+  aucod: number | null;
+  nPoints: number;
+  tSpan: number | null;
+  expIdx: number | null;   // start index of steepest ln-OD interval
+  minOD: number | null;
+  tMin: number | null;
+  tMax: number | null;
+};
+
+function computeGrowthMetrics(data?: { t: number; od: number }[]): GrowthMetrics {
+  const empty: GrowthMetrics = {
+    maxOD: null, muMax: null, doublingTimeH: null, lagTimeH: null, aucod: null,
+    nPoints: data?.length ?? 0, tSpan: null, expIdx: null, minOD: null, tMin: null, tMax: null,
+  };
+  if (!data || data.length < 2) return empty;
+  // Defensive copy sorted by time so slope/AUC math is monotonic in t.
+  const pts = [...data].filter(d => Number.isFinite(d.t) && Number.isFinite(d.od)).sort((a, b) => a.t - b.t);
+  if (pts.length < 2) return { ...empty, nPoints: pts.length };
+
+  const ods = pts.map(p => p.od);
+  const ts = pts.map(p => p.t);
+  const maxOD = Math.max(...ods);
+  const minOD = Math.min(...ods);
+  const tMin = ts[0];
+  const tMax = ts[ts.length - 1];
+  const tSpan = tMax - tMin;
+
+  // muMax: steepest ln(OD) slope across consecutive points. Skip intervals with
+  // non-positive OD (ln undefined) or zero/negative dt.
+  let muMax: number | null = null;
+  let expIdx: number | null = null;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const dt = ts[i + 1] - ts[i];
+    if (dt <= 0 || ods[i] <= 0 || ods[i + 1] <= 0) continue;
+    const slope = (Math.log(ods[i + 1]) - Math.log(ods[i])) / dt;
+    if (muMax === null || slope > muMax) { muMax = slope; expIdx = i; }
+  }
+  const doublingTimeH = muMax !== null && muMax > 0 ? Math.LN2 / muMax : null;
+
+  // lagTimeH: first time OD reaches >= 2x the baseline (min of first up-to-3 pts).
+  const baseline = Math.min(...ods.slice(0, Math.min(3, ods.length)));
+  let lagTimeH: number | null = null;
+  if (baseline > 0) {
+    const thresh = baseline * 2;
+    for (let i = 0; i < pts.length; i++) {
+      if (ods[i] >= thresh) { lagTimeH = ts[i]; break; }
+    }
+  }
+
+  // AUC by trapezoid rule (OD * hours).
+  let aucod = 0;
+  for (let i = 0; i < pts.length - 1; i++) {
+    aucod += ((ods[i] + ods[i + 1]) / 2) * (ts[i + 1] - ts[i]);
+  }
+
+  return {
+    maxOD, muMax, doublingTimeH, lagTimeH, aucod,
+    nPoints: pts.length, tSpan, expIdx, minOD, tMin, tMax,
+  };
+}
+
+// Small formatter so n/a renders consistently everywhere a metric is shown.
+function fmtMetric(v: number | null, digits = 2, suffix = ''): string {
+  if (v === null || !Number.isFinite(v)) return 'n/a';
+  return `${v.toFixed(digits)}${suffix}`;
+}
+
 function GrowthCurveSparkline({
   data, odSources, width = 88, height = 38, yMaxOverride, xMinOverride, xMaxOverride,
+  sample, onExpand,
 }: {
   data?: { t: number; od: number }[];
   odSources?: { type: string; source: string }[];
   width?: number; height?: number;
   yMaxOverride?: number; xMinOverride?: number; xMaxOverride?: number;
+  sample?: MutationSample;
+  onExpand?: (s: MutationSample) => void;
 }) {
+  const clickable = !!(onExpand && sample);
   if (!data || data.length < 2) {
     // No numeric series in the DB. If the LIMS tracked an OD measurement
     // upstream, show a small "OD" badge with the source filename in the
-    // tooltip — researchers can then track down the actual file.
+    // tooltip - researchers can then track down the actual file.
     if (odSources && odSources.length > 0) {
       const tooltip = odSources
         .map(s => `${s.type.replace('OD_series_', '')}: ${s.source}`)
         .join('\n') + '\n(numeric series not in DB mirror)';
-      return (
+      const badge = (
         <div
-          className="flex items-center justify-center text-[9px] font-semibold rounded bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800"
+          className={cn(
+            'flex items-center justify-center text-[9px] font-semibold rounded bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800',
+            clickable && 'cursor-pointer hover:ring-1 hover:ring-amber-400',
+          )}
           style={{ width, height }}
-          title={tooltip}
+          title={clickable ? tooltip + '\nClick to expand growth curve' : tooltip}
           aria-label={tooltip}
         >
           OD ref
         </div>
       );
+      if (clickable) {
+        return (
+          <button type="button" onClick={() => onExpand!(sample!)} className="block p-0 m-0 bg-transparent border-0">
+            {badge}
+          </button>
+        );
+      }
+      return badge;
     }
     return <div className="text-[9px] text-[var(--text-faint)] italic flex items-center justify-center" style={{ width, height }}>no curve</div>;
   }
@@ -264,18 +375,54 @@ function GrowthCurveSparkline({
   const pad = 3;
   const sx = (x: number) => pad + ((x - xMin) / Math.max(1e-6, xMax - xMin)) * (width - pad * 2);
   const sy = (y: number) => height - pad - ((y - yMin) / Math.max(1e-6, yMax - yMin)) * (height - pad * 2);
-  const path = data.map((d, i) => `${i === 0 ? 'M' : 'L'} ${sx(d.t).toFixed(1)} ${sy(d.od).toFixed(1)}`).join(' ');
-  const tooltip = `${data.length} points · OD ${Math.min(...ys).toFixed(2)}→${Math.max(...ys).toFixed(2)} over t=${Math.min(...xs).toFixed(1)}–${Math.max(...xs).toFixed(1)}h`;
-  return (
+  const linePath = data.map((d, i) => `${i === 0 ? 'M' : 'L'} ${sx(d.t).toFixed(1)} ${sy(d.od).toFixed(1)}`).join(' ');
+  // Filled area: line path closed down to the baseline so the curve shape reads
+  // at a glance even at 70px wide.
+  const areaPath = `${linePath} L ${sx(data[data.length - 1].t).toFixed(1)} ${(height - pad).toFixed(1)} L ${sx(data[0].t).toFixed(1)} ${(height - pad).toFixed(1)} Z`;
+
+  // The max-OD point (carrying-capacity marker).
+  const maxY = Math.max(...ys);
+  const maxPt = data.reduce((best, d) => (d.od > best.od ? d : best), data[0]);
+  const capY = sy(maxY);
+
+  // Heavy metric calc lives only in the tooltip string (one per sparkline, cheap
+  // enough; the full work happens in the modal).
+  const m = computeGrowthMetrics(data);
+  const tooltip =
+    `OD max ${fmtMetric(m.maxOD)} (K) | mu ${fmtMetric(m.muMax, 3, '/h')} | ` +
+    `doubling ${fmtMetric(m.doublingTimeH, 2, ' h')} | ` +
+    `t ${fmtMetric(m.tMin, 1)}-${fmtMetric(m.tMax, 1)} h, ${m.nPoints} pts` +
+    (clickable ? '\nClick to expand growth curve' : '');
+
+  const svg = (
     <svg width={width} height={height} className="block" aria-label={tooltip}>
       <title>{tooltip}</title>
+      {/* y=0 baseline */}
       <line x1={pad} y1={height - pad} x2={width - pad} y2={height - pad} stroke="var(--border)" strokeWidth="0.5" />
-      <path d={path} fill="none" stroke="var(--data-grow)" strokeWidth="1.4" />
-      {data.map((d, i) => (
-        <circle key={i} cx={sx(d.t)} cy={sy(d.od)} r="1.2" fill="var(--data-grow)" />
-      ))}
+      {/* carrying-capacity (max OD) reference line */}
+      <line x1={pad} y1={capY} x2={width - pad} y2={capY} stroke="var(--data-grow)" strokeWidth="0.5" strokeDasharray="2 2" opacity="0.45" />
+      {/* filled area under curve */}
+      <path d={areaPath} fill="var(--data-grow)" opacity="0.12" stroke="none" />
+      {/* curve */}
+      <path d={linePath} fill="none" stroke="var(--data-grow)" strokeWidth="1.4" />
+      {/* max-OD marker */}
+      <circle cx={sx(maxPt.t)} cy={sy(maxPt.od)} r="1.8" fill="var(--data-grow)" stroke="white" strokeWidth="0.5" />
     </svg>
   );
+
+  if (clickable) {
+    return (
+      <button
+        type="button"
+        onClick={() => onExpand!(sample!)}
+        className="block p-0 m-0 bg-transparent border-0 cursor-pointer rounded hover:ring-1 hover:ring-[var(--data-grow)]/60"
+        title="Click to expand growth curve"
+      >
+        {svg}
+      </button>
+    );
+  }
+  return svg;
 }
 
 function sortSamples(samples: MutationSample[]): MutationSample[] {
@@ -643,6 +790,8 @@ function SampleSelectionPanel({
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [showFilters, setShowFilters] = useState(false);
   const [hydrated, setHydrated] = useState(false);
+  // The sample whose growth-curve sparkline was clicked; drives the modal.
+  const [growthCurveSample, setGrowthCurveSample] = useState<MutationSample | null>(null);
 
   // Rehydrate filter + collapse state from localStorage.
   useEffect(() => {
@@ -863,6 +1012,15 @@ function SampleSelectionPanel({
     (Object.values(filters.chips) as string[][]).reduce((n, arr) => n + arr.length, 0) +
     (filters.transferMin !== null || filters.transferMax !== null ? 1 : 0);
 
+  // Peers for the growth-curve modal: filtered samples sharing the focused
+  // sample's experiment + replicate + donor_dna (the cheapest same-group key).
+  const growthPeers = useMemo(() => {
+    if (!growthCurveSample) return [];
+    const key = (s: MutationSample) => `${s.experiment}|${s.replicate ?? ''}|${s.donor_dna ?? ''}`;
+    const k = key(growthCurveSample);
+    return filtered.filter(s => key(s) === k);
+  }, [growthCurveSample, filtered]);
+
   return (
     <div className="flex flex-col h-full min-h-0">
       {/* Search + summary row */}
@@ -1065,7 +1223,7 @@ function SampleSelectionPanel({
                         </td>
                         <td className="px-2 py-1">
                           <div className="flex justify-end">
-                            <GrowthCurveSparkline data={s.growth_curve} odSources={s.od_sources} width={70} height={26} />
+                            <GrowthCurveSparkline data={s.growth_curve} odSources={s.od_sources} width={70} height={26} sample={s} onExpand={setGrowthCurveSample} />
                           </div>
                         </td>
                       </tr>
@@ -1077,6 +1235,13 @@ function SampleSelectionPanel({
           </tbody>
         </table>
       </div>
+      {growthCurveSample && (
+        <GrowthCurveModal
+          sample={growthCurveSample}
+          peers={growthPeers}
+          onClose={() => setGrowthCurveSample(null)}
+        />
+      )}
     </div>
   );
 }
@@ -1116,6 +1281,8 @@ function ComparativePanel({
   const [compactHeaders, setCompactHeaders] = useState(false);
   // The mutation whose name was clicked; drives the rich detail modal.
   const [detailMutation, setDetailMutation] = useState<MutationRow | null>(null);
+  // The sample whose growth-curve sparkline was clicked; drives the growth modal.
+  const [growthCurveSample, setGrowthCurveSample] = useState<MutationSample | null>(null);
   const [filtersHydrated, setFiltersHydrated] = useState(false);
 
   // Rehydrate filters from localStorage on first mount. Once the user has
@@ -1341,6 +1508,15 @@ function ComparativePanel({
   }, [selectedSamples, renderedMutations, hideEmptySamples]);
 
   const hiddenSampleCount = selectedSamples.length - visibleSamples.length;
+
+  // Peers for the growth-curve modal: visible samples sharing the focused
+  // sample's experiment + replicate + donor_dna (same-group replicates/timepoints).
+  const growthPeers = useMemo(() => {
+    if (!growthCurveSample) return [];
+    const key = (s: MutationSample) => `${s.experiment}|${s.replicate ?? ''}|${s.donor_dna ?? ''}`;
+    const k = key(growthCurveSample);
+    return visibleSamples.filter(s => key(s) === k);
+  }, [growthCurveSample, visibleSamples]);
 
   // Per-COLUMN (sample) min/max of frequency values across the rendered rows, so
   // each sample column's heatmap gradient spans that column's own value range
@@ -1815,6 +1991,8 @@ function ComparativePanel({
                         yMaxOverride={curveScale.yMax}
                         xMinOverride={curveScale.xMin}
                         xMaxOverride={curveScale.xMax}
+                        sample={s}
+                        onExpand={setGrowthCurveSample}
                       />
                     </div>
                   )}
@@ -1915,6 +2093,13 @@ function ComparativePanel({
           samples={visibleSamples}
           groupOrder={groupOrder}
           onClose={() => setDetailMutation(null)}
+        />
+      )}
+      {growthCurveSample && (
+        <GrowthCurveModal
+          sample={growthCurveSample}
+          peers={growthPeers}
+          onClose={() => setGrowthCurveSample(null)}
         />
       )}
     </div>
@@ -2029,6 +2214,361 @@ function ModalSection({ title, hint, children }: { title: string; hint?: string;
       </div>
       {children}
     </section>
+  );
+}
+
+/* ---- Growth-curve modal ----------------------------------------------------
+   Large, scrollable popup opened by clicking a growth-curve sparkline. Mirrors
+   the MutationDetailModal pattern (fixed inset-0 backdrop, max-w-3xl card, close
+   on backdrop / X / Esc). Renders a genome-browser-quality OD600-vs-time chart
+   with labeled axes, gridlines, the exponential phase highlighted, a metrics
+   panel, a linear-vs-log Y toggle (log is the microbiology-standard view where
+   exponential growth is a straight line), and an overlay that compares same-group
+   peer curves on one axis. Self-contained SVG, all geometry memoized. */
+
+// Distinct hues for overlaid peer curves (the focused curve stays emerald).
+const PEER_HUES = [
+  '#2563eb', '#d97706', '#7c3aed', '#db2777', '#0891b2', '#65a30d',
+  '#dc2626', '#0d9488', '#9333ea', '#ca8a04', '#4f46e5', '#e11d48',
+];
+
+function GrowthCurveModal({
+  sample, peers, onClose,
+}: {
+  sample: MutationSample;
+  peers: MutationSample[];
+  onClose: () => void;
+}) {
+  const [logScale, setLogScale] = useState(false);
+  const [showOverlay, setShowOverlay] = useState(true);
+
+  // Close on Esc.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  const data = sample.growth_curve;
+  const hasCurve = !!(data && data.length >= 2);
+
+  const metrics = useMemo(() => computeGrowthMetrics(data), [data]);
+
+  // Peers that actually carry a numeric series, excluding the focused sample,
+  // capped at 12 overlaid curves for legibility.
+  const PEER_CAP = 12;
+  const overlayPeers = useMemo(() => {
+    return peers
+      .filter(p => p.id !== sample.id && p.growth_curve && p.growth_curve.length >= 2);
+  }, [peers, sample.id]);
+  const shownPeers = overlayPeers.slice(0, PEER_CAP);
+  const hiddenPeerCount = overlayPeers.length - shownPeers.length;
+
+  // Chart geometry + scales, memoized. Y domain spans the focused curve AND any
+  // overlaid peers so every curve fits on the shared axis.
+  const chart = useMemo(() => {
+    const W = 660, H = 300;
+    const padL = 52, padR = 16, padT = 16, padB = 40;
+    const innerW = W - padL - padR;
+    const innerH = H - padT - padB;
+    if (!hasCurve) return null;
+
+    const seriesForDomain = [data!, ...(showOverlay ? shownPeers.map(p => p.growth_curve!) : [])];
+    let xMin = Infinity, xMax = -Infinity, yMax = 0, yMinPos = Infinity;
+    for (const s of seriesForDomain) {
+      for (const p of s) {
+        if (p.t < xMin) xMin = p.t;
+        if (p.t > xMax) xMax = p.t;
+        if (p.od > yMax) yMax = p.od;
+        if (p.od > 0 && p.od < yMinPos) yMinPos = p.od;
+      }
+    }
+    if (!Number.isFinite(xMin)) { xMin = 0; xMax = 1; }
+    if (xMax <= xMin) xMax = xMin + 1;
+    yMax = Math.max(yMax, 0.05);
+    if (!Number.isFinite(yMinPos)) yMinPos = 0.01;
+    // For log mode, floor at a sensible lower OD so the axis is readable.
+    const logLo = Math.max(0.001, Math.min(yMinPos, yMax / 1000));
+    const logHi = yMax;
+
+    const sx = (t: number) => padL + ((t - xMin) / (xMax - xMin)) * innerW;
+    const syLinear = (od: number) => padT + innerH - (od / yMax) * innerH;
+    const syLog = (od: number) => {
+      const v = Math.max(logLo, od);
+      const f = (Math.log(v) - Math.log(logLo)) / (Math.log(logHi) - Math.log(logLo));
+      return padT + innerH - f * innerH;
+    };
+    const sy = logScale ? syLog : syLinear;
+
+    // X ticks: nice step aiming for ~6 ticks.
+    const xRange = xMax - xMin;
+    const xRaw = xRange / 6;
+    const xMag = Math.pow(10, Math.floor(Math.log10(Math.max(1e-6, xRaw))));
+    const xNorm = xRaw / xMag;
+    const xMul = xNorm <= 1 ? 1 : xNorm <= 2 ? 2 : xNorm <= 5 ? 5 : 10;
+    const xStep = Math.max(1e-6, xMul * xMag);
+    const xTicks: number[] = [];
+    const xFirst = Math.ceil(xMin / xStep) * xStep;
+    for (let t = xFirst; t <= xMax + 1e-9 && xTicks.length < 14; t += xStep) xTicks.push(t);
+
+    // Y ticks differ by mode.
+    let yTicks: number[];
+    if (logScale) {
+      // Decade ticks across the log domain.
+      yTicks = [];
+      const decLo = Math.floor(Math.log10(logLo));
+      const decHi = Math.ceil(Math.log10(logHi));
+      for (let d = decLo; d <= decHi; d++) {
+        const base = Math.pow(10, d);
+        if (base >= logLo * 0.999 && base <= logHi * 1.001) yTicks.push(base);
+      }
+      if (yTicks.length < 2) yTicks = [logLo, logHi];
+    } else {
+      const yRaw = yMax / 5;
+      const yMag = Math.pow(10, Math.floor(Math.log10(Math.max(1e-6, yRaw))));
+      const yNorm = yRaw / yMag;
+      const yMul = yNorm <= 1 ? 1 : yNorm <= 2 ? 2 : yNorm <= 5 ? 5 : 10;
+      const yStep = Math.max(1e-6, yMul * yMag);
+      yTicks = [];
+      for (let v = 0; v <= yMax + 1e-9 && yTicks.length < 12; v += yStep) yTicks.push(v);
+    }
+
+    const linePath = (s: { t: number; od: number }[]) =>
+      s.map((p, i) => `${i === 0 ? 'M' : 'L'} ${sx(p.t).toFixed(1)} ${sy(p.od).toFixed(1)}`).join(' ');
+    const focusPath = linePath(data!);
+    const areaPath = `${focusPath} L ${sx(data![data!.length - 1].t).toFixed(1)} ${(padT + innerH).toFixed(1)} L ${sx(data![0].t).toFixed(1)} ${(padT + innerH).toFixed(1)} Z`;
+
+    // Exponential-phase segment (the steepest ln-OD interval that produced muMax).
+    let expSeg: string | null = null;
+    if (metrics.expIdx !== null && data![metrics.expIdx] && data![metrics.expIdx + 1]) {
+      const a = data![metrics.expIdx];
+      const b = data![metrics.expIdx + 1];
+      expSeg = `M ${sx(a.t).toFixed(1)} ${sy(a.od).toFixed(1)} L ${sx(b.t).toFixed(1)} ${sy(b.od).toFixed(1)}`;
+    }
+
+    const capY = metrics.maxOD !== null ? sy(metrics.maxOD) : null;
+
+    return {
+      W, H, padL, padR, padT, padB, innerW, innerH,
+      xMin, xMax, yMax, sx, sy, xTicks, yTicks,
+      focusPath, areaPath, expSeg, capY,
+      peerPaths: showOverlay ? shownPeers.map(p => linePath(p.growth_curve!)) : [],
+    };
+  }, [data, hasCurve, logScale, showOverlay, shownPeers, metrics]);
+
+  const chips: { label: string; value?: string | number }[] = [
+    { label: 'experiment', value: sample.experiment },
+    { label: 'strain', value: sample.strain },
+    { label: 'condition', value: sample.condition },
+    { label: 'replicate', value: sample.replicate },
+    { label: 'transfer', value: sample.transfer },
+    { label: 'donor DNA', value: sample.donor_dna },
+  ];
+
+  const metricCards: { label: string; value: string; caption: string }[] = [
+    { label: 'Max OD600 (K)', value: fmtMetric(metrics.maxOD, 3), caption: 'observed carrying capacity (curve max)' },
+    { label: 'Max growth rate mu', value: fmtMetric(metrics.muMax, 3, ' /h'), caption: 'steepest ln(OD) slope between points' },
+    { label: 'Doubling time', value: fmtMetric(metrics.doublingTimeH, 2, ' h'), caption: 'ln(2) / mu, at max growth rate' },
+    { label: 'Lag time', value: fmtMetric(metrics.lagTimeH, 2, ' h'), caption: 'first t where OD reaches 2x baseline' },
+    { label: 'AUC', value: fmtMetric(metrics.aucod, 3, ' OD*h'), caption: 'area under OD vs time (trapezoid)' },
+    { label: 'Data points', value: String(metrics.nPoints), caption: 'measured OD600 readings' },
+    { label: 'Time span', value: fmtMetric(metrics.tSpan, 1, ' h'), caption: `t = ${fmtMetric(metrics.tMin, 1)} to ${fmtMetric(metrics.tMax, 1)} h` },
+  ];
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+    >
+      <div
+        className="bg-[var(--surface)] text-[var(--text)] border border-[var(--border)] rounded-lg shadow-2xl w-full max-w-3xl max-h-[85vh] overflow-y-auto scroll-smooth"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header (sticky) */}
+        <div className="sticky top-0 z-10 bg-[var(--surface)] border-b border-[var(--border)] px-5 py-3 flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <TrendingUp className="w-4 h-4 text-[var(--data-grow)] shrink-0" />
+              <span className="font-mono text-[18px] font-semibold text-[var(--text)] break-all">{sample.name}</span>
+            </div>
+            <div className="mt-1.5 flex flex-wrap gap-1.5">
+              {chips.filter(c => c.value !== undefined && c.value !== null && c.value !== '').map(c => (
+                <span key={c.label} className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--surface-3)] border border-[var(--border)] text-[var(--text-soft)]">
+                  <span className="text-[var(--text-faint)] uppercase tracking-wide mr-1">{c.label}</span>
+                  <span className="font-mono text-[var(--text)]">{String(c.value)}</span>
+                </span>
+              ))}
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="shrink-0 p-1 rounded hover:bg-[var(--surface-3)] text-[var(--text-soft)] hover:text-[var(--text)]"
+            title="Close (Esc)"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <div className="px-5 py-4 space-y-4">
+          {/* Chart */}
+          <ModalSection title="Growth curve" hint="OD600 vs time (h)">
+            {!hasCurve ? (
+              <div className="text-[12px] text-[var(--text-soft)] space-y-2">
+                <div className="italic text-[var(--text-faint)]">numeric series not in this dataset</div>
+                {sample.od_sources && sample.od_sources.length > 0 ? (
+                  <div className="space-y-1">
+                    <div className="text-[var(--text-soft)]">OD measurement was tracked upstream in:</div>
+                    <ul className="font-mono text-[11px] space-y-0.5">
+                      {sample.od_sources.map((s, i) => (
+                        <li key={i} className="text-[var(--text)]">
+                          <span className="text-amber-700 dark:text-amber-300">{s.type.replace('OD_series_', '')}</span>: {s.source}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : (
+                  <div className="text-[var(--text-faint)]">No OD source reference available either.</div>
+                )}
+              </div>
+            ) : chart ? (
+              <>
+                {/* Toggles */}
+                <div className="flex items-center gap-3 mb-2 flex-wrap">
+                  <div className="inline-flex rounded border border-[var(--border)] overflow-hidden text-[11px]">
+                    <button
+                      onClick={() => setLogScale(false)}
+                      className={cn('px-2 py-0.5', !logScale ? 'bg-[var(--data-grow)] text-white' : 'bg-[var(--surface-2)] text-[var(--text-soft)]')}
+                    >Linear</button>
+                    <button
+                      onClick={() => setLogScale(true)}
+                      className={cn('px-2 py-0.5', logScale ? 'bg-[var(--data-grow)] text-white' : 'bg-[var(--surface-2)] text-[var(--text-soft)]')}
+                      title="Log(OD) makes exponential growth a straight line - the standard microbiology view"
+                    >Log (ln OD)</button>
+                  </div>
+                  {overlayPeers.length > 0 && (
+                    <button
+                      onClick={() => setShowOverlay(v => !v)}
+                      className={cn('px-2 py-0.5 rounded border text-[11px]', showOverlay
+                        ? 'bg-blue-50 dark:bg-blue-900/30 border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-300'
+                        : 'bg-[var(--surface-2)] border-[var(--border)] text-[var(--text-soft)]')}
+                    >{showOverlay ? 'Hide group overlay' : 'Show group overlay'}</button>
+                  )}
+                  <span className="text-[10px] text-[var(--text-faint)]">
+                    {logScale ? 'Log axis: exponential phase reads as a straight line.' : 'Linear axis.'}
+                  </span>
+                </div>
+
+                <svg width={chart.W} height={chart.H} className="block max-w-full h-auto" role="img" aria-label={`Growth curve for ${sample.name}`}>
+                  {/* Gridlines + Y ticks */}
+                  {chart.yTicks.map((v, i) => {
+                    const y = chart.sy(v);
+                    return (
+                      <g key={`y${i}`}>
+                        <line x1={chart.padL} y1={y} x2={chart.W - chart.padR} y2={y} stroke="var(--border)" strokeWidth="0.5" opacity="0.5" />
+                        <text x={chart.padL - 6} y={y + 3} textAnchor="end" fontSize="9" fill="var(--text-faint)" className="font-mono">{v < 0.01 ? v.toExponential(0) : v.toFixed(v < 0.1 ? 3 : 2)}</text>
+                      </g>
+                    );
+                  })}
+                  {/* X ticks + gridlines */}
+                  {chart.xTicks.map((t, i) => {
+                    const x = chart.sx(t);
+                    return (
+                      <g key={`x${i}`}>
+                        <line x1={x} y1={chart.padT} x2={x} y2={chart.padT + chart.innerH} stroke="var(--border)" strokeWidth="0.5" opacity="0.3" />
+                        <line x1={x} y1={chart.padT + chart.innerH} x2={x} y2={chart.padT + chart.innerH + 4} stroke="var(--text-faint)" strokeWidth="0.75" />
+                        <text x={x} y={chart.padT + chart.innerH + 15} textAnchor="middle" fontSize="9" fill="var(--text-faint)" className="font-mono">{t % 1 === 0 ? t.toFixed(0) : t.toFixed(1)}</text>
+                      </g>
+                    );
+                  })}
+                  {/* Axes */}
+                  <line x1={chart.padL} y1={chart.padT} x2={chart.padL} y2={chart.padT + chart.innerH} stroke="var(--text-soft)" strokeWidth="1" />
+                  <line x1={chart.padL} y1={chart.padT + chart.innerH} x2={chart.W - chart.padR} y2={chart.padT + chart.innerH} stroke="var(--text-soft)" strokeWidth="1" />
+                  {/* Axis labels */}
+                  <text x={chart.padL + chart.innerW / 2} y={chart.H - 4} textAnchor="middle" fontSize="11" fill="var(--text-soft)" fontWeight="600">Time (h)</text>
+                  <text x={12} y={chart.padT + chart.innerH / 2} textAnchor="middle" fontSize="11" fill="var(--text-soft)" fontWeight="600" transform={`rotate(-90 12 ${chart.padT + chart.innerH / 2})`}>{logScale ? 'OD600 (log)' : 'OD600'}</text>
+
+                  {/* Carrying-capacity (max OD) dashed line */}
+                  {chart.capY !== null && (
+                    <g>
+                      <line x1={chart.padL} y1={chart.capY} x2={chart.W - chart.padR} y2={chart.capY} stroke="var(--data-grow)" strokeWidth="1" strokeDasharray="4 3" opacity="0.7" />
+                      <text x={chart.W - chart.padR - 2} y={chart.capY - 3} textAnchor="end" fontSize="9" fill="var(--data-grow)" className="font-mono">K = {fmtMetric(metrics.maxOD, 3)}</text>
+                    </g>
+                  )}
+
+                  {/* Overlay peer curves (thin, faded, distinct hues) */}
+                  {chart.peerPaths.map((d, i) => (
+                    <path key={`peer${i}`} d={d} fill="none" stroke={PEER_HUES[i % PEER_HUES.length]} strokeWidth="1" opacity="0.45" />
+                  ))}
+
+                  {/* Focus area + line */}
+                  {!showOverlay || overlayPeers.length === 0 ? (
+                    <path d={chart.areaPath} fill="var(--data-grow)" opacity="0.12" stroke="none" />
+                  ) : null}
+                  <path d={chart.focusPath} fill="none" stroke="var(--data-grow)" strokeWidth="2.2" />
+
+                  {/* Exponential-phase highlight (where muMax came from) */}
+                  {chart.expSeg && (
+                    <path d={chart.expSeg} fill="none" stroke="#ea580c" strokeWidth="3.5" opacity="0.85" />
+                  )}
+
+                  {/* Focus data points with hover tooltips */}
+                  {data!.map((p, i) => (
+                    <circle key={i} cx={chart.sx(p.t)} cy={chart.sy(p.od)} r="2.6" fill="var(--data-grow)" stroke="white" strokeWidth="0.6">
+                      <title>t = {p.t.toFixed(2)} h, OD600 = {p.od.toFixed(3)}</title>
+                    </circle>
+                  ))}
+                </svg>
+
+                {/* Legend */}
+                <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-[var(--text-soft)]">
+                  <span className="inline-flex items-center gap-1"><span className="inline-block w-3 h-[2px] bg-[var(--data-grow)]" /> {sample.name} (focus)</span>
+                  {chart.expSeg && <span className="inline-flex items-center gap-1"><span className="inline-block w-3 h-[3px]" style={{ background: '#ea580c' }} /> exponential phase (mu)</span>}
+                  {chart.capY !== null && <span className="inline-flex items-center gap-1"><span className="inline-block w-3 border-t border-dashed border-[var(--data-grow)]" /> carrying capacity K</span>}
+                </div>
+              </>
+            ) : null}
+          </ModalSection>
+
+          {/* Metrics */}
+          {hasCurve && (
+            <ModalSection title="Growth metrics" hint="simple descriptive estimates, not a kinetic-model fit">
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                {metricCards.map(c => (
+                  <div key={c.label} className="rounded border border-[var(--border)] bg-[var(--surface-2)] px-2.5 py-1.5">
+                    <div className="text-[9.5px] uppercase tracking-wide text-[var(--text-faint)]">{c.label}</div>
+                    <div className="font-mono text-[14px] font-semibold text-[var(--text)] tabular-nums">{c.value}</div>
+                    <div className="text-[9px] text-[var(--text-faint)] leading-tight mt-0.5">{c.caption}</div>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-2 text-[10px] text-[var(--text-faint)] leading-snug">
+                Note: mu is the steepest single ln(OD) interval and lag uses a 2x-baseline threshold heuristic.
+                These are point-to-point estimates from sparse readings, not a Gompertz/logistic fit.
+              </div>
+            </ModalSection>
+          )}
+
+          {/* Compare with group */}
+          {overlayPeers.length > 0 && (
+            <ModalSection title="Compare with group" hint={`${overlayPeers.length} peer curve${overlayPeers.length === 1 ? '' : 's'} share this sample's experiment, replicate and donor DNA`}>
+              <div className="flex flex-wrap gap-x-4 gap-y-1">
+                {shownPeers.map((p, i) => (
+                  <span key={p.id} className="inline-flex items-center gap-1.5 text-[10.5px]" title={p.name}>
+                    <span className="inline-block w-3 h-[2px]" style={{ background: PEER_HUES[i % PEER_HUES.length] }} />
+                    <span className="font-mono text-[var(--text-soft)] truncate max-w-[160px]">{p.name}</span>
+                  </span>
+                ))}
+              </div>
+              {hiddenPeerCount > 0 && (
+                <div className="mt-1.5 text-[10px] text-[var(--text-faint)]">{hiddenPeerCount} more peer curve{hiddenPeerCount === 1 ? '' : 's'} hidden (capped at {PEER_CAP} for legibility).</div>
+              )}
+            </ModalSection>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
 
