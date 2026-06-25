@@ -1700,9 +1700,14 @@ function ComparativePanel({
         </button>
       </div>
 
-      {/* Comparison table */}
+      {/* Comparison table.
+          border-separate (not border-collapse) is REQUIRED for sticky headers:
+          with border-collapse, browsers paint collapsed borders in a layer that
+          lets scrolling cell colors bleed through the 1px seams behind sticky
+          cells regardless of z-index. border-separate + spacing 0 makes every
+          sticky cell paint its own full opaque background with no seams. */}
       <div className="flex-1 min-h-0 overflow-auto relative">
-        <table className="text-[12px] border-collapse">
+        <table className="text-[12px] border-separate" style={{ borderSpacing: 0 }}>
           {/* Sticky top: column groups + sample info rows + growth curves */}
           <thead className="sticky top-0 z-30 bg-white dark:bg-gray-800">
             {/* Grouping bands: one row per enabled grouping level (outermost first).
