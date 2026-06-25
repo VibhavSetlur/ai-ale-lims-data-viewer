@@ -1,85 +1,111 @@
-# AI-ALE static deploy: live runbook (modelseed.org/annotation/projects/aiale)
+# AI-ALE static deploy: live runbook (BOTH instances)
 
-This is the EXACT, verified procedure that put the viewer live at
-https://modelseed.org/annotation/projects/aiale/ on 2026-06-24. Use it to
-re-deploy after a LIMS DB refresh.
+The EXACT, verified procedure to (re)deploy the two live static instances after a
+LIMS DB refresh. Both are built from the same codebase; they differ ONLY in which
+database is baked in.
+
+## The two instances
+
+| Instance | URL | Webroot | Database baked in | Barcode tab |
+|---|---|---|---|---|
+| PUBLIC (publication snapshot) | https://modelseed.org/annotation/projects/aiale/ | /scratch1/fliu/html/modelseed_annotation/projects/aiale/ | TFMN1 trimmed (`data/lims_TFMN1_indexed.db`) | hidden (no barcode data) |
+| PRIVATE (internal, unlisted) | https://modelseed.org/annotation/projects/aiale-06-25-2026/ | /scratch1/fliu/html/modelseed_annotation/projects/aiale-06-25-2026/ | full (`data/lims_indexed.db`) | shown |
+
+The Barcode tab visibility is automatic: the viewer reads `stats.hasBarcodes` from the
+baked data, which is true only when the database has a non-empty `verAB_barcodes` table.
+The TFMN1 trimmed DB omits that table, so the public instance hides the tab. See
+`ARCHITECTURE.md` section 3.
 
 ## Facts confirmed with Filipe (fliu)
-- Webroot:  /scratch1/fliu/html/modelseed_annotation/projects/aiale/
-- URL:      https://modelseed.org/annotation/projects/aiale/
-- "the folder will be the url" - the folder contents ARE served at that URL.
-- /annotation is fliu's separate nginx conduit (not the main modelseed.org).
-- The folder is owned by fliu, group `cels`, group-writable; vsetlur (in cels)
-  can write files into it. The folder itself is fliu's; do not try to chmod it.
+- /annotation is fliu's separate nginx conduit. "The folder is the url" - folder contents
+  are served at that URL.
+- Both webroots are owned by fliu, group `cels`, group-writable; vsetlur (in `cels`) can
+  write FILES into them but does NOT own the directories (cannot chmod the top dir).
 
-## CRITICAL gotcha (caused a 403): file permissions
-nginx runs as a different user and must be able to READ every file. Files
-created with a restrictive umask land as 600 (-rw-------) and nginx returns
-403 Forbidden. EVERY deploy MUST end with:
-    find <webroot> -type d -exec chmod 755 {} \;
-    find <webroot> -type f -exec chmod 644 {} \;
-(The top-level folder chmod will say "Operation not permitted" because fliu owns
-it - that's fine, it's already group-accessible. Only the files/subdirs we add
-need 644/755.)
+## CRITICAL gotchas
+1. PERMISSIONS (causes 403): nginx must READ every file. Files created with a restrictive
+   umask land as 600 and nginx returns 403. EVERY deploy MUST end with files 644 / dirs 755
+   on the webroot CONTENTS (not the top dir, which fliu owns).
+2. STATIC BUILD POISONS SERVER MODE: `build:static` leaves a `.next` with
+   `exportTrailingSlash: true`; running `npm start` on it 404s all API routes. The tooling
+   auto-cleans this (`build-static.sh` clears `.next`, `serve.sh` rebuilds clean), but if
+   you ever see "root 200 but every /api 404 with a 308", that is the cause.
 
-## Full re-deploy procedure
-Run from /scratch/vsetlur/ai-ale-lims-data-viewer with the conda env active and
-the SERVER running (ops/serve.sh) so prebake can snapshot the live API.
+## Prerequisite: indexed DB copies
+
+Keep two indexed local copies (built once, refreshed when upstream changes):
+
+```bash
+cd /scratch/vsetlur/ai-ale-lims-data-viewer
+source /scratch/vsetlur/anaconda3/etc/profile.d/conda.sh && conda activate ai-ale-dev
+
+# full mirror -> data/lims_indexed.db
+ops/refresh-db.sh /scratch1/fliu/hub_scratch/synbio/lims_mirror.backup.db data/lims_indexed.db
+
+# TFMN1 trimmed mirror -> data/lims_TFMN1_indexed.db  (N. Spahr produces the trimmed source)
+ops/refresh-db.sh /scratch1/fliu/hub_scratch/synbio/lims_mirror_TFMN1.db data/lims_TFMN1_indexed.db
+```
+
+## Re-deploy procedure (run for EACH instance)
+
+The only differences per instance are: which DB the server runs on before baking, the
+`SRC` for the httpvfs DB, the `BASE_PATH`, and the destination webroot. Set these four
+and the rest is identical.
 
 ```bash
 cd /scratch/vsetlur/ai-ale-lims-data-viewer
 source /scratch/vsetlur/anaconda3/etc/profile.d/conda.sh && conda activate ai-ale-dev
 export PATH="$HOME/.local/bin:$PATH"
 
-# 1. confirm the server is up (prebake reads it)
-curl -s -o /dev/null -w "%{http_code}\n" http://localhost:3457/api/health   # 200
+# ---- choose ONE instance ----
+# PUBLIC (TFMN1 trimmed):
+DB=data/lims_TFMN1_indexed.db; BP=/annotation/projects/aiale;            DST=/scratch1/fliu/html/modelseed_annotation/projects/aiale
+# PRIVATE (full):
+# DB=data/lims_indexed.db;     BP=/annotation/projects/aiale-06-25-2026; DST=/scratch1/fliu/html/modelseed_annotation/projects/aiale-06-25-2026
 
-# 2. bake fresh curated-view data artifacts from the current DB
+# 1. point the server at this instance's DB and (re)start it
+./ops/stop.sh 2>/dev/null; sleep 1
+SQLITE_PATH="$PWD/$DB" ./ops/serve.sh; sleep 6
+curl -s http://localhost:3457/api/health     # confirm "path" is the DB you intend
+
+# 2. bake curated-view data from THIS db (capability flags like hasBarcodes are baked here)
 npm run prebake
 
-# 3. build the client-queryable SQLite for the raw Tables browser (sql.js-httpvfs)
-bash scripts/prepare-httpvfs-db.sh        # -> public/db/lims.db + worker + wasm + config
+# 3. build the client-queryable SQLite for the raw Tables browser, FROM THIS db
+SRC="$DB" bash scripts/prepare-httpvfs-db.sh   # -> public/db/lims.db + worker + wasm + config
 
-# 4. build the static bundle with the production base path
+# 4. build the static bundle with this instance's base path
 rm -rf out
-BASE_PATH=/annotation/projects/aiale npm run build:static     # -> out/  (~241MB incl DB)
+BASE_PATH="$BP" npm run build:static           # -> out/
 
-# 5. publish into Filipe's webroot (clear old, copy new)
-DST=/scratch1/fliu/html/modelseed_annotation/projects/aiale
-find "$DST" -mindepth 1 -delete 2>/dev/null || rm -rf "$DST"/* "$DST"/.[!.]*
-cp -r out/. "$DST"/
+# 5. publish: mirror out/ into the webroot. rsync --delete keeps it clean; --no-perms
+#    avoids trying to chmod fliu's top dir (which we do not own).
+rsync -a --delete --no-perms --omit-dir-times out/ "$DST/"
 
-# 6. MANDATORY perms fix (or nginx 403s)
-find "$DST" -type d -exec chmod 755 {} \; 2>/dev/null
-find "$DST" -type f -exec chmod 644 {} \;
+# 6. MANDATORY perms fix on CONTENTS only (or nginx 403s)
+find "$DST" -mindepth 1 -type d -exec chmod 755 {} \; 2>/dev/null
+find "$DST" -mindepth 1 -type f -exec chmod 644 {} \;
 
-# 7. verify the live URL (root, curated data, AND the DB range request)
-curl -s -o /dev/null -w "root: %{http_code}\n" https://modelseed.org/annotation/projects/aiale/
-curl -s -o /dev/null -w "data: %{http_code}\n" https://modelseed.org/annotation/projects/aiale/data/manifest.json
-curl -s -D - -o /dev/null -H "Range: bytes=0-99" https://modelseed.org/annotation/projects/aiale/db/lims.db | grep -i "206\|content-range"
+# 7. verify
+curl -s -o /dev/null -w "root: %{http_code}\n" "https://modelseed.org$BP/"
+curl -s -o /dev/null -w "data: %{http_code}\n" "https://modelseed.org$BP/data/manifest.json"
+curl -s -D - -o /dev/null -H "Range: bytes=0-99" "https://modelseed.org$BP/db/lims.db" | grep -i 206
+python3 -c "import json,urllib.request as u; print('hasBarcodes:', json.load(u.urlopen('https://modelseed.org$BP/data/mutations__experiment_TFMN1.json'))['stats'].get('hasBarcodes'))"
 ```
-Expect 200 for root + data, and "206 Partial Content" for the DB range request
-(this is what makes the deep table querying work). The page should show the
-curated views AND a Database Tables browser where you can deep-filter/sort/search
-any table, including 223k-row Mutations.
+
+Expect: root + data = 200, DB range = "206 Partial Content", and `hasBarcodes` matching
+the instance (False for public/TFMN1, True for private/full). Then repeat the block for the
+OTHER instance.
 
 ## How the deep table querying works (sql.js-httpvfs)
-The raw Database Tables browser runs REAL SQL in the browser against
-`db/lims.db` via sql.js-httpvfs, which fetches only the byte ranges (DB pages) a
-query touches over HTTP range requests. The DB ships with 14 indexes and 64KB
-pages so deep queries touch few pages. REQUIRES the host to serve the .db file
-with `Accept-Ranges: bytes` (verified on modelseed.org/annotation: returns 206).
-If a future host does NOT support range requests, the table browser breaks (it
-would try to download the whole 220MB) - check with the Range curl above.
+The raw Database Tables browser runs REAL SQL in the browser against `db/lims.db` via
+sql.js-httpvfs, which fetches only the byte ranges (DB pages) a query touches over HTTP
+range requests. REQUIRES the host to serve the .db with `Accept-Ranges: bytes` (verified
+on modelseed.org/annotation: returns 206). If a future host lacks range support, the table
+browser breaks - check with the Range curl above.
 
-## Guardrail note
-Writing into /scratch1/fliu/... is normally OFF LIMITS. It is allowed HERE only
-because Filipe explicitly created this folder, granted perms, and asked us to
-place + test the files. Do not write anywhere else in fliu's space. If perms are
-ever revoked, switch to handing fliu the `out/` folder for him to copy.
-
-## Stale-chunk note
-Next.js content-hashes its JS/CSS, so old chunks from a previous deploy are
-harmless but accumulate. Optionally `rm -rf "$DST"/*` before step 4 to keep the
-folder clean (we own the files inside, just not the folder). Always re-run the
-perms fix afterward.
+## Guardrail
+Writing into /scratch1/fliu/... is normally OFF LIMITS. It is allowed for these two
+folders ONLY because Filipe created them, granted perms, and asked us to place the files.
+Do not write anywhere else in fliu's space. If perms are revoked, hand fliu the `out/`
+folder to copy.

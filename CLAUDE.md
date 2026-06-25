@@ -58,36 +58,32 @@ npm run build:static     # -> out/  (basePath=/annotation/projects/aiale)
 ```
 Override the URL base path: `BASE_PATH=/annotation/projects/<name> npm run build:static`.
 
-## TWO static deployments (same codebase, different basePath) - 2026-06-25
-There are now TWO live static deployments built from this ONE viewer codebase,
-differing only by build-time `BASE_PATH`:
+## TWO static deployments (same codebase, DIFFERENT databases) - updated 2026-06-25
+TWO live static deployments built from this ONE viewer codebase. They differ by
+build-time `BASE_PATH` AND by WHICH DATABASE is baked in. Full procedure:
+docs/DEPLOY_RUNBOOK_LIVE.md. Design rationale: docs/ARCHITECTURE.md section 3-4.
 
-1. PUBLIC (what everyone sees): https://modelseed.org/annotation/projects/aiale/
+1. PUBLIC (publication snapshot, launches with the robotic paper):
+   https://modelseed.org/annotation/projects/aiale/
    Webroot: /scratch1/fliu/html/modelseed_annotation/projects/aiale/
-2. PRIVATE / unlisted (Dr. Henry wants a separate, less-noticeable link shared
-   only by URL): https://modelseed.org/annotation/projects/aiale-06-25-2026/
+   DB baked in: TFMN1 trimmed (data/lims_TFMN1_indexed.db, NO verAB_barcodes).
+   -> Barcode Charts tab auto-HIDDEN here (hasBarcodes is false).
+2. PRIVATE / unlisted (internal full instance; share by URL only):
+   https://modelseed.org/annotation/projects/aiale-06-25-2026/
    Webroot: /scratch1/fliu/html/modelseed_annotation/projects/aiale-06-25-2026/
-   (fliu created this folder 2026-06-25.) This is the WORKING / version-control
-   copy - the one to actually iterate on. The poplar:3457 server instance stays
-   up but is not really used day to day.
+   DB baked in: full mirror (data/lims_indexed.db). -> Barcode tab SHOWN.
 
-Build + deploy EACH with its own base path (data is shared/baked the same):
-```
-# build for a target folder
-BASE_PATH=/annotation/projects/aiale            npm run build:static  # public
-BASE_PATH=/annotation/projects/aiale-06-25-2026 npm run build:static  # private
-# then copy out/. into that folder's webroot and FIX PERMS:
-find <webroot> -type d -exec chmod 755 {} \; ; find <webroot> -type f -exec chmod 644 {} \;
-```
-RIGHT NOW both URLs are intentionally IDENTICAL (same viewer, same data).
+DATA-DRIVEN GATING IS LIVE (implemented, not future): /api/mutations stats carries
+`hasBarcodes` (verAB_barcodes exists AND non-empty). The Barcode tab renders only when
+true; a guard kicks a restored 'barcodes' tab back to Comparative when absent. Same
+codebase everywhere; the visible surface is driven by what is in each baked DB. To add a
+view to an instance, bake a DB that has its data - no code fork.
 
-FUTURE PLAN (do NOT implement yet, just know it): one viewer codebase, but each
-deployment shows different client-side views purely based on WHICH baked
-data/tables EXIST in that deployment (version-control style). E.g. a build without
-Barcode Charts, or showing only certain samples, in one version vs another. The
-viewer should auto-hide a view when its data is absent (data-driven gating), so we
-ship the same viewer everywhere and differentiate by the baked artifacts. Not
-built yet.
+Deploy EACH instance against ITS db (point the server at that DB before prebake +
+prepare-httpvfs-db.sh so the baked artifacts + httpvfs DB match). Mirror with
+`rsync -a --delete --no-perms --omit-dir-times out/ <webroot>/` then fix perms on
+CONTENTS (files 644, dirs 755; never the top dir - fliu owns it). The poplar:3457 server
+instance stays up but is not used day to day.
 
 Both fliu webroots: fliu owns them, group cels group-writable, vsetlur can write
 FILES (explicitly granted). CRITICAL: after copying, ALWAYS chmod 644 files + 755
