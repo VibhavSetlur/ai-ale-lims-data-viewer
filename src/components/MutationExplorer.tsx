@@ -4053,11 +4053,12 @@ function CopyNumberChart({
     <div className="flex flex-col lg:flex-row gap-4 h-full min-h-0">
       {/* Chart column */}
       <div className="relative flex-1 min-w-0 min-h-0 flex items-center justify-center">
-        <div className="relative w-full">
+        <div className="relative w-full h-full flex items-center justify-center">
           <svg
             ref={svgRef}
             viewBox={`0 0 ${W} ${H}`}
-            className="w-full select-none"
+            preserveAspectRatio="xMidYMid meet"
+            className="max-w-full max-h-full w-auto h-auto select-none"
             role="img"
             aria-label={`Copy number trend for ${regionLabel}`}
             onMouseMove={handleMove}
