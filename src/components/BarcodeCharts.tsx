@@ -1084,6 +1084,7 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
               pinnedCand={pinnedCand} onPickCandidate={(c) => setPinnedCand(p => p === c ? null : c)}
               onBack={() => setView('grid')}
               hoveredCand={hoveredCand}
+              onHoverCandidate={setHoveredCand}
               onAddToCompare={(k) => setComparing(prev => prev.includes(k) ? prev : prev.length >= COMPARE_MAX ? [...prev.slice(1), k] : [...prev, k])}
               isInCompare={comparing.includes(chartKey(focusedChart))}
             />
@@ -1325,8 +1326,8 @@ function Centered({ children }: { children: React.ReactNode }) {
 
 // Side-panel candidate legend used in Focus view — always-visible column
 // (the column itself scrolls if it overflows; the chart never does).
-function CandidateLegendPanel({ chart, stats, candColors, pinnedCand, onPick, topN }: {
-  chart: BarcodeChart; stats: ChartStats; candColors: Record<string, string>; pinnedCand: string | null; onPick: (c: string) => void; topN: number;
+function CandidateLegendPanel({ chart, stats, candColors, pinnedCand, onPick, onHover, topN }: {
+  chart: BarcodeChart; stats: ChartStats; candColors: Record<string, string>; pinnedCand: string | null; onPick: (c: string) => void; onHover?: (c: string | null) => void; topN: number;
 }) {
   void chart;
   const sorted = stats.candidateTotals;
@@ -1356,12 +1357,14 @@ function CandidateLegendPanel({ chart, stats, candColors, pinnedCand, onPick, to
           const barPct = maxPct ? Math.min(100, (pctNum / maxPct) * 100) : 0;
           return (
             <button key={cand} onClick={() => onPick(cand)}
+              onMouseEnter={() => onHover?.(cand)}
+              onMouseLeave={() => onHover?.(null)}
               className={cn(
                 'group w-full flex items-center gap-2 px-2.5 py-1.5 border-b border-slate-100 dark:border-gray-700/40 text-left transition-colors',
                 pin ? 'bg-blue-50 dark:bg-blue-900/30' :
                 dim ? 'opacity-40 hover:opacity-100' : 'hover:bg-slate-50 dark:hover:bg-gray-700/60'
               )}
-              title={`${cand}: ${total.toLocaleString()} reads — ${pctNum.toFixed(2)}% of bar total. Click to pin.`}
+              title={`${cand}: ${total.toLocaleString()} reads - ${pctNum.toFixed(2)}% of bar total. Hover to highlight, click to pin.`}
             >
               {/* color swatch */}
               <span className="inline-block w-3 h-3 rounded-sm shrink-0" style={{ background: candColors[cand] }} />
@@ -1415,13 +1418,14 @@ interface FocusViewProps {
   onPickCandidate: (c: string) => void;
   onBack: () => void;
   hoveredCand?: string | null;
+  onHoverCandidate?: (c: string | null) => void;
   onAddToCompare: (k: string) => void;
   isInCompare: boolean;
 }
 function FocusView(props: FocusViewProps) {
   const { charts, focusKey, setFocusKey, chart, stats, colorMode, normalize,
     aColors, bColors, candColors, candidateFilter, topN, pinnedCand, onPickCandidate,
-    onBack, hoveredCand, onAddToCompare, isInCompare } = props;
+    onBack, hoveredCand, onHoverCandidate, onAddToCompare, isInCompare } = props;
   const idx = charts.findIndex(c => chartKey(c) === focusKey);
   const prev = idx > 0 ? charts[idx - 1] : null;
   const next = idx >= 0 && idx < charts.length - 1 ? charts[idx + 1] : null;
@@ -1531,7 +1535,7 @@ function FocusView(props: FocusViewProps) {
         <div className="w-80 shrink-0 border-l border-slate-200 dark:border-gray-700 bg-white dark:bg-gray-800 flex flex-col overflow-hidden">
           <CandidateLegendPanel
             chart={chart} stats={stats} candColors={candColors}
-            pinnedCand={pinnedCand} onPick={onPickCandidate} topN={topN}
+            pinnedCand={pinnedCand} onPick={onPickCandidate} onHover={onHoverCandidate} topN={topN}
           />
         </div>
       </div>

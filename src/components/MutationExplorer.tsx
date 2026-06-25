@@ -792,6 +792,8 @@ function SampleSelectionPanel({
   const [hydrated, setHydrated] = useState(false);
   // The sample whose growth-curve sparkline was clicked; drives the modal.
   const [growthCurveSample, setGrowthCurveSample] = useState<MutationSample | null>(null);
+  // The sample whose NAME was clicked; drives the rich sample-detail modal.
+  const [detailSample, setDetailSample] = useState<MutationSample | null>(null);
 
   // Rehydrate filter + collapse state from localStorage.
   useEffect(() => {
@@ -1209,7 +1211,16 @@ function SampleSelectionPanel({
                         <td className="px-2 py-1 align-middle">
                           {isSel ? <CheckSquare className="w-4 h-4 text-[var(--accent-600)]" /> : <Square className="w-4 h-4 text-[var(--text-faint)]" />}
                         </td>
-                        <td className="px-2 py-1 lims-id text-[var(--text)]">{s.name}</td>
+                        <td className="px-2 py-1 lims-id text-[var(--text)]">
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); setDetailSample(s); }}
+                            className="text-left hover:text-[var(--accent-600)] hover:underline decoration-dotted underline-offset-2 cursor-pointer"
+                            title="Open sample detail"
+                          >
+                            {s.name}
+                          </button>
+                        </td>
                         <td className="px-2 py-1 text-[var(--text-soft)]">{s.experiment}</td>
                         <td className="px-2 py-1 text-[var(--text-soft)]">{s.replicate ?? ''}</td>
                         <td className="px-2 py-1 text-[var(--text-soft)]">{s.donor_dna ?? ''}</td>
@@ -1240,6 +1251,14 @@ function SampleSelectionPanel({
           sample={growthCurveSample}
           peers={growthPeers}
           onClose={() => setGrowthCurveSample(null)}
+        />
+      )}
+      {detailSample && (
+        <SampleDetailModal
+          sample={detailSample}
+          allMutationCount={mutationCountBySample.get(detailSample.id) ?? 0}
+          onClose={() => setDetailSample(null)}
+          onOpenGrowth={(s) => setGrowthCurveSample(s)}
         />
       )}
     </div>
@@ -1283,7 +1302,21 @@ function ComparativePanel({
   const [detailMutation, setDetailMutation] = useState<MutationRow | null>(null);
   // The sample whose growth-curve sparkline was clicked; drives the growth modal.
   const [growthCurveSample, setGrowthCurveSample] = useState<MutationSample | null>(null);
+  // The sample whose column-header name was clicked; drives the sample-detail modal.
+  const [detailSample, setDetailSample] = useState<MutationSample | null>(null);
   const [filtersHydrated, setFiltersHydrated] = useState(false);
+
+  // Distinct mutation-call count per sample (>0 value), matching the count the
+  // sample-detail modal shows. Single pass over the mutation rows.
+  const mutationCountBySample = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const row of mutations) {
+      for (const [sid, v] of Object.entries(row.values)) {
+        if (typeof v === 'number' && v > 0) m.set(sid, (m.get(sid) ?? 0) + 1);
+      }
+    }
+    return m;
+  }, [mutations]);
 
   // Rehydrate filters from localStorage on first mount. Once the user has
   // touched the filters their persisted state takes precedence over defaults.
@@ -1922,7 +1955,12 @@ function ComparativePanel({
               {visibleSamples.map(s => (
                 <th key={s.id} className="border-b border-l border-slate-200 dark:border-gray-700 px-1.5 py-1 whitespace-nowrap min-w-[88px] max-w-[160px] overflow-hidden bg-white dark:bg-gray-800">
                   <div className="flex items-start justify-between gap-1">
-                    <div className="text-[11px] font-mono text-slate-800 dark:text-gray-100 leading-tight truncate" title={s.name}>{s.name}</div>
+                    <button
+                      type="button"
+                      onClick={() => setDetailSample(s)}
+                      className="text-[11px] font-mono text-slate-800 dark:text-gray-100 leading-tight truncate text-left hover:text-blue-600 dark:hover:text-blue-400 hover:underline decoration-dotted underline-offset-2 cursor-pointer"
+                      title={`${s.name}\nOpen sample detail`}
+                    >{s.name}</button>
                     <button
                       onClick={() => { const next = new Set(selected); next.delete(s.id); setSelected(next); }}
                       className="text-slate-300 dark:text-gray-600 hover:text-red-500"
@@ -2102,6 +2140,14 @@ function ComparativePanel({
           onClose={() => setGrowthCurveSample(null)}
         />
       )}
+      {detailSample && (
+        <SampleDetailModal
+          sample={detailSample}
+          allMutationCount={mutationCountBySample.get(detailSample.id) ?? 0}
+          onClose={() => setDetailSample(null)}
+          onOpenGrowth={(s) => setGrowthCurveSample(s)}
+        />
+      )}
     </div>
   );
 }
@@ -2241,6 +2287,14 @@ function GrowthCurveModal({
 }) {
   const [logScale, setLogScale] = useState(false);
   const [showOverlay, setShowOverlay] = useState(true);
+  // Index of the focus-curve datum currently under the crosshair / hovered dot.
+  // A single index keeps interactivity cheap (one state update per move).
+  const [hoverIndex, setHoverIndex] = useState<number | null>(null);
+  // Peer the user is hovering in the legend or on the canvas: that curve is
+  // raised to full opacity + thickened while the others dim.
+  const [hoveredPeerId, setHoveredPeerId] = useState<string | null>(null);
+  // Peer toggled (clicked) to stay emphasized even without an active hover.
+  const [focusedPeerId, setFocusedPeerId] = useState<string | null>(null);
 
   // Close on Esc.
   useEffect(() => {
@@ -2348,11 +2402,19 @@ function GrowthCurveModal({
 
     const capY = metrics.maxOD !== null ? sy(metrics.maxOD) : null;
 
+    // Per-point screen coords for the focus curve (drives hover dots + crosshair
+    // snapping). Computed once here so mouse-move handling stays allocation-free.
+    const focusPts = data!.map(p => ({ t: p.t, od: p.od, x: sx(p.t), y: sy(p.od) }));
+
     return {
       W, H, padL, padR, padT, padB, innerW, innerH,
       xMin, xMax, yMax, sx, sy, xTicks, yTicks,
-      focusPath, areaPath, expSeg, capY,
-      peerPaths: showOverlay ? shownPeers.map(p => linePath(p.growth_curve!)) : [],
+      focusPath, areaPath, expSeg, capY, focusPts,
+      // Pair each overlay path with its peer id + hue so hover/focus emphasis can
+      // target an individual curve.
+      peerPaths: showOverlay
+        ? shownPeers.map((p, i) => ({ id: p.id, name: p.name, d: linePath(p.growth_curve!), hue: PEER_HUES[i % PEER_HUES.length] }))
+        : [],
     };
   }, [data, hasCurve, logScale, showOverlay, shownPeers, metrics]);
 
@@ -2364,6 +2426,30 @@ function GrowthCurveModal({
     { label: 'transfer', value: sample.transfer },
     { label: 'donor DNA', value: sample.donor_dna },
   ];
+
+  // Map a cursor X (in SVG user units) to the nearest focus datum index. The
+  // invisible plot-area <rect> reports cursor position relative to the SVG, so we
+  // search focusPts by screen X (which already encodes the active linear/log
+  // scale, so this works identically in both modes).
+  const handlePlotMove = (e: React.MouseEvent<SVGRectElement>) => {
+    if (!chart || chart.focusPts.length === 0) return;
+    const svg = e.currentTarget.ownerSVGElement;
+    if (!svg) return;
+    const rect = svg.getBoundingClientRect();
+    // Account for the SVG being scaled by CSS (max-w-full h-auto) to user units.
+    const scaleX = chart.W / rect.width;
+    const cursorX = (e.clientX - rect.left) * scaleX;
+    let best = 0;
+    let bestDist = Infinity;
+    for (let i = 0; i < chart.focusPts.length; i++) {
+      const dx = Math.abs(chart.focusPts[i].x - cursorX);
+      if (dx < bestDist) { bestDist = dx; best = i; }
+    }
+    setHoverIndex(prev => (prev === best ? prev : best));
+  };
+
+  const hoverPt = chart && hoverIndex !== null ? chart.focusPts[hoverIndex] ?? null : null;
+
 
   const metricCards: { label: string; value: string; caption: string }[] = [
     { label: 'Max OD600 (K)', value: fmtMetric(metrics.maxOD, 3), caption: 'observed carrying capacity (curve max)' },
@@ -2460,7 +2546,8 @@ function GrowthCurveModal({
                   </span>
                 </div>
 
-                <svg width={chart.W} height={chart.H} className="block max-w-full h-auto" role="img" aria-label={`Growth curve for ${sample.name}`}>
+                <div className="relative inline-block max-w-full">
+                <svg width={chart.W} height={chart.H} className="block max-w-full h-auto select-none" role="img" aria-label={`Growth curve for ${sample.name}`}>
                   {/* Gridlines + Y ticks */}
                   {chart.yTicks.map((v, i) => {
                     const y = chart.sy(v);
@@ -2497,10 +2584,29 @@ function GrowthCurveModal({
                     </g>
                   )}
 
-                  {/* Overlay peer curves (thin, faded, distinct hues) */}
-                  {chart.peerPaths.map((d, i) => (
-                    <path key={`peer${i}`} d={d} fill="none" stroke={PEER_HUES[i % PEER_HUES.length]} strokeWidth="1" opacity="0.45" />
-                  ))}
+                  {/* Overlay peer curves (thin, faded, distinct hues). The
+                      hovered/focused peer is raised to full opacity + thickened;
+                      the rest dim so the emphasized curve stands out. */}
+                  {chart.peerPaths.map((pp) => {
+                    const emphasized = pp.id === hoveredPeerId || pp.id === focusedPeerId;
+                    const anyEmphasis = hoveredPeerId !== null || focusedPeerId !== null;
+                    return (
+                      <path
+                        key={`peer${pp.id}`}
+                        d={pp.d}
+                        fill="none"
+                        stroke={pp.hue}
+                        strokeWidth={emphasized ? 2.4 : 1}
+                        opacity={emphasized ? 0.95 : anyEmphasis ? 0.15 : 0.45}
+                        style={{ cursor: 'pointer', transition: 'opacity 120ms, stroke-width 120ms' }}
+                        onMouseEnter={() => setHoveredPeerId(pp.id)}
+                        onMouseLeave={() => setHoveredPeerId(prev => (prev === pp.id ? null : prev))}
+                        onClick={() => setFocusedPeerId(prev => (prev === pp.id ? null : pp.id))}
+                      >
+                        <title>{pp.name}</title>
+                      </path>
+                    );
+                  })}
 
                   {/* Focus area + line */}
                   {!showOverlay || overlayPeers.length === 0 ? (
@@ -2513,13 +2619,67 @@ function GrowthCurveModal({
                     <path d={chart.expSeg} fill="none" stroke="#ea580c" strokeWidth="3.5" opacity="0.85" />
                   )}
 
-                  {/* Focus data points with hover tooltips */}
-                  {data!.map((p, i) => (
-                    <circle key={i} cx={chart.sx(p.t)} cy={chart.sy(p.od)} r="2.6" fill="var(--data-grow)" stroke="white" strokeWidth="0.6">
-                      <title>t = {p.t.toFixed(2)} h, OD600 = {p.od.toFixed(3)}</title>
-                    </circle>
-                  ))}
+                  {/* Hover crosshair (vertical line at the snapped time) */}
+                  {hoverPt && (
+                    <line
+                      x1={hoverPt.x} y1={chart.padT} x2={hoverPt.x} y2={chart.padT + chart.innerH}
+                      stroke="var(--data-grow)" strokeWidth="1" strokeDasharray="3 3" opacity="0.7"
+                      pointerEvents="none"
+                    />
+                  )}
+
+                  {/* Focus data points. The hovered point enlarges with a ring;
+                      each is individually hoverable and updates the same index. */}
+                  {chart.focusPts.map((p, i) => {
+                    const active = hoverIndex === i;
+                    return (
+                      <g key={i}>
+                        {active && (
+                          <circle cx={p.x} cy={p.y} r="6" fill="var(--data-grow)" opacity="0.2" pointerEvents="none" />
+                        )}
+                        <circle
+                          cx={p.x} cy={p.y} r={active ? 4 : 2.6}
+                          fill="var(--data-grow)" stroke="white" strokeWidth={active ? 1 : 0.6}
+                          style={{ cursor: 'pointer' }}
+                          onMouseEnter={() => setHoverIndex(i)}
+                        >
+                          <title>t = {p.t.toFixed(2)} h, OD600 = {p.od.toFixed(3)}</title>
+                        </circle>
+                      </g>
+                    );
+                  })}
+
+                  {/* Invisible full-plot overlay drives the crosshair + nearest-
+                      point tooltip on mouse move. Painted last so it sits on top. */}
+                  <rect
+                    x={chart.padL} y={chart.padT} width={chart.innerW} height={chart.innerH}
+                    fill="transparent"
+                    style={{ cursor: 'crosshair' }}
+                    onMouseMove={handlePlotMove}
+                    onMouseLeave={() => setHoverIndex(null)}
+                  />
                 </svg>
+
+                {/* Floating tooltip near the hovered point (HTML, positioned over
+                    the SVG via the relative wrapper; coords scaled to rendered px). */}
+                {hoverPt && (
+                  <div
+                    className="pointer-events-none absolute z-10 rounded border border-[var(--border)] bg-[var(--surface)] px-2 py-1 shadow-lg text-[10.5px] leading-tight"
+                    style={{
+                      left: `${(hoverPt.x / chart.W) * 100}%`,
+                      top: `${(hoverPt.y / chart.H) * 100}%`,
+                      transform: 'translate(-50%, -120%)',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    <div className="font-mono text-[var(--text)]">t = {hoverPt.t.toFixed(2)} h</div>
+                    <div className="font-mono text-[var(--data-grow)]">OD600 = {hoverPt.od.toFixed(3)}</div>
+                    {logScale && hoverPt.od > 0 && (
+                      <div className="font-mono text-[var(--text-faint)]">ln(OD) = {Math.log(hoverPt.od).toFixed(3)}</div>
+                    )}
+                  </div>
+                )}
+                </div>
 
                 {/* Legend */}
                 <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-[var(--text-soft)]">
@@ -2554,18 +2714,215 @@ function GrowthCurveModal({
           {overlayPeers.length > 0 && (
             <ModalSection title="Compare with group" hint={`${overlayPeers.length} peer curve${overlayPeers.length === 1 ? '' : 's'} share this sample's experiment, replicate and donor DNA`}>
               <div className="flex flex-wrap gap-x-4 gap-y-1">
-                {shownPeers.map((p, i) => (
-                  <span key={p.id} className="inline-flex items-center gap-1.5 text-[10.5px]" title={p.name}>
-                    <span className="inline-block w-3 h-[2px]" style={{ background: PEER_HUES[i % PEER_HUES.length] }} />
-                    <span className="font-mono text-[var(--text-soft)] truncate max-w-[160px]">{p.name}</span>
-                  </span>
-                ))}
+                {shownPeers.map((p, i) => {
+                  const emphasized = p.id === hoveredPeerId || p.id === focusedPeerId;
+                  const isFocused = p.id === focusedPeerId;
+                  return (
+                    <button
+                      key={p.id}
+                      type="button"
+                      className={cn(
+                        'inline-flex items-center gap-1.5 text-[10.5px] rounded px-1 py-0.5 transition-colors',
+                        emphasized ? 'bg-[var(--surface-3)]' : 'hover:bg-[var(--surface-2)]',
+                      )}
+                      title={`${p.name}\nHover to emphasize, click to ${isFocused ? 'release' : 'pin'} this curve`}
+                      onMouseEnter={() => setHoveredPeerId(p.id)}
+                      onMouseLeave={() => setHoveredPeerId(prev => (prev === p.id ? null : prev))}
+                      onClick={() => setFocusedPeerId(prev => (prev === p.id ? null : p.id))}
+                    >
+                      <span
+                        className="inline-block w-3"
+                        style={{ background: PEER_HUES[i % PEER_HUES.length], height: emphasized ? 3 : 2 }}
+                      />
+                      <span className={cn('font-mono truncate max-w-[160px]', emphasized ? 'text-[var(--text)] font-semibold' : 'text-[var(--text-soft)]')}>{p.name}</span>
+                      {isFocused && <span className="text-[9px] text-[var(--data-grow)]">pinned</span>}
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="mt-1.5 text-[10px] text-[var(--text-faint)]">
+                Hover a peer (legend or curve) to emphasize it; click to pin it.
               </div>
               {hiddenPeerCount > 0 && (
-                <div className="mt-1.5 text-[10px] text-[var(--text-faint)]">{hiddenPeerCount} more peer curve{hiddenPeerCount === 1 ? '' : 's'} hidden (capped at {PEER_CAP} for legibility).</div>
+                <div className="mt-1 text-[10px] text-[var(--text-faint)]">{hiddenPeerCount} more peer curve{hiddenPeerCount === 1 ? '' : 's'} hidden (capped at {PEER_CAP} for legibility).</div>
               )}
             </ModalSection>
           )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ---- Sample detail modal ---------------------------------------------------
+   Rich, interactive popup opened by clicking a sample NAME (the row checkbox /
+   rest of the row still toggles selection). Mirrors the MutationDetailModal /
+   GrowthCurveModal pattern (fixed inset-0 backdrop, max-w-3xl scrollable card,
+   close on backdrop / X / Esc). Shows: header chips, a metadata grid, an
+   embedded clickable growth sparkline with the key growth metrics, and the
+   sample's mutation-call count. Clicking the sparkline chains to the full
+   GrowthCurveModal via onOpenGrowth. Self-contained; metrics memoized. */
+function SampleDetailModal({
+  sample, allMutationCount, onClose, onOpenGrowth,
+}: {
+  sample: MutationSample;
+  allMutationCount: number;
+  onClose: () => void;
+  onOpenGrowth: (s: MutationSample) => void;
+}) {
+  // Close on Esc.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  const data = sample.growth_curve;
+  const hasCurve = !!(data && data.length >= 2);
+  const metrics = useMemo(() => computeGrowthMetrics(data), [data]);
+
+  // Header chips: only render the ones present. Colors follow the established
+  // semantics (emerald growth context lives in the chart; sample facets are
+  // neutral slate, with strain/condition/donor given subtle accents).
+  const chips: { label: string; value?: string | number; cls?: string }[] = [
+    { label: 'experiment', value: sample.experiment, cls: 'bg-blue-50 dark:bg-blue-900/30 border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-300' },
+    { label: 'strain', value: sample.strain, cls: 'bg-violet-50 dark:bg-violet-900/30 border-violet-200 dark:border-violet-800 text-violet-700 dark:text-violet-300' },
+    { label: 'condition', value: sample.condition, cls: 'bg-amber-50 dark:bg-amber-900/30 border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-300' },
+    { label: 'replicate', value: sample.replicate },
+    { label: 'transfer', value: sample.transfer },
+    { label: 'donor DNA', value: sample.donor_dna },
+    { label: 'selection', value: sample.selection_note },
+  ];
+
+  // Metadata grid: every documented field, "n/a" when absent.
+  const naOr = (v: string | number | undefined | null) =>
+    v === undefined || v === null || v === '' ? 'n/a' : String(v);
+  const metaRows: { label: string; value: string }[] = [
+    { label: 'Experiment', value: naOr(sample.experiment) },
+    { label: 'Experiment type', value: naOr(sample.experiment_type) },
+    { label: 'Strain', value: naOr(sample.strain) },
+    { label: 'Condition', value: naOr(sample.condition) },
+    { label: 'Donor DNA', value: naOr(sample.donor_dna) },
+    { label: 'Replicate', value: naOr(sample.replicate) },
+    { label: 'Transfer', value: naOr(sample.transfer) },
+    { label: 'Selection note', value: naOr(sample.selection_note) },
+  ];
+
+  const metricCards: { label: string; value: string }[] = [
+    { label: 'Max OD (K)', value: fmtMetric(metrics.maxOD, 3) },
+    { label: 'Growth rate mu', value: fmtMetric(metrics.muMax, 3, ' /h') },
+    { label: 'Doubling time', value: fmtMetric(metrics.doublingTimeH, 2, ' h') },
+    { label: 'Lag time', value: fmtMetric(metrics.lagTimeH, 2, ' h') },
+    { label: 'AUC', value: fmtMetric(metrics.aucod, 2, ' OD*h') },
+  ];
+
+  // Clicking the embedded sparkline chains to the full growth modal. Simplest:
+  // close this modal, then open the growth one (the parent wires onOpenGrowth to
+  // setGrowthCurveSample).
+  const openGrowth = () => { onClose(); onOpenGrowth(sample); };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+    >
+      <div
+        className="bg-[var(--surface)] text-[var(--text)] border border-[var(--border)] rounded-lg shadow-2xl w-full max-w-3xl max-h-[85vh] overflow-y-auto scroll-smooth"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header (sticky) */}
+        <div className="sticky top-0 z-10 bg-[var(--surface)] border-b border-[var(--border)] px-5 py-3 flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <FlaskConical className="w-4 h-4 text-[var(--accent-600)] shrink-0" />
+              <span className="font-mono text-[18px] font-semibold text-[var(--text)] break-all">{sample.name}</span>
+            </div>
+            <div className="mt-1.5 flex flex-wrap gap-1.5">
+              {chips.filter(c => c.value !== undefined && c.value !== null && c.value !== '').map(c => (
+                <span key={c.label} className={cn('text-[10px] px-1.5 py-0.5 rounded border', c.cls ?? 'bg-[var(--surface-3)] border-[var(--border)] text-[var(--text-soft)]')}>
+                  <span className="uppercase tracking-wide mr-1 opacity-70">{c.label}</span>
+                  <span className="font-mono">{String(c.value)}</span>
+                </span>
+              ))}
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="shrink-0 p-1 rounded hover:bg-[var(--surface-3)] text-[var(--text-soft)] hover:text-[var(--text)]"
+            title="Close (Esc)"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <div className="px-5 py-4 space-y-4">
+          {/* Metadata grid */}
+          <section>
+            <div className="flex items-baseline gap-2 mb-2">
+              <h4 className="text-[12px] font-semibold uppercase tracking-wider text-[var(--text-soft)]">Sample metadata</h4>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              {metaRows.map(r => (
+                <div key={r.label} className="rounded border border-[var(--border)] bg-[var(--surface-2)] px-2.5 py-1.5">
+                  <div className="text-[9.5px] uppercase tracking-wide text-[var(--text-faint)]">{r.label}</div>
+                  <div className={cn('font-mono text-[12px] break-words', r.value === 'n/a' ? 'text-[var(--text-faint)] italic' : 'text-[var(--text)]')}>{r.value}</div>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          {/* Growth */}
+          <ModalSection title="Growth" hint={hasCurve ? 'OD600 vs time (h) - click chart to expand' : 'no numeric series in this dataset'}>
+            {hasCurve ? (
+              <div className="flex flex-col sm:flex-row sm:items-start gap-4">
+                <div className="shrink-0">
+                  <GrowthCurveSparkline data={data} odSources={sample.od_sources} width={320} height={120} sample={sample} onExpand={() => openGrowth()} />
+                  <div className="text-[10px] text-[var(--text-faint)] mt-1">Click to open the full interactive growth curve.</div>
+                </div>
+                <div className="grid grid-cols-2 gap-2 flex-1 min-w-0">
+                  {metricCards.map(c => (
+                    <div key={c.label} className="rounded border border-[var(--border)] bg-[var(--surface-2)] px-2.5 py-1.5">
+                      <div className="text-[9.5px] uppercase tracking-wide text-[var(--text-faint)]">{c.label}</div>
+                      <div className="font-mono text-[13px] font-semibold text-[var(--text)] tabular-nums">{c.value}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div className="text-[12px] text-[var(--text-soft)] space-y-2">
+                <div className="italic text-[var(--text-faint)]">numeric series not in this dataset</div>
+                {sample.od_sources && sample.od_sources.length > 0 ? (
+                  <div className="space-y-1">
+                    <div className="text-[var(--text-soft)]">OD measurement was tracked upstream in:</div>
+                    <ul className="font-mono text-[11px] space-y-0.5">
+                      {sample.od_sources.map((s, i) => (
+                        <li key={i} className="text-[var(--text)]">
+                          <span className="text-amber-700 dark:text-amber-300">{s.type.replace('OD_series_', '')}</span>: {s.source}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : (
+                  <div className="text-[var(--text-faint)]">No OD source reference available either.</div>
+                )}
+              </div>
+            )}
+          </ModalSection>
+
+          {/* Mutation load */}
+          <ModalSection title="Mutation load" hint="distinct mutation calls detected in this sample">
+            <div className="flex items-center gap-3">
+              <span className={cn('inline-flex items-center justify-center min-w-[2.5rem] px-2 py-1 rounded font-mono text-[18px] font-semibold',
+                allMutationCount > 0 ? 'lims-pill-mut' : 'bg-[var(--surface-3)] text-[var(--text-faint)]')}>
+                {allMutationCount}
+              </span>
+              <span className="text-[12px] text-[var(--text-soft)]">
+                {allMutationCount === 1 ? '1 mutation call in this sample' : `${allMutationCount} mutation calls in this sample`}
+              </span>
+            </div>
+          </ModalSection>
         </div>
       </div>
     </div>
