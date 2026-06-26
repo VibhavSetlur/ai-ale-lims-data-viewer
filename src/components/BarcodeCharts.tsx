@@ -56,6 +56,28 @@ function parseCandidate(label: string): { a: string; b: string } | null {
   return m ? { a: m[1], b: m[2] } : null;
 }
 
+// Stable per-CANDIDATE color: the color of a subunit combination (e.g. A1-B1) is
+// derived from the A and B numbers themselves, NOT from the candidate's rank in
+// whatever set happens to be loaded. This guarantees A1-B1 is the SAME color in
+// every chart, every sample, every experiment, so a reviewer can track one
+// combination by color across the whole dataset (requested by Nidhi 2026-06).
+// We fold (a,b) into a single ordinal with a large odd multiplier on the A index
+// so the golden-angle rotation spreads neighbouring combinations far apart in hue.
+function colorForCandidate(label: string): string {
+  const p = parseCandidate(label);
+  if (!p) {
+    // Fallback for non A#-B# labels (e.g. "__OTHER__"): stable hash of the string.
+    let h = 0;
+    for (let i = 0; i < label.length; i++) h = (h * 31 + label.charCodeAt(i)) | 0;
+    return `hsl(${Math.abs(h) % 360} 65% 50%)`;
+  }
+  const a = parseInt(p.a.slice(1), 10) || 0;
+  const b = parseInt(p.b.slice(1), 10) || 0;
+  const ordinal = a * 97 + b; // 97 = large prime so A-rows do not collide in hue
+  const hue = (ordinal * GOLDEN) % 360;
+  return `hsl(${hue} 65% 50%)`;
+}
+
 function chartKey(c: BarcodeChart): string {
   return `${c.experiment}/${c.library}/${c.well}/r${c.replicate}`;
 }
@@ -521,9 +543,13 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
     const aMap: Record<string, string> = {};
     const bMap: Record<string, string> = {};
     const cMap: Record<string, string> = {};
-    aArr.forEach((k, i) => { aMap[k] = colorFor(i, aArr.length); });
-    bArr.forEach((k, i) => { bMap[k] = colorFor(i, bArr.length); });
-    cArr.forEach((k, i) => { cMap[k] = colorFor(i, cArr.length); });
+    // Colors are derived from the subunit identity (the A number, the B number, or
+    // the A-B combination) rather than from list position, so the same subunit or
+    // combination keeps ONE color across every chart/sample/experiment. This lets a
+    // reviewer track e.g. A1-B1 by its color anywhere (Nidhi 2026-06).
+    aArr.forEach(k => { aMap[k] = colorFor((parseInt(k.slice(1), 10) || 0) * 13, 0); });
+    bArr.forEach(k => { bMap[k] = colorFor((parseInt(k.slice(1), 10) || 0) * 13, 0); });
+    cArr.forEach(k => { cMap[k] = colorForCandidate(k); });
     return { aColors: aMap, bColors: bMap, candColors: cMap, allCandidates: cArr };
   }, [data]);
 
