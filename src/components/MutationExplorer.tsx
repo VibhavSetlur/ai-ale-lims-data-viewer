@@ -2030,21 +2030,22 @@ function ComparativePanel({
               </th>
               {visibleSamples.map(s => (
                 <th key={s.id} className="border-b-2 border-l border-slate-200 dark:border-gray-700 px-1 py-1 bg-white dark:bg-gray-800">
-                  {!compactHeaders && (
-                    <div className="flex justify-center">
-                      <GrowthCurveSparkline
-                        data={s.growth_curve}
-                        odSources={s.od_sources}
-                        width={84}
-                        height={36}
-                        yMaxOverride={curveScale.yMax}
-                        xMinOverride={curveScale.xMin}
-                        xMaxOverride={curveScale.xMax}
-                        sample={s}
-                        onExpand={setGrowthCurveSample}
-                      />
-                    </div>
-                  )}
+                  {/* Growth curves stay visible in compact mode; only the text
+                      metadata rows (experiment/condition/strain/DNA/replicate) are
+                      collapsed to reclaim vertical space. */}
+                  <div className="flex justify-center">
+                    <GrowthCurveSparkline
+                      data={s.growth_curve}
+                      odSources={s.od_sources}
+                      width={84}
+                      height={36}
+                      yMaxOverride={curveScale.yMax}
+                      xMinOverride={curveScale.xMin}
+                      xMaxOverride={curveScale.xMax}
+                      sample={s}
+                      onExpand={setGrowthCurveSample}
+                    />
+                  </div>
                 </th>
               ))}
             </tr>

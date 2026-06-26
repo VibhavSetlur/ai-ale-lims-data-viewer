@@ -303,6 +303,7 @@ interface ChartProps {
   chart: BarcodeChart;
   stats: ChartStats;
   colorMode: ColorMode;
+  splitAB: boolean;
   normalize: Normalize;
   aColors: Record<string, string>;
   bColors: Record<string, string>;
@@ -319,7 +320,7 @@ interface ChartProps {
 }
 
 function ChartCard({
-  chart, stats, colorMode, normalize, aColors, bColors, candColors,
+  chart, stats, colorMode, splitAB, normalize, aColors, bColors, candColors,
   selectedCands, isolateSelected, topN, hoverCand, height, onPickCandidate,
 }: ChartProps) {
   // Hover tooltip state — managed in React so we get instant feedback
@@ -487,9 +488,125 @@ function ChartCard({
           {chart.transfers.map((t, ti) => {
             const total = totals[ti];
             const cx = PAD_L + xStep * ti + xStep / 2;
+            const baseY = PAD_T + innerH;
+
+            // Build the three stackings for this transfer:
+            //  - AB:   full A-B candidates (candColors)
+            //  - A:    reads aggregated by VarA subunit (aColors)
+            //  - B:    reads aggregated by VarB subunit (bColors)
+            // VarA/VarB are the SAME total reads, just grouped differently, so all
+            // three sub-bars are the same height and directly comparable.
+            const abStack: { key: string; label: string; v: number; color: string; cand?: string }[] =
+              visibleCands.map(c => ({ key: c, label: c, v: chart.candidates[c]?.[ti] || 0, color: candColors[c] || '#888', cand: c }));
+            if (otherCounts && otherCounts[ti] > 0) abStack.push({ key: '__OTHER__', label: 'Other', v: otherCounts[ti], color: '#94a3b8' });
+
+            // Aggregate by subunit across ALL candidates in the chart (not just the
+            // visible top-N) so the A and B breakdowns are complete and honest.
+            const aAgg = new Map<string, number>();
+            const bAgg = new Map<string, number>();
+            for (const [cand, counts] of Object.entries(chart.candidates)) {
+              const val = counts[ti] || 0;
+              if (!val) continue;
+              const p = parseCandidate(cand);
+              if (!p) continue;
+              aAgg.set(p.a, (aAgg.get(p.a) || 0) + val);
+              bAgg.set(p.b, (bAgg.get(p.b) || 0) + val);
+            }
+            const aStack = [...aAgg.entries()].sort((x, y) => y[1] - x[1])
+              .map(([a, v]) => ({ key: `A:${a}`, label: a, v, color: aColors[a] || '#888' }));
+            const bStack = [...bAgg.entries()].sort((x, y) => y[1] - x[1])
+              .map(([b, v]) => ({ key: `B:${b}`, label: b, v, color: bColors[b] || '#888' }));
+
+            // Renders one stacked sub-bar. subX/subW position it within the slot.
+            const renderSubBar = (
+              segs: { key: string; label: string; v: number; color: string; cand?: string }[],
+              subX: number, subW: number, groupLabel: string,
+            ) => {
+              let acc = 0;
+              return segs.map(seg => {
+                if (!seg.v) return null;
+                const norm = normalize === 'fraction' ? (total ? seg.v / total : 0) : seg.v;
+                const h = (norm / maxY) * innerH;
+                const y = baseY - acc - h;
+                acc += h;
+                const isCandSeg = !!seg.cand && seg.cand !== '__OTHER__';
+                const selected = isCandSeg && hasSelection && isSelected(seg.cand!);
+                // In split mode, emphasis only applies to the A-B sub-bar (the only
+                // one whose segments map 1:1 to selectable candidates).
+                const dim = isCandSeg && isDimmed(seg.cand!);
+                const pctNum = total ? (100 * seg.v / total) : 0;
+                const pctStrFine = total ? `${pctNum.toFixed(1)}%` : '';
+                const showCount = h >= LABEL_MIN_H && subW >= 22;
+                const showName = h >= LABEL_NAME_MIN_H && subW >= 30;
+                const midY = y + h / 2;
+                const subCx = subX + subW / 2;
+                const inlineLabel = showName ? `${seg.label} · ${total ? `${pctNum.toFixed(0)}%` : seg.v}` : `${total ? `${pctNum.toFixed(0)}%` : seg.v}`;
+                const tipText = `${groupLabel}: ${seg.label}\nT${t}: ${seg.v}${total ? `\n${pctStrFine} of bar total` : ''}\nbar total: ${total}`;
+                return (
+                  <g key={seg.key}>
+                    <rect
+                      x={subX} y={y} width={subW} height={Math.max(0.5, h)}
+                      fill={seg.color}
+                      stroke={selected ? '#0f172a' : 'rgba(255,255,255,0.4)'}
+                      strokeWidth={selected ? 1.5 : 0.4}
+                      opacity={dim ? 0.16 : 1}
+                      style={{ cursor: isCandSeg && onPickCandidate ? 'pointer' : 'default' }}
+                      onClick={() => isCandSeg && onPickCandidate?.(seg.cand!)}
+                      onMouseEnter={(e) => {
+                        const svg = (e.currentTarget as SVGRectElement).ownerSVGElement;
+                        const rect = svg?.getBoundingClientRect();
+                        const px = rect ? e.clientX - rect.left : 0;
+                        const py = rect ? e.clientY - rect.top : 0;
+                        setHover({ x: px, y: py, text: tipText, flipX: rect ? px > rect.width - 200 : false, flipY: py < 56 });
+                      }}
+                      onMouseLeave={() => setHover(null)}
+                    >
+                      <title>{tipText.replace(/\n/g, ' · ')}</title>
+                    </rect>
+                    {showCount && !dim && (
+                      <text x={subCx} y={midY + 3.5} textAnchor="middle"
+                        fontSize={showName ? 10.5 : 9.5} className="pointer-events-none"
+                        style={{ fill: 'white', paintOrder: 'stroke', stroke: 'rgba(0,0,0,0.6)', strokeWidth: 2.4, strokeLinejoin: 'round', fontWeight: 700 }}>
+                        {inlineLabel}
+                      </text>
+                    )}
+                  </g>
+                );
+              });
+            };
+
+            if (splitAB) {
+              // Three side-by-side sub-bars within the slot: A-B | VarA | VarB.
+              const gap = 3;
+              const groupW = Math.min(BAR_CAP * 1.6, slotW * 0.86);
+              const subW = (groupW - gap * 2) / 3;
+              const gx = cx - groupW / 2;
+              return (
+                <g key={ti}>
+                  <text x={cx} y={H - PAD_B + 14} textAnchor="middle" fontSize={11} className="fill-slate-600 dark:fill-gray-300 tabular-nums">T{t}</text>
+                  {renderSubBar(abStack, gx, subW, 'A-B')}
+                  {renderSubBar(aStack, gx + subW + gap, subW, 'VarA')}
+                  {renderSubBar(bStack, gx + (subW + gap) * 2, subW, 'VarB')}
+                  {/* sub-bar group labels under each */}
+                  {[['A-B', gx], ['VarA', gx + subW + gap], ['VarB', gx + (subW + gap) * 2]].map(([lab, sx]) => (
+                    <text key={lab as string} x={(sx as number) + subW / 2} y={H - PAD_B + 24} textAnchor="middle" fontSize={8} className="fill-slate-400 dark:fill-gray-500">{lab}</text>
+                  ))}
+                  {total > 0 && (() => {
+                    // All three sub-bars are the same total height; label sits just above.
+                    const barH = ((normalize === 'fraction' ? 1 : total) / maxY) * innerH;
+                    return (
+                      <text x={cx} y={baseY - barH - 5} textAnchor="middle" fontSize={11} className="fill-slate-700 dark:fill-gray-200 tabular-nums" fontWeight={600}>
+                        {normalize === 'fraction' ? '100%' : total.toLocaleString()}
+                      </text>
+                    );
+                  })()}
+                </g>
+              );
+            }
+
+            // Single combined bar (default).
             const x = cx - barW / 2;
             let acc = 0;
-            const baseY = PAD_T + innerH;
             const stack: { cand: string; v: number }[] = visibleCands.map(c => ({ cand: c, v: chart.candidates[c]?.[ti] || 0 }));
             if (otherCounts && otherCounts[ti] > 0) stack.push({ cand: '__OTHER__', v: otherCounts[ti] });
             return (
@@ -675,6 +792,11 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
   const [candSort, setCandSort] = useState<CandSortKey>('reads');
   const [candGroup, setCandGroup] = useState<CandGroupKey>('none');
   const [colorMode, setColorMode] = useState<ColorMode>('candidate');
+  // Split-bar view: when on, each transfer bar is subdivided into three side-by-side
+  // sub-bars (A-B combined, VarA-only breakdown, VarB-only breakdown) so the user can
+  // see how the individual VarA and VarB subunits behave alongside the combination,
+  // all in stable per-identity colors (Nidhi 2026-06).
+  const [splitAB, setSplitAB] = useState(false);
   const [normalize, setNormalize] = useState<Normalize>('count');
   const [topN, setTopN] = useState(10);
   const [sortKey, setSortKey] = useState<SortKey>('natural');
@@ -1007,6 +1129,18 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
           ))}
         </div>
 
+        {/* Split each bar into A-B / VarA / VarB sub-bars */}
+        <button
+          onClick={() => setSplitAB(v => !v)}
+          className={cn('px-2 py-1 text-[10.5px] font-medium rounded border',
+            splitAB
+              ? 'bg-emerald-600 text-white border-emerald-600'
+              : 'bg-white dark:bg-gray-700 text-slate-600 dark:text-gray-300 border-slate-200 dark:border-gray-600')}
+          title="Split each transfer bar into three sub-bars: the A-B combination, the VarA subunit breakdown, and the VarB subunit breakdown (same stable colors)."
+        >
+          Split A|B
+        </button>
+
         {/* Y axis */}
         <div className="flex items-center border border-slate-200 dark:border-gray-600 rounded overflow-hidden">
           {(['count','fraction'] as Normalize[]).map((n, i) => (
@@ -1327,7 +1461,7 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
               setFocusKey={k => setFocusKey(k)}
               chart={focusedChart}
               stats={statsByKey.get(chartKey(focusedChart))!}
-              colorMode={colorMode} normalize={normalize}
+              colorMode={colorMode} splitAB={splitAB} normalize={normalize}
               aColors={aColors} bColors={bColors} candColors={candColors}
               selectedCands={selectedCands} isolateSelected={isolateSelected} topN={topN}
               onToggleCand={toggleCand} onOpenDetail={setDetailCand}
@@ -1344,7 +1478,7 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
               keys={comparing}
               charts={data?.charts ?? []}
               statsByKey={statsByKey}
-              colorMode={colorMode} normalize={normalize}
+              colorMode={colorMode} splitAB={splitAB} normalize={normalize}
               aColors={aColors} bColors={bColors} candColors={candColors}
               selectedCands={selectedCands} isolateSelected={isolateSelected} topN={topN}
               onToggleCand={toggleCand}
@@ -1707,6 +1841,7 @@ interface FocusViewProps {
   chart: BarcodeChart;
   stats: ChartStats;
   colorMode: ColorMode;
+  splitAB: boolean;
   normalize: Normalize;
   aColors: Record<string, string>;
   bColors: Record<string, string>;
@@ -1723,7 +1858,7 @@ interface FocusViewProps {
   isInCompare: boolean;
 }
 function FocusView(props: FocusViewProps) {
-  const { charts, focusKey, setFocusKey, chart, stats, colorMode, normalize,
+  const { charts, focusKey, setFocusKey, chart, stats, colorMode, splitAB, normalize,
     aColors, bColors, candColors, selectedCands, isolateSelected, topN, onToggleCand, onOpenDetail,
     onBack, hoveredCand, onHoverCandidate, onAddToCompare, isInCompare } = props;
   const idx = charts.findIndex(c => chartKey(c) === focusKey);
@@ -1823,7 +1958,7 @@ function FocusView(props: FocusViewProps) {
           <div className="flex-1 min-w-0 min-h-0">
             <ChartCard
               chart={chart} stats={stats}
-              colorMode={colorMode} normalize={normalize}
+              colorMode={colorMode} splitAB={splitAB} normalize={normalize}
               aColors={aColors} bColors={bColors} candColors={candColors}
               selectedCands={selectedCands} isolateSelected={isolateSelected} topN={topN}
               height={chartHeight}
@@ -1848,6 +1983,7 @@ interface CompareViewProps {
   charts: BarcodeChart[];
   statsByKey: Map<string, ChartStats>;
   colorMode: ColorMode;
+  splitAB: boolean;
   normalize: Normalize;
   aColors: Record<string, string>;
   bColors: Record<string, string>;
@@ -1861,7 +1997,7 @@ interface CompareViewProps {
   onRemove: (k: string) => void;
 }
 function CompareView(props: CompareViewProps) {
-  const { keys, charts, statsByKey, colorMode, normalize, aColors, bColors,
+  const { keys, charts, statsByKey, colorMode, splitAB, normalize, aColors, bColors,
     candColors, selectedCands, isolateSelected, topN, onToggleCand, onBack, hoveredCand, onRemove } = props;
 
   useEffect(() => {
@@ -1904,7 +2040,7 @@ function CompareView(props: CompareViewProps) {
                   </button>
                   <ChartCard
                     chart={c} stats={stats}
-                    colorMode={colorMode} normalize={normalize}
+                    colorMode={colorMode} splitAB={splitAB} normalize={normalize}
                     aColors={aColors} bColors={bColors} candColors={candColors}
                     selectedCands={selectedCands} isolateSelected={isolateSelected} topN={topN}
                     height={resolved.length <= 2 ? 320 : 240}
