@@ -486,11 +486,23 @@ interface ChartProps {
   hoverSubunit?: SubunitRef | null; // transient subunit highlight (sidebar group-header hover)
   height: number;          // SVG inner height target
   onPickCandidate?: (cand: string) => void;
+  // Compare-only: force a COMMON y-axis maximum (read count) across several
+  // charts so bars are visually comparable. Ignored when normalize === 'fraction'
+  // (fraction always tops out at 1). Default undefined keeps per-chart auto-scale.
+  yMaxOverride?: number;
+  // Compare-only: cross-chart hover. When the user hovers a bar segment we can
+  // push that candidate up to the parent so every compared chart lights it up.
+  onHoverCandidate?: (cand: string | null) => void;
+  // Compare-only: the compare tile renders its own clean header (with a clear
+  // remove button), so we suppress ChartCard's built-in header to avoid a
+  // duplicate. Default keeps the header for grid / focus.
+  hideHeader?: boolean;
 }
 
 function ChartCard({
   chart, stats, colorMode, splitAB, normalize, aColors, bColors, candColors,
   selectedCands, isolateSelected, topN, hoverCand, hoverSubunit, height, onPickCandidate,
+  yMaxOverride, onHoverCandidate, hideHeader,
 }: ChartProps) {
   // Hover tooltip state — managed in React so we get instant feedback
   // and rich content (multi-line, color swatch). SVG <title> stays as a
@@ -540,7 +552,11 @@ function ChartCard({
   const innerW = W - PAD_L - PAD_R;
 
   const maxRaw = Math.max(1, ...totals);
-  const maxY = normalize === 'fraction' ? 1 : maxRaw;
+  // In compare, a common y-max is passed so every chart shares one scale and
+  // bars are truly comparable. We still never go below this chart's own data
+  // (Math.max) so a tall bar is never clipped if the override is somehow stale.
+  const maxCount = yMaxOverride != null ? Math.max(maxRaw, yMaxOverride) : maxRaw;
+  const maxY = normalize === 'fraction' ? 1 : maxCount;
   const slotW = innerW / Math.max(1, chart.transfers.length);
   const BAR_CAP = 56;          // hard ceiling so 2-transfer charts don't bloat
   const BAR_FILL = 0.62;       // bar uses 62% of its slot otherwise
@@ -583,6 +599,7 @@ function ChartCard({
 
   return (
     <div className="rounded-lg border border-slate-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-sm overflow-hidden h-full flex flex-col">
+      {!hideHeader && (
       <div className="px-3 py-1.5 border-b border-slate-200 dark:border-gray-700 bg-slate-50/60 dark:bg-gray-800/60 flex items-center gap-2 text-[12px] shrink-0">
         {chart.well && (
           <>
@@ -616,6 +633,7 @@ function ChartCard({
           <span title="Total reads across all transfers">· {stats.totalReads.toLocaleString()} reads</span>
         </div>
       </div>
+      )}
 
       <div className="p-2 relative flex-1 min-h-0 flex" onMouseLeave={() => setHover(null)}>
         {hover && (
@@ -744,8 +762,10 @@ function ChartCard({
                         const px = rect ? e.clientX - rect.left : 0;
                         const py = rect ? e.clientY - rect.top : 0;
                         setHover({ x: px, y: py, text: tipText, flipX: rect ? px > rect.width - 200 : false, flipY: py < 56 });
+                        // Cross-chart sync: only the A-B sub-bar maps 1:1 to a candidate.
+                        if (isCandSeg) onHoverCandidate?.(seg.cand!);
                       }}
-                      onMouseLeave={() => setHover(null)}
+                      onMouseLeave={() => { setHover(null); if (isCandSeg) onHoverCandidate?.(null); }}
                     >
                       <title>{tipText.replace(/\n/g, ' · ')}</title>
                     </rect>
@@ -763,9 +783,11 @@ function ChartCard({
 
             if (splitAB) {
               // Three side-by-side sub-bars within the slot: A-B | VarA | VarB.
-              const gap = 3;
-              const groupW = Math.min(BAR_CAP * 1.6, slotW * 0.86);
-              const subW = (groupW - gap * 2) / 3;
+              // Generous inter-bar spacing so the three groups read as distinct
+              // (the bars are narrower than a single combined bar on purpose).
+              const gap = Math.max(8, slotW * 0.06);
+              const groupW = Math.min(BAR_CAP * 2.1, slotW * 0.92);
+              const subW = Math.max(8, (groupW - gap * 2) / 3);
               const gx = cx - groupW / 2;
               return (
                 <g key={ti}>
@@ -775,7 +797,7 @@ function ChartCard({
                   {renderSubBar(bStack, gx + (subW + gap) * 2, subW, 'VarB')}
                   {/* sub-bar group labels under each */}
                   {[['A-B', gx], ['VarA', gx + subW + gap], ['VarB', gx + (subW + gap) * 2]].map(([lab, sx]) => (
-                    <text key={lab as string} x={(sx as number) + subW / 2} y={H - PAD_B + 24} textAnchor="middle" fontSize={8} className="fill-slate-400 dark:fill-gray-500">{lab}</text>
+                    <text key={lab as string} x={(sx as number) + subW / 2} y={H - PAD_B + 30} textAnchor="middle" fontSize={10.5} fontWeight={600} className="fill-slate-500 dark:fill-gray-400">{lab}</text>
                   ))}
                   {total > 0 && (() => {
                     // All three sub-bars are the same total height; label sits just above.
@@ -843,8 +865,9 @@ function ChartCard({
                           const px = rect ? e.clientX - rect.left : 0;
                           const py = rect ? e.clientY - rect.top : 0;
                           setHover({ x: px, y: py, text: tipText, flipX: rect ? px > rect.width - 200 : false, flipY: py < 56 });
+                          if (cand !== '__OTHER__') onHoverCandidate?.(cand);
                         }}
-                        onMouseLeave={() => setHover(null)}
+                        onMouseLeave={() => { setHover(null); if (cand !== '__OTHER__') onHoverCandidate?.(null); }}
                       >
                         <title>{tipText.replace(/\n/g, ' · ')}</title>
                       </rect>
@@ -1701,6 +1724,7 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
               hoveredCand={hoveredCand}
               hoveredSubunit={hoveredSubunit}
               onRemove={(k) => setComparing(prev => prev.filter(x => x !== k))}
+              onHoverCandidate={setHoveredCand}
             />
           )}
         </div>
@@ -2266,10 +2290,13 @@ interface CompareViewProps {
   hoveredCand?: string | null;
   hoveredSubunit?: SubunitRef | null;
   onRemove: (k: string) => void;
+  // Cross-chart hover sync. Threaded from the parent's setHoveredCand so the
+  // shared legend (and bar hovers) light up the same candidate in every chart.
+  onHoverCandidate?: (c: string | null) => void;
 }
 function CompareView(props: CompareViewProps) {
   const { keys, charts, statsByKey, colorMode, splitAB, normalize, aColors, bColors,
-    candColors, selectedCands, isolateSelected, topN, onToggleCand, onBack, hoveredCand, hoveredSubunit, onRemove } = props;
+    candColors, selectedCands, isolateSelected, topN, onToggleCand, onBack, hoveredCand, hoveredSubunit, onRemove, onHoverCandidate } = props;
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onBack(); };
@@ -2277,48 +2304,261 @@ function CompareView(props: CompareViewProps) {
     return () => window.removeEventListener('keydown', handler);
   }, [onBack]);
 
-  const resolved = keys
+  // Column-count control. 'auto' picks a sensible layout from the count; the
+  // explicit 1 / 2 / 3 options let a reviewer force a wide single column (great
+  // for reading tall stacks) or pack more charts in.
+  const [colChoice, setColChoice] = useState<'auto' | 1 | 2 | 3>('auto');
+  // Cap the union legend; the rest are summarised as "N more".
+  const LEGEND_CAP = 15;
+
+  const resolved = useMemo(() => keys
     .map(k => charts.find(c => chartKey(c) === k))
-    .filter((c): c is BarcodeChart => !!c);
-  // Pick a grid layout that fits the count nicely (1, 2-col, 2x2, 3x2).
-  const cols = resolved.length <= 1 ? 1 : resolved.length === 2 ? 2 : 2;
+    .filter((c): c is BarcodeChart => !!c), [keys, charts]);
+
+  // COMMON Y-MAX across the compared charts so bars are truly comparable. We take
+  // the per-chart maximum bar total (sum of candidate reads at the tallest
+  // transfer) and keep the largest across the set. Memoized: O(charts x transfers).
+  // In fraction mode the axis is always 0..1 so the override is irrelevant there.
+  const commonMaxY = useMemo(() => {
+    let m = 1;
+    for (const c of resolved) {
+      const n = c.transfers.length;
+      for (let ti = 0; ti < n; ti++) {
+        let tot = 0;
+        for (const counts of Object.values(c.candidates)) tot += counts[ti] || 0;
+        if (tot > m) m = tot;
+      }
+    }
+    return m;
+  }, [resolved]);
+
+  // SHARED CANDIDATE LEGEND: union of the top candidates across every compared
+  // chart. For each candidate we track total reads across the compared set, in
+  // how many of the compared charts it appears, and the variance of its
+  // final-transfer fraction across charts (so the most DIVERGENT candidates can
+  // surface first). All computed in one pass; memoized.
+  const legend = useMemo(() => {
+    type Agg = { cand: string; total: number; charts: number; lastFractions: number[] };
+    const map = new Map<string, Agg>();
+    for (const c of resolved) {
+      const stats = statsByKey.get(chartKey(c));
+      if (!stats) continue;
+      // Per-chart final-transfer total for fraction math.
+      const lastIdx = c.transfers.length - 1;
+      let lastBarTotal = 0;
+      for (const counts of Object.values(c.candidates)) lastBarTotal += counts[lastIdx] || 0;
+      // Consider this chart's own top candidates (by total reads) so the union
+      // stays focused on what actually matters, not the long tail.
+      const top = stats.candidateTotals.slice(0, Math.max(LEGEND_CAP, topN || 0) + 5);
+      for (const { cand, total } of top) {
+        let a = map.get(cand);
+        if (!a) { a = { cand, total: 0, charts: 0, lastFractions: [] }; map.set(cand, a); }
+        a.total += total;
+        a.charts += 1;
+        const lastReads = c.candidates[cand]?.[lastIdx] || 0;
+        a.lastFractions.push(lastBarTotal ? lastReads / lastBarTotal : 0);
+      }
+    }
+    const rows = [...map.values()].map(a => {
+      const n = a.lastFractions.length;
+      const mean = n ? a.lastFractions.reduce((s, v) => s + v, 0) / n : 0;
+      const variance = n ? a.lastFractions.reduce((s, v) => s + (v - mean) * (v - mean), 0) / n : 0;
+      const p = parseCandidate(a.cand);
+      return { cand: a.cand, total: a.total, charts: a.charts, variance, a: p?.a ?? '', b: p?.b ?? '' };
+    });
+    return rows;
+  }, [resolved, statsByKey, topN]);
+
+  // Two sort modes for the shared legend: by total reads (default) or by
+  // divergence (variance of final-transfer fraction across charts) so the
+  // candidates whose fate differs most between samples bubble up first.
+  const [legendSort, setLegendSort] = useState<'reads' | 'divergence'>('reads');
+  const legendSorted = useMemo(() => {
+    const rows = [...legend];
+    if (legendSort === 'divergence') rows.sort((x, y) => y.variance - x.variance || y.total - x.total);
+    else rows.sort((x, y) => y.total - x.total);
+    return rows;
+  }, [legend, legendSort]);
+  const legendShown = legendSorted.slice(0, LEGEND_CAP);
+  const legendMore = legendSorted.length - legendShown.length;
+
+  const cols = colChoice === 'auto'
+    ? (resolved.length <= 1 ? 1 : resolved.length === 2 ? 2 : 3)
+    : colChoice;
+  // Tile height scales with how many columns we show: fewer columns => taller
+  // charts. Keeps tall stacks readable when packing 3-up.
+  const tileHeight = cols <= 1 ? 360 : cols === 2 ? 300 : 240;
+  const useCommonY = normalize !== 'fraction';
+
+  const colBtnCls = (active: boolean) => cn(
+    'px-1.5 py-0.5 rounded text-[11px] font-medium border',
+    active
+      ? 'bg-blue-600 text-white border-blue-600'
+      : 'border-slate-200 dark:border-gray-600 text-slate-600 dark:text-gray-300 hover:bg-slate-100 dark:hover:bg-gray-700',
+  );
+
   return (
     <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-      <div className="flex items-center gap-2 px-2 py-1.5 border-b border-slate-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-[11.5px] shrink-0">
+      {/* STICKY SHARED COMPARE TOOLBAR */}
+      <div className="sticky top-0 z-20 flex flex-wrap items-center gap-x-3 gap-y-1.5 px-3 py-2 border-b border-slate-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-[11.5px] shrink-0">
         <button onClick={onBack} title="Back to Grid (Esc)"
           className="flex items-center gap-1 px-2 py-1 rounded border border-slate-200 dark:border-gray-600 hover:bg-slate-100 dark:hover:bg-gray-700 text-slate-700 dark:text-gray-200 font-medium">
           <ChevronLeft className="w-3.5 h-3.5" /> Grid
         </button>
         <span className="font-semibold text-slate-700 dark:text-gray-200">Compare</span>
-        <span className="text-slate-500 dark:text-gray-400">{resolved.length} chart{resolved.length === 1 ? '' : 's'} side-by-side</span>
-        <span className="ml-auto text-[10.5px] text-slate-400 dark:text-gray-500 hidden md:inline">All charts share the same color / Y-axis / pin · click ✕ to drop</span>
+        <span className="text-slate-500 dark:text-gray-400 tabular-nums">{resolved.length} chart{resolved.length === 1 ? '' : 's'}</span>
+
+        {/* Column-count control */}
+        <div className="flex items-center gap-1">
+          <Columns3 className="w-3.5 h-3.5 text-slate-400" />
+          <span className="text-slate-500 dark:text-gray-400">Cols</span>
+          <div className="flex items-center gap-1">
+            <button className={colBtnCls(colChoice === 'auto')} onClick={() => setColChoice('auto')} title="Auto layout">Auto</button>
+            <button className={colBtnCls(colChoice === 1)} onClick={() => setColChoice(1)} title="One column (tall)">1</button>
+            <button className={colBtnCls(colChoice === 2)} onClick={() => setColChoice(2)} title="Two columns">2</button>
+            <button className={colBtnCls(colChoice === 3)} onClick={() => setColChoice(3)} title="Three columns">3</button>
+          </div>
+        </div>
+
+        {/* Common-Y indicator so the reviewer trusts the bars are comparable */}
+        <span
+          className={cn(
+            'flex items-center gap-1 px-1.5 py-0.5 rounded border text-[10.5px] font-medium',
+            useCommonY
+              ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800'
+              : 'bg-slate-50 dark:bg-gray-700/40 text-slate-500 dark:text-gray-400 border-slate-200 dark:border-gray-600',
+          )}
+          title={useCommonY
+            ? `Every chart is locked to a common Y maximum (${commonMaxY.toLocaleString()} reads) so bar heights are directly comparable.`
+            : 'Fraction mode: all charts already share a 0 to 100% axis.'}
+        >
+          <BarChart3 className="w-3 h-3" />
+          {useCommonY ? `Y locked to ${commonMaxY.toLocaleString()}` : 'Y = 0 to 100%'}
+        </span>
+
+        <span className="text-slate-500 dark:text-gray-400 tabular-nums">
+          {selectedCands.size} candidate{selectedCands.size === 1 ? '' : 's'} selected
+        </span>
+
+        <button onClick={() => { for (const c of resolved) onRemove(chartKey(c)); }}
+          disabled={resolved.length === 0}
+          title="Remove every chart from compare"
+          className="ml-auto flex items-center gap-1 px-2 py-1 rounded border border-slate-200 dark:border-gray-600 text-slate-600 dark:text-gray-300 hover:bg-red-50 dark:hover:bg-red-900/20 hover:text-red-600 hover:border-red-300 disabled:opacity-40 disabled:cursor-not-allowed">
+          <X className="w-3.5 h-3.5" /> Clear all
+        </button>
       </div>
-      <div className="flex-1 min-h-0 overflow-auto p-2">
+
+      {/* SHARED CANDIDATE LEGEND / TRACKER */}
+      {resolved.length > 0 && legendShown.length > 0 && (
+        <div className="shrink-0 border-b border-slate-200 dark:border-gray-700 bg-slate-50/70 dark:bg-gray-800/50 px-3 py-2">
+          <div className="flex items-center gap-2 mb-1.5">
+            <span className="text-[10.5px] font-semibold uppercase tracking-wider text-slate-500 dark:text-gray-400">Shared candidates</span>
+            <span className="text-[10px] text-slate-400 dark:text-gray-500">click to track in every chart · hover to highlight</span>
+            <div className="ml-auto flex items-center gap-1">
+              <span className="text-[10px] text-slate-400 dark:text-gray-500">Sort</span>
+              <button className={colBtnCls(legendSort === 'reads')} onClick={() => setLegendSort('reads')} title="Sort by total reads across compared charts">Reads</button>
+              <button className={colBtnCls(legendSort === 'divergence')} onClick={() => setLegendSort('divergence')} title="Sort by how differently this candidate ends up across the compared charts (variance of final-transfer fraction)">Divergent</button>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {legendShown.map(row => {
+              const isSel = selectedCands.has(row.cand);
+              const isHov = hoveredCand === row.cand;
+              return (
+                <button
+                  key={row.cand}
+                  onClick={() => onToggleCand(row.cand)}
+                  onMouseEnter={() => onHoverCandidate?.(row.cand)}
+                  onMouseLeave={() => onHoverCandidate?.(null)}
+                  title={`${row.cand}  (VarA ${row.a} · VarB ${row.b})\n${row.total.toLocaleString()} reads across ${row.charts}/${resolved.length} compared charts\nclick to ${isSel ? 'deselect' : 'select'} in all charts`}
+                  className={cn(
+                    'flex items-center gap-1.5 px-2 py-1 rounded border text-[11px] tabular-nums transition-colors',
+                    isSel
+                      ? 'bg-blue-50 dark:bg-blue-900/30 border-blue-400 dark:border-blue-600 text-blue-800 dark:text-blue-200'
+                      : isHov
+                        ? 'bg-white dark:bg-gray-700 border-slate-300 dark:border-gray-500 text-slate-700 dark:text-gray-200'
+                        : 'bg-white/70 dark:bg-gray-800/60 border-slate-200 dark:border-gray-600 text-slate-600 dark:text-gray-300 hover:border-slate-300 dark:hover:border-gray-500',
+                  )}
+                >
+                  <span className="w-3 h-3 rounded-sm shrink-0 ring-1 ring-black/10" style={{ background: candColors[row.cand] || '#888' }} />
+                  <span className="font-mono font-medium">{row.cand}</span>
+                  <span className="text-slate-400 dark:text-gray-500">{row.total.toLocaleString()}</span>
+                  <span className="text-[9.5px] text-slate-400 dark:text-gray-500" title={`Appears in ${row.charts} of ${resolved.length} compared charts`}>{row.charts}/{resolved.length}</span>
+                  {legendSort === 'divergence' && (
+                    <span className="text-[9.5px] text-amber-600 dark:text-amber-400" title="Spread of final-transfer fraction across the compared charts (higher = more divergent fate)">
+                      σ²{(row.variance * 100).toFixed(1)}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+            {legendMore > 0 && (
+              <span className="flex items-center px-2 py-1 text-[10.5px] text-slate-400 dark:text-gray-500">+{legendMore} more</span>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* CHART GRID */}
+      <div className="flex-1 min-h-0 overflow-auto p-3">
         {resolved.length === 0 ? (
           <Centered>
             <span>No charts queued for comparison.</span>
             <button onClick={onBack} className="text-xs text-emerald-600 dark:text-emerald-400 underline">Back to Grid to pick some</button>
           </Centered>
         ) : (
-          <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}>
+          <div className="grid gap-4 items-stretch" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}>
             {resolved.map(c => {
               const stats = statsByKey.get(chartKey(c))!;
               return (
-                <div key={chartKey(c)} className="relative">
-                  <button onClick={() => onRemove(chartKey(c))} title="Remove from compare"
-                    className="absolute top-1 right-1 z-10 w-5 h-5 rounded-full bg-white/90 dark:bg-gray-900/80 border border-slate-300 dark:border-gray-600 flex items-center justify-center text-slate-500 hover:text-red-500 hover:border-red-400">
-                    <X className="w-3 h-3" />
-                  </button>
-                  <ChartCard
-                    chart={c} stats={stats}
-                    colorMode={colorMode} splitAB={splitAB} normalize={normalize}
-                    aColors={aColors} bColors={bColors} candColors={candColors}
-                    selectedCands={selectedCands} isolateSelected={isolateSelected} topN={topN}
-                    height={resolved.length <= 2 ? 320 : 240}
-                    hoverCand={hoveredCand}
-                    hoverSubunit={hoveredSubunit}
-                    onPickCandidate={onToggleCand}
-                  />
+                <div key={chartKey(c)} className="relative flex flex-col rounded-lg border border-slate-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-sm overflow-hidden group">
+                  {/* PER-CHART HEADER: identity, totals, flip badge, remove */}
+                  <div className="flex items-center gap-2 px-3 py-1.5 border-b border-slate-200 dark:border-gray-700 bg-slate-50/60 dark:bg-gray-800/60 text-[11.5px] shrink-0">
+                    {c.well && (
+                      <>
+                        <span className="font-mono font-semibold text-slate-800 dark:text-gray-100">{c.well}</span>
+                        <span className="text-slate-400">|</span>
+                      </>
+                    )}
+                    <span className="font-mono text-slate-700 dark:text-gray-200">{c.strain}</span>
+                    <span className="text-slate-400">|</span>
+                    <span className="font-mono text-slate-700 dark:text-gray-200 truncate" title={c.library}>{c.library}</span>
+                    <span className="text-slate-400">|</span>
+                    <span className="text-slate-600 dark:text-gray-300 whitespace-nowrap">Rep {c.replicate}</span>
+                    {stats.flipped && (
+                      <span className="px-1 py-0.5 rounded bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800 font-semibold uppercase tracking-wider text-[10px]"
+                        title={`Flip: dominant A-B candidate changed between the first and last transfer (${stats.dominantAtFirst} to ${stats.dominantAtLast})`}>
+                        flip
+                      </span>
+                    )}
+                    <button onClick={() => onRemove(chartKey(c))} title="Remove from compare"
+                      className="ml-auto w-5 h-5 rounded border border-slate-200 dark:border-gray-600 flex items-center justify-center text-slate-400 hover:text-red-500 hover:border-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 shrink-0">
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
+                  {/* sub-line: totals + unique candidates */}
+                  <div className="px-3 py-0.5 border-b border-slate-100 dark:border-gray-700/60 text-[10.5px] tabular-nums text-slate-500 dark:text-gray-400 flex items-center gap-2 shrink-0">
+                    <span title="Total reads across all transfers">{stats.totalReads.toLocaleString()} reads</span>
+                    <span className="text-slate-300 dark:text-gray-600">·</span>
+                    <span title="Distinct A-B candidates in this chart">{stats.uniqueCandidates} candidate{stats.uniqueCandidates === 1 ? '' : 's'}</span>
+                    <span className="text-slate-300 dark:text-gray-600">·</span>
+                    <span title="Number of sequenced transfers">{c.transfers.length} transfer{c.transfers.length === 1 ? '' : 's'}</span>
+                  </div>
+                  {/* CHART: pass the COMMON y-max so bars are comparable */}
+                  <div className="flex-1 min-h-0" style={{ minHeight: tileHeight }}>
+                    <ChartCard
+                      chart={c} stats={stats}
+                      colorMode={colorMode} splitAB={splitAB} normalize={normalize}
+                      aColors={aColors} bColors={bColors} candColors={candColors}
+                      selectedCands={selectedCands} isolateSelected={isolateSelected} topN={topN}
+                      height={tileHeight}
+                      hoverCand={hoveredCand}
+                      hoverSubunit={hoveredSubunit}
+                      onPickCandidate={onToggleCand}
+                      onHoverCandidate={onHoverCandidate}
+                      yMaxOverride={useCommonY ? commonMaxY : undefined}
+                    />
+                  </div>
                 </div>
               );
             })}
