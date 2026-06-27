@@ -42,6 +42,18 @@ type Normalize = 'count' | 'fraction';
 type SortKey = 'natural' | 'totalReads' | 'transfers' | 'candidates' | 'flipped';
 type CandSortKey = 'reads' | 'charts' | 'name' | 'varA' | 'varB';
 type CandGroupKey = 'none' | 'varA' | 'varB';
+// Transient subunit highlight: hovering a VarA or VarB group header lights up
+// EVERY candidate that shares that subunit across the visible charts, without
+// committing a selection. kind 'A' = a VarA subunit id (e.g. A81); kind 'B' = a
+// VarB subunit id (e.g. B151). null = nothing hovered.
+type SubunitRef = { kind: 'A' | 'B'; id: string };
+// Test whether a candidate label belongs to a hovered subunit. O(1) per call.
+function candMatchesSubunit(cand: string, sub: SubunitRef | null): boolean {
+  if (!sub) return false;
+  const p = parseCandidate(cand);
+  if (!p) return false;
+  return sub.kind === 'A' ? p.a === sub.id : p.b === sub.id;
+}
 
 // Deterministic, color-blind-aware palette (golden-angle hue rotation).
 const GOLDEN = 137.508;
@@ -221,6 +233,162 @@ function CandidateDetailModal({
   );
 }
 
+// Per-SUBUNIT cross-chart detail popup. Mirrors CandidateDetailModal but aggregates
+// EVERY A-B partner that shares one VarA subunit (e.g. all A81-*) or one VarB subunit
+// (e.g. all *-B151). Shows total reads, in how many charts the subunit appears, its
+// peak aggregated fraction and where, the list of partner combinations, and one
+// faint fraction-over-transfers line per chart (aggregating all partners). This is
+// the "track a single subunit, not just one combination, across all conditions" view.
+function SubunitDetailModal({
+  sub, charts, aColors, bColors, onClose,
+}: {
+  sub: SubunitRef;
+  charts: BarcodeChart[];
+  aColors: Record<string, string>;
+  bColors: Record<string, string>;
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', h);
+    return () => window.removeEventListener('keydown', h);
+  }, [onClose]);
+
+  const color = (sub.kind === 'A' ? aColors[sub.id] : bColors[sub.id]) || '#2563eb';
+  const kindLabel = sub.kind === 'A' ? 'VarA subunit' : 'VarB subunit';
+
+  // Aggregate this subunit across every chart. For each chart, sum the reads of all
+  // candidates that share this subunit at each transfer, then express as a fraction of
+  // the chart total at that transfer. Track totals, chart count, partner set and peak.
+  const { series, xMax, peak, totalReads, chartCount, partners } = useMemo(() => {
+    const out: { key: string; label: string; pts: { x: number; y: number }[] }[] = [];
+    let xMaxLocal = 1;
+    let peakLocal = { frac: 0, transfer: 0, label: '' };
+    let total = 0;
+    let nCharts = 0;
+    const partnerSet = new Set<string>();
+    for (const c of charts) {
+      // Reads of all candidates sharing this subunit, per transfer index.
+      const sub3 = Array(c.transfers.length).fill(0);
+      let chartSubTotal = 0;
+      for (const [cand, counts] of Object.entries(c.candidates)) {
+        if (!candMatchesSubunit(cand, sub)) continue;
+        let cs = 0;
+        counts.forEach((v, i) => { sub3[i] += v || 0; cs += v || 0; });
+        if (cs > 0) partnerSet.add(cand);
+      }
+      chartSubTotal = sub3.reduce((a, v) => a + v, 0);
+      if (chartSubTotal <= 0) continue;
+      nCharts += 1;
+      total += chartSubTotal;
+      const pts: { x: number; y: number }[] = [];
+      c.transfers.forEach((t, i) => {
+        const tot = Object.values(c.candidates).reduce((a, arr) => a + (arr[i] || 0), 0);
+        const frac = tot > 0 ? sub3[i] / tot : 0;
+        pts.push({ x: t, y: frac });
+        if (t > xMaxLocal) xMaxLocal = t;
+        if (frac > peakLocal.frac) {
+          peakLocal = { frac, transfer: t, label: `${c.well || c.strain || c.library} r${c.replicate}` };
+        }
+      });
+      if (pts.some(p => p.y > 0)) {
+        out.push({ key: chartKey(c), label: `${c.well || c.strain} r${c.replicate} (${c.library})`, pts });
+      }
+    }
+    // Partner list: just the candidate ids that share this subunit (sorted).
+    const partnerArr = [...partnerSet].sort();
+    return { series: out, xMax: xMaxLocal, peak: peakLocal, totalReads: total, chartCount: nCharts, partners: partnerArr };
+  }, [sub, charts]);
+
+  const W = 720, H = 320, padL = 44, padR = 16, padT = 16, padB = 40;
+  const plotW = W - padL - padR, plotH = H - padT - padB;
+  const sx = (x: number) => padL + (xMax > 0 ? (x / xMax) * plotW : 0);
+  const sy = (y: number) => padT + plotH - y * plotH;
+  const yTicks = [0, 0.25, 0.5, 0.75, 1];
+  const xStep = xMax <= 12 ? 1 : Math.ceil(xMax / 12);
+  const xTicks: number[] = [];
+  for (let v = 0; v <= xMax; v += xStep) xTicks.push(v);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={onClose}>
+      <div
+        className="bg-white dark:bg-gray-900 rounded-lg shadow-2xl w-full max-w-3xl max-h-[85vh] overflow-y-auto"
+        onClick={e => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center gap-2 px-4 py-3 border-b border-slate-200 dark:border-gray-700 sticky top-0 bg-white dark:bg-gray-900 z-10">
+          <span className="inline-block w-4 h-4 rounded-sm shrink-0" style={{ background: color }} />
+          <span className="font-mono font-semibold text-[15px] text-slate-800 dark:text-gray-100">{sub.id}</span>
+          <span className="text-[11.5px] text-slate-500 dark:text-gray-400">{kindLabel} aggregated across all A-B partners and charts</span>
+          <button onClick={onClose} title="Close (Esc)"
+            className="ml-auto p-1 rounded hover:bg-slate-100 dark:hover:bg-gray-700 text-slate-500 dark:text-gray-400">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        {/* Stat cards */}
+        <div className="px-4 py-3 grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11.5px]">
+          <Stat label="appears in" value={`${chartCount} chart${chartCount === 1 ? '' : 's'}`} />
+          <Stat label="total reads" value={totalReads.toLocaleString()} />
+          <Stat label="peak fraction" value={`${(peak.frac * 100).toFixed(1)}%`} accent />
+          <Stat label="peak at" value={peak.frac > 0 ? `T${peak.transfer} - ${peak.label}` : 'n/a'} />
+        </div>
+
+        {/* Partner combinations sharing this subunit */}
+        <div className="px-4 pb-1">
+          <div className="text-[11px] text-slate-500 dark:text-gray-400 mb-1">
+            {partners.length} A-B partner combination{partners.length === 1 ? '' : 's'} share this subunit:
+          </div>
+          <div className="flex flex-wrap gap-1 max-h-20 overflow-y-auto">
+            {partners.map(c => (
+              <span key={c} className="px-1.5 py-0.5 rounded text-[10.5px] font-mono bg-slate-100 dark:bg-gray-800 text-slate-600 dark:text-gray-300 border border-slate-200 dark:border-gray-700">
+                {c}
+              </span>
+            ))}
+            {partners.length === 0 && <span className="text-[11px] text-slate-400">none</span>}
+          </div>
+        </div>
+
+        {/* Cross-chart aggregated fraction-over-transfers chart */}
+        <div className="px-4 pb-4 pt-2">
+          <div className="text-[11px] text-slate-500 dark:text-gray-400 mb-1">
+            Aggregated fraction of reads over transfers (all {sub.id} partners summed), one line per chart
+            ({series.length} chart{series.length === 1 ? '' : 's'}).
+          </div>
+          {series.length === 0 ? (
+            <div className="text-[12px] text-slate-400 dark:text-gray-500 py-8 text-center">
+              No nonzero measurements for this subunit.
+            </div>
+          ) : (
+            <svg viewBox={`0 0 ${W} ${H}`} className="w-full select-none" role="img"
+              aria-label={`Aggregated fraction over transfers for ${sub.id}`}>
+              {yTicks.map(v => (
+                <g key={`y${v}`}>
+                  <line x1={padL} x2={W - padR} y1={sy(v)} y2={sy(v)} stroke="currentColor" className="text-slate-200 dark:text-gray-700" strokeWidth="1" />
+                  <text x={padL - 6} y={sy(v) + 3} textAnchor="end" className="text-[9px] fill-slate-400 dark:fill-gray-500">{Math.round(v * 100)}%</text>
+                </g>
+              ))}
+              {xTicks.map(v => (
+                <text key={`x${v}`} x={sx(v)} y={H - padB + 14} textAnchor="middle" className="text-[9px] fill-slate-400 dark:fill-gray-500">T{v}</text>
+              ))}
+              <text x={padL + plotW / 2} y={H - 4} textAnchor="middle" className="text-[10px] fill-slate-500 dark:fill-gray-400">Transfer</text>
+              {series.map(s => {
+                const d = s.pts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${sx(p.x).toFixed(1)} ${sy(p.y).toFixed(1)}`).join(' ');
+                return (
+                  <g key={s.key}>
+                    <path d={d} fill="none" stroke={color} strokeWidth="1.6" opacity={0.55} strokeLinejoin="round" strokeLinecap="round" />
+                    {s.pts.map((p, i) => <circle key={i} cx={sx(p.x)} cy={sy(p.y)} r="1.8" fill={color} opacity={0.7} />)}
+                  </g>
+                );
+              })}
+            </svg>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Stat({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
   return (
     <div className={cn('flex flex-col px-2.5 py-1.5 rounded border',
@@ -315,13 +483,14 @@ interface ChartProps {
   isolateSelected: boolean;
   topN: number;            // 0 = no rollup, else collapse the rest into "other"
   hoverCand?: string | null;  // transient highlight (e.g. sidebar row hover); no persistent stroke
+  hoverSubunit?: SubunitRef | null; // transient subunit highlight (sidebar group-header hover)
   height: number;          // SVG inner height target
   onPickCandidate?: (cand: string) => void;
 }
 
 function ChartCard({
   chart, stats, colorMode, splitAB, normalize, aColors, bColors, candColors,
-  selectedCands, isolateSelected, topN, hoverCand, height, onPickCandidate,
+  selectedCands, isolateSelected, topN, hoverCand, hoverSubunit, height, onPickCandidate,
 }: ChartProps) {
   // Hover tooltip state — managed in React so we get instant feedback
   // and rich content (multi-line, color swatch). SVG <title> stays as a
@@ -365,7 +534,7 @@ function ChartCard({
   // For 1 transfer: bar ~6% of inner width. For many transfers: bar fills
   // most of its slot up to the cap.
   const W = 600;
-  const PAD_L = 48, PAD_R = 28, PAD_T = 22, PAD_B = 32;
+  const PAD_L = 56, PAD_R = 28, PAD_T = 24, PAD_B = 46;
   const innerH = height;
   const H = innerH + PAD_T + PAD_B;
   const innerW = W - PAD_L - PAD_R;
@@ -394,18 +563,23 @@ function ChartCard({
   const yTicks = 4;
   const tickValues = Array.from({ length: yTicks + 1 }, (_, i) => (maxY * i) / yTicks);
   // Emphasis rules (consistent across grid / focus / compare):
-  //   - hoveredCand wins instantly: it is the only solid bar while a hover is active.
+  //   - a hovered subunit wins instantly: every candidate sharing that VarA/VarB
+  //     subunit is solid while the hover is active (lets a reviewer light up all
+  //     A81-* or all *-B151 at once by hovering a group header).
+  //   - else hoveredCand wins: it is the only solid bar while a hover is active.
   //   - otherwise, if a selection exists, selected candidates are solid and the
   //     rest are dimmed for context.
   //   - with no hover and no selection, everything is solid.
   const hasSelection = selectedCands.size > 0;
+  const hasSubHover = !!hoverSubunit;
   const isSelected = (cand: string) => selectedCands.has(cand);
   const isEmphasized = (cand: string) => {
+    if (hasSubHover) return candMatchesSubunit(cand, hoverSubunit!);
     if (hoverCand) return cand === hoverCand;
     if (hasSelection) return isSelected(cand);
     return true;
   };
-  const isDimmed = (cand: string) => cand !== '__OTHER__' && !isEmphasized(cand) && (hoverCand != null || hasSelection);
+  const isDimmed = (cand: string) => cand !== '__OTHER__' && !isEmphasized(cand) && (hasSubHover || hoverCand != null || hasSelection);
 
   return (
     <div className="rounded-lg border border-slate-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-sm overflow-hidden h-full flex flex-col">
@@ -473,17 +647,17 @@ function ChartCard({
             return (
               <g key={i}>
                 <line x1={PAD_L} x2={W - PAD_R} y1={y} y2={y} stroke="currentColor" className="text-slate-200 dark:text-gray-700" strokeWidth={0.5} />
-                <text x={PAD_L - 6} y={y + 3} textAnchor="end" fontSize={10} className="fill-slate-500 dark:fill-gray-400 tabular-nums">
+                <text x={PAD_L - 8} y={y + 4} textAnchor="end" fontSize={13} className="fill-slate-600 dark:fill-gray-300 tabular-nums">
                   {normalize === 'fraction' ? `${Math.round(v * 100)}%` : Math.round(v)}
                 </text>
               </g>
             );
           })}
           <line x1={PAD_L} x2={W - PAD_R} y1={PAD_T + innerH} y2={PAD_T + innerH} stroke="currentColor" className="text-slate-400 dark:text-gray-500" strokeWidth={1} />
-          <text x={14} y={PAD_T + innerH / 2} textAnchor="middle" fontSize={10} transform={`rotate(-90 14 ${PAD_T + innerH / 2})`} className="fill-slate-600 dark:fill-gray-300">
-            {normalize === 'fraction' ? 'Fraction' : 'Count'}
+          <text x={16} y={PAD_T + innerH / 2} textAnchor="middle" fontSize={14} fontWeight={600} transform={`rotate(-90 16 ${PAD_T + innerH / 2})`} className="fill-slate-700 dark:fill-gray-200">
+            {normalize === 'fraction' ? 'Fraction of reads' : 'Read count'}
           </text>
-          <text x={PAD_L + innerW / 2} y={H - 6} textAnchor="middle" fontSize={10} className="fill-slate-600 dark:fill-gray-300">Transfer</text>
+          <text x={PAD_L + innerW / 2} y={H - 8} textAnchor="middle" fontSize={14} fontWeight={600} className="fill-slate-700 dark:fill-gray-200">Transfer (passage)</text>
 
           {chart.transfers.map((t, ti) => {
             const total = totals[ti];
@@ -541,7 +715,19 @@ function ChartCard({
                 const midY = y + h / 2;
                 const subCx = subX + subW / 2;
                 const inlineLabel = showName ? `${seg.label} · ${total ? `${pctNum.toFixed(0)}%` : seg.v}` : `${total ? `${pctNum.toFixed(0)}%` : seg.v}`;
-                const tipText = `${groupLabel}: ${seg.label}\nT${t}: ${seg.v}${total ? `\n${pctStrFine} of bar total` : ''}\nbar total: ${total}`;
+                // Richer tooltip. For the A-B sub-bar, break out the VarA and VarB
+                // subunits. For the VarA / VarB sub-bars, note that the segment is the
+                // sum of every combination sharing that subunit.
+                let tipText: string;
+                if (groupLabel === 'A-B') {
+                  const pp = isCandSeg ? parseCandidate(seg.cand!) : null;
+                  const breakout = pp ? `\nVarA ${pp.a}  ·  VarB ${pp.b}` : '';
+                  tipText = `A-B: ${seg.label}${breakout}\nreads: ${seg.v}${total ? `   (${pctStrFine} of bar)` : ''}\nT${t} · bar total ${total}`;
+                } else {
+                  const kindWord = groupLabel === 'VarA' ? 'VarA' : 'VarB';
+                  const combos = groupLabel === 'VarA' ? `${seg.label}-*` : `*-${seg.label}`;
+                  tipText = `${kindWord} ${seg.label}: ${seg.v} reads${total ? `, ${pctStrFine} of bar` : ''}\n(sum of all ${combos} combinations)\nT${t} · bar total ${total}`;
+                }
                 return (
                   <g key={seg.key}>
                     <rect
@@ -583,7 +769,7 @@ function ChartCard({
               const gx = cx - groupW / 2;
               return (
                 <g key={ti}>
-                  <text x={cx} y={H - PAD_B + 14} textAnchor="middle" fontSize={11} className="fill-slate-600 dark:fill-gray-300 tabular-nums">T{t}</text>
+                  <text x={cx} y={H - PAD_B + 16} textAnchor="middle" fontSize={13} fontWeight={600} className="fill-slate-700 dark:fill-gray-200 tabular-nums">T{t}</text>
                   {renderSubBar(abStack, gx, subW, 'A-B')}
                   {renderSubBar(aStack, gx + subW + gap, subW, 'VarA')}
                   {renderSubBar(bStack, gx + (subW + gap) * 2, subW, 'VarB')}
@@ -611,7 +797,7 @@ function ChartCard({
             if (otherCounts && otherCounts[ti] > 0) stack.push({ cand: '__OTHER__', v: otherCounts[ti] });
             return (
               <g key={ti}>
-                <text x={cx} y={H - PAD_B + 14} textAnchor="middle" fontSize={11} className="fill-slate-600 dark:fill-gray-300 tabular-nums">T{t}</text>
+                <text x={cx} y={H - PAD_B + 16} textAnchor="middle" fontSize={13} fontWeight={600} className="fill-slate-700 dark:fill-gray-200 tabular-nums">T{t}</text>
                 {stack.map(({ cand, v }) => {
                   if (!v) return null;
                   const norm = normalize === 'fraction' ? (total ? v / total : 0) : v;
@@ -635,9 +821,12 @@ function ChartCard({
                       : showName
                         ? `${cand} · ${pctStr || v}`
                         : `${v}${pctStr ? ` · ${pctStr}` : ''}`;
+                  // Richer tooltip: candidate, VarA / VarB broken out, reads, % of
+                  // bar, the transfer, and the bar total. Built per-segment (cheap).
+                  const pp = cand !== '__OTHER__' ? parseCandidate(cand) : null;
                   const tipText = cand === '__OTHER__'
-                    ? `Other (${otherCands.length} candidates)\nT${t}: ${v}${total ? `\n${pctStrFine} of bar total` : ''}\nbar total: ${total}`
-                    : `${cand}\nT${t}: ${v}${total ? `\n${pctStrFine} of bar total` : ''}\nbar total: ${total}`;
+                    ? `Other (${otherCands.length} candidates)\nreads: ${v}${total ? `   (${pctStrFine} of bar)` : ''}\nT${t} · bar total ${total}`
+                    : `A-B: ${cand}${pp ? `\nVarA ${pp.a}  ·  VarB ${pp.b}` : ''}\nreads: ${v}${total ? `   (${pctStrFine} of bar)` : ''}\nT${t} · bar total ${total}`;
                   return (
                     <g key={cand}>
                       <rect
@@ -779,6 +968,9 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
   const [isolateSelected, setIsolateSelected] = useState(false);
   // Candidate whose cross-chart detail popup is open (null = closed).
   const [detailCand, setDetailCand] = useState<string | null>(null);
+  // Subunit whose cross-chart detail popup is open (null = closed). Mirrors detailCand
+  // but for a whole VarA or VarB subunit aggregated across its A-B partners.
+  const [detailSubunit, setDetailSubunit] = useState<SubunitRef | null>(null);
   const [candidateQuery, setCandidateQuery] = useState('');
   const [onlyFlipped, setOnlyFlipped] = useState(false);
 
@@ -804,6 +996,9 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
   // Transient hover highlight: hovering a candidate row in the sidebar lights up
   // that candidate's segments across every visible chart (without committing a pin).
   const [hoveredCand, setHoveredCand] = useState<string | null>(null);
+  // Transient subunit hover: hovering a VarA/VarB group header in the sidebar lights
+  // up EVERY candidate sharing that subunit across all visible charts (no commit).
+  const [hoveredSubunit, setHoveredSubunit] = useState<SubunitRef | null>(null);
   const [focusKey, setFocusKey] = useState<string | null>(null);
   const [showSidebar, setShowSidebar] = useState(true);
   // Compare view defaults to no sidebar — the chart area needs the room.
@@ -987,6 +1182,19 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
     setSelectedCands(prev => {
       const next = new Set(prev);
       if (next.has(cand)) next.delete(cand); else next.add(cand);
+      return next;
+    });
+  }, []);
+
+  // Select/deselect an ENTIRE subunit at once. Given the candidate ids that share a
+  // VarA or VarB subunit, if all are currently selected we remove them (toggle off);
+  // otherwise we add the missing ones (toggle on). Used by the sidebar group headers.
+  const toggleSubunitCands = useCallback((cands: string[]) => {
+    setSelectedCands(prev => {
+      const next = new Set(prev);
+      const allSelected = cands.length > 0 && cands.every(c => next.has(c));
+      if (allSelected) for (const c of cands) next.delete(c);
+      else for (const c of cands) next.add(c);
       return next;
     });
   }, []);
@@ -1351,7 +1559,10 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
             isolateSelected={isolateSelected}
             setIsolateSelected={setIsolateSelected}
             setHoveredCand={setHoveredCand}
+            setHoveredSubunit={setHoveredSubunit}
+            toggleSubunitCands={toggleSubunitCands}
             onOpenDetail={setDetailCand}
+            onOpenSubunitDetail={setDetailSubunit}
             visibleCandSet={visibleCandSet}
             candidateIndex={candidateIndex}
             candidateQuery={candidateQuery}
@@ -1467,7 +1678,11 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
               onToggleCand={toggleCand} onOpenDetail={setDetailCand}
               onBack={() => setView('grid')}
               hoveredCand={hoveredCand}
+              hoveredSubunit={hoveredSubunit}
               onHoverCandidate={setHoveredCand}
+              onHoverSubunit={setHoveredSubunit}
+              onToggleSubunitCands={toggleSubunitCands}
+              onOpenSubunitDetail={setDetailSubunit}
               onAddToCompare={(k) => setComparing(prev => prev.includes(k) ? prev : prev.length >= COMPARE_MAX ? [...prev.slice(1), k] : [...prev, k])}
               isInCompare={comparing.includes(chartKey(focusedChart))}
             />
@@ -1484,6 +1699,7 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
               onToggleCand={toggleCand}
               onBack={() => setView('grid')}
               hoveredCand={hoveredCand}
+              hoveredSubunit={hoveredSubunit}
               onRemove={(k) => setComparing(prev => prev.filter(x => x !== k))}
             />
           )}
@@ -1500,6 +1716,18 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
           isSelected={selectedCands.has(detailCand)}
           onToggleSelect={() => toggleCand(detailCand)}
           onClose={() => setDetailCand(null)}
+        />
+      )}
+
+      {/* Per-subunit cross-chart detail popup (aggregates all A-B partners of a
+          VarA or VarB subunit). */}
+      {detailSubunit && data && (
+        <SubunitDetailModal
+          sub={detailSubunit}
+          charts={data.charts}
+          aColors={aColors}
+          bColors={bColors}
+          onClose={() => setDetailSubunit(null)}
         />
       )}
     </div>
@@ -1519,7 +1747,10 @@ interface CandidatesSidebarProps {
   isolateSelected: boolean;
   setIsolateSelected: React.Dispatch<React.SetStateAction<boolean>>;
   setHoveredCand: React.Dispatch<React.SetStateAction<string | null>>;
+  setHoveredSubunit: React.Dispatch<React.SetStateAction<SubunitRef | null>>;
+  toggleSubunitCands: (cands: string[]) => void;
   onOpenDetail: (cand: string) => void;
+  onOpenSubunitDetail: (sub: SubunitRef) => void;
   visibleCandSet: Set<string>;
   candidateIndex: Map<string, { charts: number; total: number }>;
   candidateQuery: string;
@@ -1651,9 +1882,42 @@ function CandidatesSidebar(p: CandidatesSidebarProps) {
 
       {/* Body — scrolling list */}
       <div className="flex-1 min-h-0 overflow-y-auto">
-        {grouped.map((grp, gi) => (
+        {grouped.map((grp, gi) => {
+          // When grouped by a subunit, the group header acts on the whole subunit:
+          // click selects/deselects all its candidates, hover highlights them across
+          // charts, and the info icon opens the cross-chart subunit detail.
+          const subKind: 'A' | 'B' | null = p.candGroup === 'varA' ? 'A' : p.candGroup === 'varB' ? 'B' : null;
+          const grpCands = grp.rows.map(r => r.cand);
+          const grpReads = grp.rows.reduce((a, r) => a + r.total, 0);
+          const selInGrp = grpCands.filter(c => p.selectedCands.has(c)).length;
+          const allSel = selInGrp > 0 && selInGrp === grpCands.length;
+          const someSel = selInGrp > 0 && !allSel;
+          return (
           <div key={grp.label ?? `g-${gi}`}>
-            {grp.label !== null && (
+            {grp.label !== null && subKind && (
+              <div
+                className="group/hdr flex items-center gap-1.5 px-2.5 py-1 text-[10px] uppercase tracking-wider font-semibold text-slate-600 dark:text-gray-300 bg-slate-100/80 dark:bg-gray-800/80 sticky top-0 z-10 border-y border-slate-200 dark:border-gray-700 cursor-pointer hover:bg-blue-50 dark:hover:bg-blue-900/30"
+                onMouseEnter={() => p.setHoveredSubunit({ kind: subKind, id: grp.label! })}
+                onMouseLeave={() => p.setHoveredSubunit(null)}
+                onClick={() => p.toggleSubunitCands(grpCands)}
+                title={`${subKind === 'A' ? 'VarA' : 'VarB'} ${grp.label}: ${grpCands.length} combination${grpCands.length === 1 ? '' : 's'}, ${grpReads.toLocaleString()} reads. Click to ${allSel ? 'deselect' : 'select'} all; hover highlights across charts; info opens the subunit detail.`}
+              >
+                <span className={cn('inline-flex items-center justify-center w-3.5 h-3.5 rounded-sm border shrink-0',
+                  allSel ? 'bg-blue-600 border-blue-600 text-white' : someSel ? 'bg-blue-300 border-blue-400 dark:bg-blue-700' : 'border-slate-400 dark:border-gray-500')}>
+                  {allSel ? '✓' : someSel ? '–' : ''}
+                </span>
+                <span className="truncate">{grp.label}</span>
+                <span className="text-slate-400 font-normal normal-case tabular-nums">({grp.rows.length} · {grpReads >= 1000 ? `${(grpReads / 1000).toFixed(1)}k` : grpReads})</span>
+                <button
+                  onClick={(e) => { e.stopPropagation(); p.onOpenSubunitDetail({ kind: subKind, id: grp.label! }); }}
+                  className="ml-auto shrink-0 p-0.5 rounded text-slate-400 dark:text-gray-500 opacity-0 group-hover/hdr:opacity-100 hover:text-blue-600 dark:hover:text-blue-300"
+                  title={`Open ${subKind === 'A' ? 'VarA' : 'VarB'} ${grp.label} detail: behavior aggregated across all its partner combinations and charts`}
+                >
+                  <Info className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
+            {grp.label !== null && !subKind && (
               <div className="px-2.5 py-1 text-[10px] uppercase tracking-wider font-semibold text-slate-600 dark:text-gray-300 bg-slate-100/80 dark:bg-gray-800/80 sticky top-0 z-10 border-y border-slate-200 dark:border-gray-700">
                 {grp.label} <span className="text-slate-400 font-normal normal-case">({grp.rows.length})</span>
               </div>
@@ -1713,7 +1977,8 @@ function CandidatesSidebar(p: CandidatesSidebarProps) {
               );
             })}
           </div>
-        ))}
+          );
+        })}
         {p.rows.length > RENDER_CAP && (
           <p className="text-[10.5px] text-slate-400 px-2.5 py-2">
             Showing first {RENDER_CAP} of {p.rows.length}. Narrow the search to see more.
@@ -1854,13 +2119,17 @@ interface FocusViewProps {
   onBack: () => void;
   hoveredCand?: string | null;
   onHoverCandidate?: (c: string | null) => void;
+  hoveredSubunit?: SubunitRef | null;
+  onHoverSubunit?: (s: SubunitRef | null) => void;
+  onToggleSubunitCands?: (cands: string[]) => void;
+  onOpenSubunitDetail?: (s: SubunitRef) => void;
   onAddToCompare: (k: string) => void;
   isInCompare: boolean;
 }
 function FocusView(props: FocusViewProps) {
   const { charts, focusKey, setFocusKey, chart, stats, colorMode, splitAB, normalize,
     aColors, bColors, candColors, selectedCands, isolateSelected, topN, onToggleCand, onOpenDetail,
-    onBack, hoveredCand, onHoverCandidate, onAddToCompare, isInCompare } = props;
+    onBack, hoveredCand, onHoverCandidate, hoveredSubunit, onAddToCompare, isInCompare } = props;
   const idx = charts.findIndex(c => chartKey(c) === focusKey);
   const prev = idx > 0 ? charts[idx - 1] : null;
   const next = idx >= 0 && idx < charts.length - 1 ? charts[idx + 1] : null;
@@ -1963,6 +2232,7 @@ function FocusView(props: FocusViewProps) {
               selectedCands={selectedCands} isolateSelected={isolateSelected} topN={topN}
               height={chartHeight}
               hoverCand={hoveredCand}
+              hoverSubunit={hoveredSubunit}
               onPickCandidate={onToggleCand}
             />
           </div>
@@ -1994,11 +2264,12 @@ interface CompareViewProps {
   onToggleCand: (c: string) => void;
   onBack: () => void;
   hoveredCand?: string | null;
+  hoveredSubunit?: SubunitRef | null;
   onRemove: (k: string) => void;
 }
 function CompareView(props: CompareViewProps) {
   const { keys, charts, statsByKey, colorMode, splitAB, normalize, aColors, bColors,
-    candColors, selectedCands, isolateSelected, topN, onToggleCand, onBack, hoveredCand, onRemove } = props;
+    candColors, selectedCands, isolateSelected, topN, onToggleCand, onBack, hoveredCand, hoveredSubunit, onRemove } = props;
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onBack(); };
@@ -2045,6 +2316,7 @@ function CompareView(props: CompareViewProps) {
                     selectedCands={selectedCands} isolateSelected={isolateSelected} topN={topN}
                     height={resolved.length <= 2 ? 320 : 240}
                     hoverCand={hoveredCand}
+                    hoverSubunit={hoveredSubunit}
                     onPickCandidate={onToggleCand}
                   />
                 </div>
