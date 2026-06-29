@@ -69,6 +69,10 @@ interface MutationRow {
   base_type?: string;
   position?: number;
   gene_product?: string;
+  // Sample IDs whose donor DNA provided this mutation (supplied in the growth
+  // condition, not spontaneous). Cells for these samples get an outline; the popup
+  // flags them. Provided-but-0% shows an outline with no fill.
+  providedIn?: string[];
   detail?: MutationDetail;
 }
 
@@ -2101,6 +2105,7 @@ function ComparativePanel({
                     >
                       <div className="text-[12px] font-medium text-slate-800 dark:text-gray-100 truncate group-hover:text-blue-600 dark:group-hover:text-blue-400 group-hover:underline decoration-dotted underline-offset-2">
                         {m.metric === 'copy_number' && <span className="mr-1 px-1 rounded bg-violet-100 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300 text-[9px] font-semibold uppercase align-middle" title="Copy number region (pinned to top)">CN</span>}
+                        {m.providedIn && m.providedIn.length > 0 && <span className="mr-1 px-1 rounded bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 text-[9px] font-semibold uppercase align-middle ring-1 ring-amber-400/60" title={`Provided as donor DNA in ${m.providedIn.length} sample${m.providedIn.length === 1 ? '' : 's'} (supplied, not spontaneous)`}>provided</span>}
                         {m.gene} <span className="font-normal text-slate-500 dark:text-gray-400 group-hover:text-blue-500 dark:group-hover:text-blue-400">/ {m.variant}</span>
                       </div>
                       <div className="text-[10px] text-slate-400 dark:text-gray-500 truncate">
@@ -2114,20 +2119,34 @@ function ComparativePanel({
                 {visibleSamples.map(s => {
                   const v = m.values[s.id];
                   const hasVal = typeof v === 'number' && !Number.isNaN(v);
+                  // PROVIDED: this mutation was supplied as donor DNA in this sample's
+                  // growth condition (Henry). Outline the cell. Provided but 0%/absent
+                  // = outline with no fill (provided, not observed).
+                  const provided = !!m.providedIn && m.providedIn.includes(s.id);
+                  const providedUnobserved = provided && (!hasVal || v === 0);
                   // Scaled gradient: per-row range for CN, per-column range for freq.
                   const range = cnRange ?? columnFreqRange.get(s.id) ?? { min: 0, max: 1 };
                   const style = hasVal ? rampStyle(v, range.min, range.max, m.metric) : undefined;
+                  // Amber inset ring marks a provided cell without recoloring the fill.
+                  const providedStyle = provided
+                    ? { ...style, boxShadow: 'inset 0 0 0 2px #d97706, inset 0 0 0 3px rgba(255,255,255,0.55)' }
+                    : style;
                   return (
                     <td
                       key={s.id}
-                      style={style}
+                      style={providedStyle}
                       className={cn(
-                        'border-l border-slate-100 dark:border-gray-700/60 px-1.5 py-1 text-center tabular-nums text-[11.5px]',
-                        !hasVal && 'text-slate-300 dark:text-gray-600 bg-slate-50/50 dark:bg-gray-800/40'
+                        'border-l border-slate-100 dark:border-gray-700/60 px-1.5 py-1 text-center tabular-nums text-[11.5px] relative',
+                        !hasVal && !provided && 'text-slate-300 dark:text-gray-600 bg-slate-50/50 dark:bg-gray-800/40'
                       )}
-                      title={hasVal ? `${m.gene} ${m.variant} in ${s.name}: ${formatMetric(v, m.metric)}${m.metric === 'frequency' ? ` (raw ${v.toFixed(3)})` : ''} · color scaled to ${m.metric === 'copy_number' ? 'this row' : 'this column'} range ${range.min.toFixed(m.metric === 'copy_number' ? 1 : 2)} to ${range.max.toFixed(m.metric === 'copy_number' ? 1 : 2)}` : `${m.gene} ${m.variant} in ${s.name}: no data`}
+                      title={
+                        (provided ? `PROVIDED in donor DNA (${s.donor_dna || 'donor'})${providedUnobserved ? ', not observed (0%)' : ''}. ` : '') +
+                        (hasVal
+                          ? `${m.gene} ${m.variant} in ${s.name}: ${formatMetric(v, m.metric)}${m.metric === 'frequency' ? ` (raw ${v.toFixed(3)})` : ''} · color scaled to ${m.metric === 'copy_number' ? 'this row' : 'this column'} range ${range.min.toFixed(m.metric === 'copy_number' ? 1 : 2)} to ${range.max.toFixed(m.metric === 'copy_number' ? 1 : 2)}`
+                          : `${m.gene} ${m.variant} in ${s.name}: no data`)
+                      }
                     >
-                      {hasVal ? formatMetric(v, m.metric) : '—'}
+                      {hasVal ? formatMetric(v, m.metric) : (providedUnobserved ? <span className="text-amber-600 dark:text-amber-400 text-[10px] font-semibold" title="provided in donor DNA, 0% abundance">0%</span> : '—')}
                     </td>
                   );
                 })}
@@ -3625,19 +3644,25 @@ function MutationDetailModal({
                       const v = mutation.values[s.id];
                       const has = typeof v === 'number' && !Number.isNaN(v);
                       const pct = has ? (mutation.metric === 'frequency' ? Math.max(0, Math.min(1, v)) : (maxFreq > 0 ? v / maxFreq : 0)) : 0;
+                      // PROVIDED in donor DNA for this sample (Henry).
+                      const provided = !!mutation.providedIn && mutation.providedIn.includes(s.id);
+                      const providedUnobserved = provided && (!has || v === 0);
                       return (
                         <div key={s.id} className="flex items-center gap-2">
-                          <div className="w-40 shrink-0 truncate font-mono text-[11px] text-[var(--text)]" title={s.name}>{s.name}</div>
-                          <div className="flex-1 h-4 rounded bg-[var(--surface-3)] overflow-hidden relative">
-                            {has && (
+                          <div className="w-40 shrink-0 truncate font-mono text-[11px] text-[var(--text)] flex items-center gap-1" title={provided ? `${s.name}\nProvided as donor DNA (${s.donor_dna || 'donor'})` : s.name}>
+                            {provided && <span className="shrink-0 px-1 rounded bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 text-[8.5px] font-bold uppercase ring-1 ring-amber-400/60" title="provided as donor DNA in this sample">prov</span>}
+                            <span className="truncate">{s.name}</span>
+                          </div>
+                          <div className={cn('flex-1 h-4 rounded bg-[var(--surface-3)] overflow-hidden relative', provided && 'ring-2 ring-amber-500/70 ring-inset')}>
+                            {has && v > 0 && (
                               <div
                                 className={cn('h-full rounded', mutation.metric === 'copy_number' ? 'bg-emerald-500' : 'bg-blue-500')}
                                 style={{ width: `${Math.round(pct * 100)}%` }}
                               />
                             )}
                           </div>
-                          <div className="w-16 shrink-0 text-right tabular-nums text-[11px] text-[var(--text)]">
-                            {has ? formatMetric(v, mutation.metric) : <span className="text-[var(--text-faint)]">- absent</span>}
+                          <div className="w-20 shrink-0 text-right tabular-nums text-[11px] text-[var(--text)]">
+                            {has ? formatMetric(v, mutation.metric) : (providedUnobserved ? <span className="text-amber-600 dark:text-amber-400" title="provided but not observed">0% prov.</span> : <span className="text-[var(--text-faint)]">- absent</span>)}
                           </div>
                         </div>
                       );

@@ -33,6 +33,11 @@ export interface MutationRow {
   base_type?: string;      // raw breseq type: SNP / INS / DEL / SUB
   position?: number;
   gene_product?: string;
+  // Sample IDs whose donor DNA (Transforming_DNA) provided THIS mutation, i.e. it
+  // was supplied in the growth condition rather than arising spontaneously. The UI
+  // outlines these cells / flags these samples. A sample can be in providedIn yet
+  // have 0% (or absent) frequency: provided but not observed (outline, no fill).
+  providedIn?: string[];
   // Rich structural detail for the Comparative-view mutation popup. Captured from
   // the first raw row that keys to this mutation (rows sharing a mutationKey share
   // these fields; only frequency varies by sample and that lives in `values`).
@@ -206,6 +211,60 @@ function deriveDonorDna(sampleName: string | null, transformingDna: string | nul
 function labelGene(r: MutationRawRow): string {
   return (r.gene_name || r.locus_tag || r.gene_product || 'unknown').trim();
 }
+
+// Parse a sample's donor DNA string (Transforming_DNA) into structured tokens so
+// we can decide whether a given mutation was PROVIDED (supplied in the growth
+// condition) vs spontaneous. Real-world formats seen in the LIMS:
+//   "fba.P44L"                gene.variant (dot)
+//   "fba_P44L"                gene_variant (underscore)
+//   "fba.P44L, pgi.G275D"     comma-separated multiple
+//   "sohB.truncation"         gene.<non-AA descriptor>
+//   "fbaWT" / "fbaMUT" / "combo10WT" / "gDNA_ACN3560" / "DEL_vanK"  ambiguous/other
+// We extract a (gene, variant) pair when a token clearly has a gene + a specific
+// variant (dot or underscore separated, gene matches /^[A-Za-z]/). The ambiguous
+// WT/MUT/combo/gDNA/DEL tokens carry no specific variant and are kept as raw
+// gene-level hints only (matched by gene + a recognizable variant on the mutation
+// would be too loose, so those do NOT mark a specific mutation as provided).
+interface DonorToken { gene: string; variant: string | null; raw: string; }
+function parseDonorTokens(donor: string | null | undefined): DonorToken[] {
+  if (!donor) return [];
+  const out: DonorToken[] = [];
+  for (const rawTok of donor.split(',')) {
+    const tok = rawTok.trim();
+    if (!tok) continue;
+    // Split gene from variant on the FIRST dot or underscore.
+    const m = tok.match(/^([A-Za-z][A-Za-z0-9]*)[._](.+)$/);
+    if (m) {
+      out.push({ gene: m[1], variant: m[2], raw: tok });
+    } else {
+      out.push({ gene: tok, variant: null, raw: tok });
+    }
+  }
+  return out;
+}
+
+// Normalize an amino-acid / descriptor variant for tolerant comparison:
+// lowercase, strip non-alphanumerics ("P44L" == "p44l"; "truncation" == "truncation").
+function normVariant(v: string): string {
+  return v.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+// Decide whether mutation (gene, variant) is provided by any donor token.
+// Match is gene-equal (case-insensitive) AND variant-equal (normalized). This is
+// deliberately strict so we never falsely flag a spontaneous mutation: a token
+// must name BOTH the same gene and the same specific variant.
+function donorProvidesMutation(tokens: DonorToken[], gene: string, variant: string): boolean {
+  if (!gene || !variant) return false;
+  const g = gene.toLowerCase();
+  const v = normVariant(variant);
+  if (!v) return false;
+  for (const t of tokens) {
+    if (!t.variant) continue;
+    if (t.gene.toLowerCase() === g && normVariant(t.variant) === v) return true;
+  }
+  return false;
+}
+
 
 function labelVariant(r: MutationRawRow): string {
   if (r.aa_ref_seq && r.aa_new_seq && r.aa_position !== null && r.aa_position !== undefined) {
@@ -641,6 +700,14 @@ export async function GET(req: NextRequest) {
 
     const sampleIds = new Set(samples.map(s => s.id));
 
+    // Per-sample parsed donor DNA tokens, so we can flag PROVIDED mutations (Henry):
+    // a mutation supplied in the growth condition vs one that arose spontaneously.
+    const donorBySample = new Map<string, DonorToken[]>();
+    for (const s of samples) {
+      const toks = parseDonorTokens(s.donor_dna);
+      if (toks.length) donorBySample.set(s.id, toks);
+    }
+
     // DEFAULT-VIEW per-sample registry resolution (see usePerSampleRegistry
     // above). When we pulled calls across all registries, each seq_sample may
     // have calls under several breseq runs; we keep only that sample's DOMINANT
@@ -741,6 +808,14 @@ export async function GET(req: NextRequest) {
       // strip the internal helper before serializing
       const { _maxFreqBySample, ...clean } = r as InternalRow;
       void _maxFreqBySample;
+      // Flag which samples PROVIDED this mutation via donor DNA (Henry). We scan
+      // every sample with donor tokens (not just those with a frequency value) so
+      // a mutation provided but never observed still gets an outline (no fill).
+      const providedIn: string[] = [];
+      for (const [sid, toks] of donorBySample) {
+        if (donorProvidesMutation(toks, clean.gene, clean.variant)) providedIn.push(sid);
+      }
+      if (providedIn.length) clean.providedIn = providedIn;
       return clean;
     });
 
