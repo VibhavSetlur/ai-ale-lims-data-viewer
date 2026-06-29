@@ -3458,6 +3458,16 @@ function CompareView(props: CompareViewProps) {
   const legendShown = legendSorted.slice(0, LEGEND_CAP);
   const legendMore = legendSorted.length - legendShown.length;
 
+  // Swatch color MUST match what the bars actually draw: the chart segments respect
+  // colorMode (A-B uses candColors, VerA uses aColors, VerB uses bColors), so the
+  // shared-candidate legend has to use the same mapping or the swatch and the bar
+  // for the same candidate disagree (reported by Nidhi). Mirror ChartCard.getColor.
+  const legendSwatchColor = (cand: string): string => {
+    if (colorMode === 'partner-a') { const p = parseCandidate(cand); return (p && aColors[p.a]) || '#888'; }
+    if (colorMode === 'partner-b') { const p = parseCandidate(cand); return (p && bColors[p.b]) || '#888'; }
+    return candColors[cand] || '#888';
+  };
+
   const cols = colChoice === 'auto'
     ? (resolved.length <= 1 ? 1 : resolved.length === 2 ? 2 : resolved.length <= 6 ? 3 : 4)
     : colChoice;
@@ -3557,7 +3567,7 @@ function CompareView(props: CompareViewProps) {
                         : 'bg-white/70 dark:bg-gray-800/60 border-slate-200 dark:border-gray-600 text-slate-600 dark:text-gray-300 hover:border-slate-300 dark:hover:border-gray-500',
                   )}
                 >
-                  <span className="w-3 h-3 rounded-sm shrink-0 ring-1 ring-black/10" style={{ background: candColors[row.cand] || '#888' }} />
+                  <span className="w-3 h-3 rounded-sm shrink-0 ring-1 ring-black/10" style={{ background: legendSwatchColor(row.cand) }} />
                   <span className="font-mono font-medium">{row.cand}</span>
                   <span className="text-slate-400 dark:text-gray-500">{row.total.toLocaleString()}</span>
                   <span className="text-[9.5px] text-slate-400 dark:text-gray-500" title={`Appears in ${row.charts} of ${resolved.length} compared charts`}>{row.charts}/{resolved.length}</span>
