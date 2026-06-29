@@ -56,11 +56,30 @@ function candMatchesSubunit(cand: string, sub: SubunitRef | null): boolean {
 }
 
 // Deterministic, color-blind-aware palette (golden-angle hue rotation).
+// Saturation/lightness are kept MODERATE (not neon) so fills are easy on the eyes
+// and text stays legible: 48% saturation + 58% lightness reads as a calm, distinct
+// tone rather than a vivid block. Pair with textColorFor() for readable labels.
 const GOLDEN = 137.508;
+const FILL_SAT = 45;
+const FILL_LIGHT = 52;
 function colorFor(idx: number, total: number): string {
   void total;
   const hue = (idx * GOLDEN) % 360;
-  return `hsl(${hue} 65% 50%)`;
+  return `hsl(${hue} ${FILL_SAT}% ${FILL_LIGHT}%)`;
+}
+
+// Pick black or white text for a given hsl() fill so labels are always readable
+// (no more white-on-yellow). Uses perceived lightness from the HSL L channel plus
+// a hue-aware nudge (yellows/greens read lighter than blues at the same L).
+function textColorFor(hslColor: string): string {
+  const m = hslColor.match(/hsl\(\s*([\d.]+)\s+([\d.]+)%\s+([\d.]+)%/);
+  if (!m) return '#ffffff';
+  const hue = parseFloat(m[1]);
+  const light = parseFloat(m[3]);
+  // yellow-green band (45-200) appears brighter, so flip to dark text sooner.
+  const brightBand = hue >= 45 && hue <= 200;
+  const threshold = brightBand ? 52 : 62;
+  return light >= threshold ? '#0f172a' : '#ffffff';
 }
 
 function parseCandidate(label: string): { a: string; b: string } | null {
@@ -81,13 +100,13 @@ function colorForCandidate(label: string): string {
     // Fallback for non A#-B# labels (e.g. "__OTHER__"): stable hash of the string.
     let h = 0;
     for (let i = 0; i < label.length; i++) h = (h * 31 + label.charCodeAt(i)) | 0;
-    return `hsl(${Math.abs(h) % 360} 65% 50%)`;
+    return `hsl(${Math.abs(h) % 360} ${FILL_SAT}% ${FILL_LIGHT}%)`;
   }
   const a = parseInt(p.a.slice(1), 10) || 0;
   const b = parseInt(p.b.slice(1), 10) || 0;
   const ordinal = a * 97 + b; // 97 = large prime so A-rows do not collide in hue
   const hue = (ordinal * GOLDEN) % 360;
-  return `hsl(${hue} 65% 50%)`;
+  return `hsl(${hue} ${FILL_SAT}% ${FILL_LIGHT}%)`;
 }
 
 function chartKey(c: BarcodeChart): string {
@@ -99,12 +118,36 @@ function chartKey(c: BarcodeChart): string {
 // (one faint line per chart the candidate appears in), plus total reads, the number
 // of charts it appears in, and its peak fraction and where that peak occurred. This
 // is the "track A1-B1 across all conditions and transfers at once" view Nidhi wanted.
+// Trajectory classification for ONE chart's per-transfer fractions. We compare the
+// first, peak and last fractions: a candidate that rose then collapsed is 'transient'
+// (bloomed then washed out); one that ends meaningfully above where it started is
+// 'rising'; below is 'falling'; otherwise 'stable'. Thresholds are in fraction units.
+type TrendKind = 'rising' | 'falling' | 'stable' | 'transient';
+function classifyTrend(first: number, peak: number, last: number): TrendKind {
+  const RISE = 0.04; // 4 percentage points counts as a real move
+  const delta = last - first;
+  // Bloomed then washed out: peaked clearly above both ends, ended near/below start.
+  if (peak - first > RISE * 2 && peak - last > RISE * 2 && last <= first + RISE) return 'transient';
+  if (delta > RISE) return 'rising';
+  if (delta < -RISE) return 'falling';
+  return 'stable';
+}
+// Stable Tailwind chip styles + readable label per trend kind.
+const TREND_META: Record<TrendKind, { label: string; chip: string }> = {
+  rising:    { label: 'rising',    chip: 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 border-emerald-300 dark:border-emerald-700' },
+  falling:   { label: 'falling',   chip: 'bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300 border-red-300 dark:border-red-700' },
+  stable:    { label: 'stable',    chip: 'bg-slate-100 dark:bg-gray-800 text-slate-600 dark:text-gray-300 border-slate-300 dark:border-gray-600' },
+  transient: { label: 'transient', chip: 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 border-amber-300 dark:border-amber-700' },
+};
+
 function CandidateDetailModal({
-  cand, charts, candColors, candidateIndex, isSelected, onToggleSelect, onClose,
+  cand, charts, candColors, aColors, bColors, candidateIndex, isSelected, onToggleSelect, onClose,
 }: {
   cand: string;
   charts: BarcodeChart[];
   candColors: Record<string, string>;
+  aColors: Record<string, string>;
+  bColors: Record<string, string>;
   candidateIndex: Map<string, { charts: number; total: number }>;
   isSelected: boolean;
   onToggleSelect: () => void;
@@ -118,60 +161,148 @@ function CandidateDetailModal({
 
   const color = candColors[cand] || '#2563eb';
   const idx = candidateIndex.get(cand) ?? { charts: 0, total: 0 };
+  const parts = parseCandidate(cand);
+
+  // Y-axis metric for the in-modal line chart: fraction (0..100%) or absolute reads.
+  const [metric, setMetric] = useState<'fraction' | 'count'>('fraction');
+  // Sortable per-chart breakdown table state.
+  const [sortKey, setSortKey] = useState<'peak' | 'delta' | 'reads'>('peak');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+  // Which chart line is highlighted (set by hovering/clicking a table row). Full
+  // opacity + thick stroke for the match, dim for the rest.
+  const [hoveredChartKey, setHoveredChartKey] = useState<string | null>(null);
+  // Hover crosshair: index into the dense transfer axis the mouse is nearest to.
+  const [hoverTransfer, setHoverTransfer] = useState<number | null>(null);
 
   // Build one fraction-over-transfers series per chart that contains this candidate.
   // Fraction = candidate reads / total reads at that transfer, so charts with very
   // different depths are comparable. Track the global peak fraction and where.
-  const { series, xMax, peak, perChart, dominantCount, meanLast } = useMemo(() => {
-    const out: { key: string; label: string; pts: { x: number; y: number }[] }[] = [];
-    const rows: { key: string; label: string; peak: number; first: number; last: number; reads: number; dominant: boolean }[] = [];
+  // Each series also carries absolute reads per transfer so the metric toggle can
+  // re-scale without recomputing, and the union of transfers powers the crosshair.
+  const { series, xMax, yMaxCount, peak, perChart, dominantCount, meanLast, trendCounts, allTransfers } = useMemo(() => {
+    const out: { key: string; label: string; pts: { x: number; y: number; reads: number }[] }[] = [];
+    const rows: { key: string; label: string; peak: number; first: number; last: number; reads: number; dominant: boolean; trend: TrendKind }[] = [];
     let xMaxLocal = 1;
+    let yMaxCountLocal = 1;
     let peakLocal = { frac: 0, transfer: 0, label: '' };
     let domCount = 0;
     let lastSum = 0, lastN = 0;
+    const tc: Record<TrendKind, number> = { rising: 0, falling: 0, stable: 0, transient: 0 };
+    const transferSet = new Set<number>();
     for (const c of charts) {
       const counts = c.candidates[cand];
       if (!counts) continue;
-      const pts: { x: number; y: number }[] = [];
+      const pts: { x: number; y: number; reads: number }[] = [];
       let firstFrac = 0, lastFrac = 0, peakFrac = 0, reads = 0, dominantHere = false;
       c.transfers.forEach((t, i) => {
         const tot = Object.values(c.candidates).reduce((a, arr) => a + (arr[i] || 0), 0);
-        const frac = tot > 0 ? (counts[i] || 0) / tot : 0;
-        pts.push({ x: t, y: frac });
-        reads += counts[i] || 0;
+        const cnt = counts[i] || 0;
+        const frac = tot > 0 ? cnt / tot : 0;
+        pts.push({ x: t, y: frac, reads: cnt });
+        reads += cnt;
+        if (cnt > yMaxCountLocal) yMaxCountLocal = cnt;
         if (i === 0) firstFrac = frac;
         if (i === c.transfers.length - 1) lastFrac = frac;
         if (frac > peakFrac) peakFrac = frac;
         // dominant in this chart at this transfer?
         let bestOther = 0;
         for (const arr of Object.values(c.candidates)) { const v = arr[i] || 0; if (v > bestOther) bestOther = v; }
-        if ((counts[i] || 0) > 0 && (counts[i] || 0) === bestOther) dominantHere = true;
+        if (cnt > 0 && cnt === bestOther) dominantHere = true;
         if (t > xMaxLocal) xMaxLocal = t;
+        transferSet.add(t);
         if (frac > peakLocal.frac) {
           peakLocal = { frac, transfer: t, label: `${c.well || c.strain || c.library} r${c.replicate}` };
         }
       });
       if (pts.some(p => p.y > 0)) {
         const label = `${c.well || c.strain} r${c.replicate} (${c.library})`;
+        const trend = classifyTrend(firstFrac, peakFrac, lastFrac);
         out.push({ key: chartKey(c), label, pts });
-        rows.push({ key: chartKey(c), label, peak: peakFrac, first: firstFrac, last: lastFrac, reads, dominant: dominantHere });
+        rows.push({ key: chartKey(c), label, peak: peakFrac, first: firstFrac, last: lastFrac, reads, dominant: dominantHere, trend });
+        tc[trend] += 1;
         if (dominantHere) domCount += 1;
         lastSum += lastFrac; lastN += 1;
       }
     }
     rows.sort((a, b) => b.peak - a.peak);
-    return { series: out, xMax: xMaxLocal, peak: peakLocal, perChart: rows, dominantCount: domCount, meanLast: lastN ? lastSum / lastN : 0 };
+    const transfers = [...transferSet].sort((a, b) => a - b);
+    return {
+      series: out, xMax: xMaxLocal, yMaxCount: yMaxCountLocal, peak: peakLocal,
+      perChart: rows, dominantCount: domCount, meanLast: lastN ? lastSum / lastN : 0,
+      trendCounts: tc, allTransfers: transfers,
+    };
   }, [cand, charts]);
 
-  // Chart geometry (fraction 0..1 on Y, transfer on X).
-  const W = 720, H = 320, padL = 44, padR = 16, padT = 16, padB = 40;
+  // Apply the sortable-table state to a copy of the per-chart rows.
+  const sortedRows = useMemo(() => {
+    const dirMul = sortDir === 'asc' ? 1 : -1;
+    const keyed = perChart.map(r => ({ ...r, delta: r.last - r.first }));
+    keyed.sort((a, b) => {
+      const va = sortKey === 'peak' ? a.peak : sortKey === 'reads' ? a.reads : a.delta;
+      const vb = sortKey === 'peak' ? b.peak : sortKey === 'reads' ? b.reads : b.delta;
+      return (va - vb) * dirMul;
+    });
+    return keyed;
+  }, [perChart, sortKey, sortDir]);
+
+  const setSort = useCallback((k: 'peak' | 'delta' | 'reads') => {
+    setSortKey(prev => { if (prev === k) { setSortDir(d => d === 'asc' ? 'desc' : 'asc'); return prev; } setSortDir('desc'); return k; });
+  }, []);
+
+  // CSV export: this candidate's per-chart per-transfer fraction AND reads. One row
+  // per (chart, transfer). Lets a reviewer pull the exact numbers into a spreadsheet.
+  const exportCsv = useCallback(() => {
+    const header = ['candidate', 'varA', 'varB', 'chart', 'transfer', 'fraction', 'reads'];
+    const lines = [header.join(',')];
+    for (const s of series) {
+      for (const p of s.pts) {
+        lines.push([
+          cand, parts?.a ?? '', parts?.b ?? '',
+          `"${s.label.replace(/"/g, '""')}"`,
+          String(p.x), (p.y).toFixed(6), String(p.reads),
+        ].join(','));
+      }
+    }
+    downloadBlob(`${cand}_fractions.csv`, lines.join('\n'));
+  }, [series, cand, parts]);
+
+  // Chart geometry. Y is either fraction 0..1 or absolute reads 0..yMaxCount.
+  const W = 720, H = 320, padL = 52, padR = 16, padT = 16, padB = 40;
   const plotW = W - padL - padR, plotH = H - padT - padB;
+  const yMax = metric === 'fraction' ? 1 : yMaxCount;
   const sx = (x: number) => padL + (xMax > 0 ? (x / xMax) * plotW : 0);
-  const sy = (y: number) => padT + plotH - y * plotH; // y is a fraction 0..1
-  const yTicks = [0, 0.25, 0.5, 0.75, 1];
+  const sy = (y: number) => padT + plotH - (yMax > 0 ? (y / yMax) * plotH : 0);
+  const valOf = (p: { y: number; reads: number }) => metric === 'fraction' ? p.y : p.reads;
+  const yTicks = metric === 'fraction'
+    ? [0, 0.25, 0.5, 0.75, 1]
+    : [0, 0.25, 0.5, 0.75, 1].map(f => f * yMaxCount);
+  const fmtY = (v: number) => metric === 'fraction' ? `${Math.round(v * 100)}%` : (v >= 1000 ? `${(v / 1000).toFixed(1)}k` : String(Math.round(v)));
   const xStep = xMax <= 12 ? 1 : Math.ceil(xMax / 12);
   const xTicks: number[] = [];
   for (let v = 0; v <= xMax; v += xStep) xTicks.push(v);
+
+  // Crosshair: map a mouse x in SVG user space to the nearest transfer in allTransfers.
+  const onPlotMove = (e: React.MouseEvent<SVGSVGElement>) => {
+    const svg = e.currentTarget;
+    const rect = svg.getBoundingClientRect();
+    const ux = ((e.clientX - rect.left) / rect.width) * W;
+    if (ux < padL - 4 || ux > W - padR + 4 || allTransfers.length === 0) { setHoverTransfer(null); return; }
+    let best = allTransfers[0], bestD = Infinity;
+    for (const t of allTransfers) { const d = Math.abs(sx(t) - ux); if (d < bestD) { bestD = d; best = t; } }
+    setHoverTransfer(best);
+  };
+  // Per-chart value at the hovered transfer (top few, by value), for the tooltip.
+  const hoverRows = useMemo(() => {
+    if (hoverTransfer == null) return [];
+    const rows: { key: string; label: string; val: number; reads: number; frac: number }[] = [];
+    for (const s of series) {
+      const p = s.pts.find(pt => pt.x === hoverTransfer);
+      if (!p || (p.reads === 0)) continue;
+      rows.push({ key: s.key, label: s.label, val: metric === 'fraction' ? p.y : p.reads, reads: p.reads, frac: p.y });
+    }
+    rows.sort((a, b) => b.val - a.val);
+    return rows;
+  }, [hoverTransfer, series, metric]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={onClose}>
@@ -180,13 +311,35 @@ function CandidateDetailModal({
         onClick={e => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center gap-2 px-4 py-3 border-b border-slate-200 dark:border-gray-700 sticky top-0 bg-white dark:bg-gray-900 z-10">
+        <div className="flex flex-wrap items-center gap-2 px-4 py-3 border-b border-slate-200 dark:border-gray-700 sticky top-0 bg-white dark:bg-gray-900 z-10">
           <span className="inline-block w-4 h-4 rounded-sm shrink-0" style={{ background: color }} />
           <span className="font-mono font-semibold text-[15px] text-slate-800 dark:text-gray-100">{cand}</span>
-          <span className="text-[11.5px] text-slate-500 dark:text-gray-400">barcode combination across all charts</span>
+          {/* Composition diagram: which VarA + VarB subunits compose this combination,
+              each shown as its own stable swatch with a contrast-checked label. */}
+          {parts && (
+            <span className="flex items-center gap-1" title={`Composed of VarA ${parts.a} and VarB ${parts.b}`}>
+              <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold border border-black/10 dark:border-white/10"
+                style={{ background: aColors[parts.a] || '#888', color: textColorFor(aColors[parts.a] || 'hsl(0 0% 40%)') }}>
+                {parts.a}
+              </span>
+              <Plus className="w-3 h-3 text-slate-400 dark:text-gray-500" />
+              <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold border border-black/10 dark:border-white/10"
+                style={{ background: bColors[parts.b] || '#888', color: textColorFor(bColors[parts.b] || 'hsl(0 0% 40%)') }}>
+                {parts.b}
+              </span>
+            </span>
+          )}
+          <span className="text-[11.5px] text-slate-500 dark:text-gray-400 hidden sm:inline">barcode combination across all charts</span>
+          <button
+            onClick={exportCsv}
+            title="Download this combination's per-chart per-transfer fractions and reads as CSV"
+            className="ml-auto text-[11.5px] px-2 py-1 rounded border font-medium flex items-center gap-1 border-slate-300 dark:border-gray-600 text-slate-600 dark:text-gray-300 hover:bg-slate-100 dark:hover:bg-gray-700"
+          >
+            <Download className="w-3.5 h-3.5" /> CSV
+          </button>
           <button
             onClick={onToggleSelect}
-            className={cn('ml-auto text-[11.5px] px-2 py-1 rounded border font-medium',
+            className={cn('text-[11.5px] px-2 py-1 rounded border font-medium',
               isSelected
                 ? 'bg-blue-600 text-white border-blue-600 hover:bg-blue-700'
                 : 'border-slate-300 dark:border-gray-600 text-slate-600 dark:text-gray-300 hover:bg-slate-100 dark:hover:bg-gray-700')}
@@ -209,42 +362,109 @@ function CandidateDetailModal({
           <Stat label="mean final share" value={`${(meanLast * 100).toFixed(1)}%`} />
         </div>
 
+        {/* Trend summary chips: how this combination trends across the charts it
+            appears in. Rises in N, falls in M, stable in K, transient in J. */}
+        {perChart.length > 0 && (
+          <div className="px-4 pb-1 flex flex-wrap items-center gap-1.5 text-[11px]">
+            <span className="text-slate-500 dark:text-gray-400">across {perChart.length} chart{perChart.length === 1 ? '' : 's'}:</span>
+            <span className={cn('px-1.5 py-0.5 rounded border font-medium', TREND_META.rising.chip)}>rises in {trendCounts.rising}</span>
+            <span className={cn('px-1.5 py-0.5 rounded border font-medium', TREND_META.falling.chip)}>falls in {trendCounts.falling}</span>
+            <span className={cn('px-1.5 py-0.5 rounded border font-medium', TREND_META.stable.chip)}>stable in {trendCounts.stable}</span>
+            {trendCounts.transient > 0 && (
+              <span className={cn('px-1.5 py-0.5 rounded border font-medium', TREND_META.transient.chip)}>transient in {trendCounts.transient}</span>
+            )}
+          </div>
+        )}
+
         {/* Cross-chart fraction-over-transfers chart */}
         <div className="px-4 pb-4">
-          <div className="text-[11px] text-slate-500 dark:text-gray-400 mb-1">
-            Fraction of reads over transfers, one line per chart this combination appears in
-            ({series.length} chart{series.length === 1 ? '' : 's'}).
+          <div className="flex items-center justify-between gap-2 mb-1">
+            <div className="text-[11px] text-slate-500 dark:text-gray-400">
+              {metric === 'fraction' ? 'Fraction' : 'Read count'} over transfers, one line per chart this combination appears in
+              ({series.length} chart{series.length === 1 ? '' : 's'}).
+            </div>
+            {/* Metric toggle: fraction (0-100%) vs absolute reads on the Y axis. */}
+            <div className="flex shrink-0 rounded border border-slate-300 dark:border-gray-600 overflow-hidden text-[10.5px] font-medium">
+              {(['fraction', 'count'] as const).map(m => (
+                <button key={m} onClick={() => setMetric(m)}
+                  className={cn('px-2 py-0.5',
+                    metric === m
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-white dark:bg-gray-800 text-slate-600 dark:text-gray-300 hover:bg-slate-100 dark:hover:bg-gray-700')}>
+                  {m === 'fraction' ? 'Fraction' : 'Read count'}
+                </button>
+              ))}
+            </div>
           </div>
           {series.length === 0 ? (
             <div className="text-[12px] text-slate-400 dark:text-gray-500 py-8 text-center">
               No nonzero measurements for this combination.
             </div>
           ) : (
-            <svg viewBox={`0 0 ${W} ${H}`} className="w-full select-none" role="img"
-              aria-label={`Fraction over transfers for ${cand}`}>
-              {/* y gridlines + labels */}
-              {yTicks.map(v => (
-                <g key={`y${v}`}>
-                  <line x1={padL} x2={W - padR} y1={sy(v)} y2={sy(v)} stroke="currentColor" className="text-slate-200 dark:text-gray-700" strokeWidth="1" />
-                  <text x={padL - 6} y={sy(v) + 3} textAnchor="end" className="text-[9px] fill-slate-400 dark:fill-gray-500">{Math.round(v * 100)}%</text>
-                </g>
-              ))}
-              {/* x ticks */}
-              {xTicks.map(v => (
-                <text key={`x${v}`} x={sx(v)} y={H - padB + 14} textAnchor="middle" className="text-[9px] fill-slate-400 dark:fill-gray-500">T{v}</text>
-              ))}
-              <text x={padL + plotW / 2} y={H - 4} textAnchor="middle" className="text-[10px] fill-slate-500 dark:fill-gray-400">Transfer</text>
-              {/* one faint line per chart, in the candidate's color */}
-              {series.map(s => {
-                const d = s.pts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${sx(p.x).toFixed(1)} ${sy(p.y).toFixed(1)}`).join(' ');
-                return (
-                  <g key={s.key}>
-                    <path d={d} fill="none" stroke={color} strokeWidth="1.6" opacity={0.55} strokeLinejoin="round" strokeLinecap="round" />
-                    {s.pts.map((p, i) => <circle key={i} cx={sx(p.x)} cy={sy(p.y)} r="1.8" fill={color} opacity={0.7} />)}
+            <div className="relative">
+              <svg viewBox={`0 0 ${W} ${H}`} className="w-full select-none" role="img"
+                onMouseMove={onPlotMove} onMouseLeave={() => setHoverTransfer(null)}
+                aria-label={`${metric === 'fraction' ? 'Fraction' : 'Read count'} over transfers for ${cand}`}>
+                {/* y gridlines + labels */}
+                {yTicks.map(v => (
+                  <g key={`y${v}`}>
+                    <line x1={padL} x2={W - padR} y1={sy(v)} y2={sy(v)} stroke="currentColor" className="text-slate-200 dark:text-gray-700" strokeWidth="1" />
+                    <text x={padL - 6} y={sy(v) + 3} textAnchor="end" className="text-[9px] fill-slate-400 dark:fill-gray-500">{fmtY(v)}</text>
                   </g>
-                );
-              })}
-            </svg>
+                ))}
+                {/* x ticks */}
+                {xTicks.map(v => (
+                  <text key={`x${v}`} x={sx(v)} y={H - padB + 14} textAnchor="middle" className="text-[9px] fill-slate-400 dark:fill-gray-500">T{v}</text>
+                ))}
+                <text x={padL + plotW / 2} y={H - 4} textAnchor="middle" className="text-[10px] fill-slate-500 dark:fill-gray-400">Transfer</text>
+                {/* vertical guide line at the hovered transfer */}
+                {hoverTransfer != null && (
+                  <line x1={sx(hoverTransfer)} x2={sx(hoverTransfer)} y1={padT} y2={padT + plotH}
+                    stroke="currentColor" className="text-blue-400 dark:text-blue-500" strokeWidth="1" strokeDasharray="3 3" />
+                )}
+                {/* one line per chart, in the candidate's color. When a chart line is
+                    highlighted (table row hover/click) it goes full opacity + thick,
+                    the rest dim back so the selected trajectory stands out. */}
+                {series.map(s => {
+                  const d = s.pts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${sx(p.x).toFixed(1)} ${sy(valOf(p)).toFixed(1)}`).join(' ');
+                  const hl = hoveredChartKey === s.key;
+                  const dimOthers = hoveredChartKey != null && !hl;
+                  return (
+                    <g key={s.key}>
+                      <path d={d} fill="none" stroke={color}
+                        strokeWidth={hl ? 3 : 1.6}
+                        opacity={dimOthers ? 0.12 : hl ? 1 : 0.55}
+                        strokeLinejoin="round" strokeLinecap="round" />
+                      {s.pts.map((p, i) => <circle key={i} cx={sx(p.x)} cy={sy(valOf(p))} r={hl ? 2.6 : 1.8} fill={color} opacity={dimOthers ? 0.12 : hl ? 1 : 0.7} />)}
+                    </g>
+                  );
+                })}
+                {/* dots at the hovered transfer (on top) */}
+                {hoverTransfer != null && series.map(s => {
+                  const p = s.pts.find(pt => pt.x === hoverTransfer);
+                  if (!p || p.reads === 0) return null;
+                  return <circle key={`h${s.key}`} cx={sx(p.x)} cy={sy(valOf(p))} r="3" fill={color} stroke="#fff" strokeWidth="1" />;
+                })}
+              </svg>
+              {/* Floating tooltip at the hovered transfer (top few chart values). */}
+              {hoverTransfer != null && hoverRows.length > 0 && (
+                <div className="absolute top-1 right-1 max-w-[55%] rounded border border-slate-200 dark:border-gray-700 bg-white/95 dark:bg-gray-800/95 shadow-lg px-2 py-1.5 text-[10.5px] pointer-events-none">
+                  <div className="font-semibold text-slate-700 dark:text-gray-200 mb-0.5">T{hoverTransfer}</div>
+                  {hoverRows.slice(0, 6).map(r => (
+                    <div key={r.key} className="flex items-center gap-1.5 tabular-nums">
+                      <span className="inline-block w-2 h-2 rounded-sm shrink-0" style={{ background: color }} />
+                      <span className="truncate max-w-[150px] text-slate-600 dark:text-gray-300 font-mono">{r.label}</span>
+                      <span className="ml-auto font-semibold text-slate-800 dark:text-gray-100">
+                        {metric === 'fraction' ? `${(r.frac * 100).toFixed(1)}%` : r.reads.toLocaleString()}
+                      </span>
+                    </div>
+                  ))}
+                  {hoverRows.length > 6 && (
+                    <div className="text-slate-400 dark:text-gray-500 mt-0.5">+{hoverRows.length - 6} more</div>
+                  )}
+                </div>
+              )}
+            </div>
           )}
         </div>
 
@@ -252,26 +472,40 @@ function CandidateDetailModal({
             first to last fraction (the trajectory), reads, and whether it dominated. */}
         {perChart.length > 0 && (
           <div className="px-4 pb-4">
-            <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-gray-400 mb-1">Per-chart breakdown</div>
+            <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-gray-400 mb-1">
+              Per-chart breakdown
+              <span className="ml-1 normal-case font-normal text-slate-400 dark:text-gray-500">(click a header to sort, hover a row to highlight its line)</span>
+            </div>
             <div className="overflow-x-auto rounded border border-slate-200 dark:border-gray-700">
               <table className="w-full text-[11.5px]">
                 <thead className="bg-slate-50 dark:bg-gray-800 text-slate-500 dark:text-gray-400">
                   <tr>
                     <th className="text-left px-2 py-1 font-semibold">Chart</th>
-                    <th className="text-right px-2 py-1 font-semibold" title="Highest fraction this combination reached in this chart">Peak</th>
-                    <th className="text-right px-2 py-1 font-semibold" title="Fraction at the first transfer to the last transfer (its trajectory)">First to last</th>
-                    <th className="text-right px-2 py-1 font-semibold">Reads</th>
+                    <th className="text-center px-2 py-1 font-semibold" title="Trajectory classification across transfers">Trend</th>
+                    <SortHeader label="Peak" active={sortKey === 'peak'} dir={sortDir} onClick={() => setSort('peak')} title="Highest fraction this combination reached in this chart" />
+                    <SortHeader label="First to last" active={sortKey === 'delta'} dir={sortDir} onClick={() => setSort('delta')} title="Change in fraction from the first transfer to the last transfer (its trajectory). Sorts by the delta." />
+                    <SortHeader label="Reads" active={sortKey === 'reads'} dir={sortDir} onClick={() => setSort('reads')} title="Total reads of this combination in this chart" />
                     <th className="text-center px-2 py-1 font-semibold" title="Was this the most abundant combination at any transfer in this chart?">Dominant</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {perChart.map(rrow => {
+                  {sortedRows.map(rrow => {
                     const trend = rrow.last - rrow.first;
                     const arrow = Math.abs(trend) < 0.02 ? '→' : trend > 0 ? '▲' : '▼';
                     const trendColor = Math.abs(trend) < 0.02 ? 'text-slate-400' : trend > 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500 dark:text-red-400';
+                    const meta = TREND_META[rrow.trend];
+                    const hl = hoveredChartKey === rrow.key;
                     return (
-                      <tr key={rrow.key} className="border-t border-slate-100 dark:border-gray-700/60">
+                      <tr key={rrow.key}
+                        onMouseEnter={() => setHoveredChartKey(rrow.key)}
+                        onMouseLeave={() => setHoveredChartKey(null)}
+                        onClick={() => setHoveredChartKey(prev => prev === rrow.key ? null : rrow.key)}
+                        className={cn('border-t border-slate-100 dark:border-gray-700/60 cursor-pointer',
+                          hl ? 'bg-blue-50 dark:bg-blue-900/30' : 'hover:bg-slate-50 dark:hover:bg-gray-800/60')}>
                         <td className="px-2 py-1 font-mono text-slate-700 dark:text-gray-200 truncate max-w-[220px]" title={rrow.label}>{rrow.label}</td>
+                        <td className="px-2 py-1 text-center">
+                          <span className={cn('inline-block px-1.5 py-0.5 rounded border text-[9.5px] font-semibold', meta.chip)}>{meta.label}</span>
+                        </td>
                         <td className="px-2 py-1 text-right tabular-nums font-semibold">{(rrow.peak * 100).toFixed(0)}%</td>
                         <td className={cn('px-2 py-1 text-right tabular-nums', trendColor)}>
                           {(rrow.first * 100).toFixed(0)}% {arrow} {(rrow.last * 100).toFixed(0)}%
@@ -455,6 +689,42 @@ function Stat({ label, value, accent }: { label: string; value: string; accent?:
       <span className="text-[9.5px] uppercase tracking-wider text-slate-500 dark:text-gray-400">{label}</span>
       <span className={cn('text-[13px] font-semibold tabular-nums', accent ? 'text-blue-700 dark:text-blue-300' : 'text-slate-800 dark:text-gray-100')}>{value}</span>
     </div>
+  );
+}
+
+// Right-aligned, clickable sort-header cell for the per-chart breakdown table.
+// Shows an up/down caret when its column is the active sort key.
+function SortHeader({ label, active, dir, onClick, title }: {
+  label: string; active: boolean; dir: 'asc' | 'desc'; onClick: () => void; title?: string;
+}) {
+  return (
+    <th className="text-right px-2 py-1 font-semibold cursor-pointer select-none hover:text-slate-700 dark:hover:text-gray-200" onClick={onClick} title={title}>
+      <span className="inline-flex items-center gap-0.5 justify-end">
+        {label}
+        <span className={cn('text-[9px]', active ? 'text-blue-600 dark:text-blue-400' : 'text-slate-300 dark:text-gray-600')}>
+          {active ? (dir === 'asc' ? '▲' : '▼') : '▾'}
+        </span>
+      </span>
+    </th>
+  );
+}
+
+// Tiny inline fraction-over-transfers sparkline for ONE candidate in ONE chart.
+// Restores the at-a-glance trend reading of vertical bars without leaving the bar
+// view. 40x12 viewBox, drawn in the candidate's stable color. The points come from
+// a memoized per-chart fraction map (see CandidateLegendPanel) so this stays cheap.
+function CandidateSparkline({ pts, color }: { pts: number[]; color: string }) {
+  const w = 40, h = 12, pad = 1;
+  if (pts.length < 2) return <span className="inline-block" style={{ width: w, height: h }} />;
+  const max = Math.max(...pts, 0.0001);
+  const sx = (i: number) => pad + (pts.length > 1 ? (i / (pts.length - 1)) * (w - 2 * pad) : 0);
+  const sy = (v: number) => h - pad - (v / max) * (h - 2 * pad);
+  const d = pts.map((v, i) => `${i === 0 ? 'M' : 'L'} ${sx(i).toFixed(1)} ${sy(v).toFixed(1)}`).join(' ');
+  return (
+    <svg viewBox={`0 0 ${w} ${h}`} width={w} height={h} className="shrink-0 overflow-visible" aria-hidden="true">
+      <path d={d} fill="none" stroke={color} strokeWidth="1.2" strokeLinejoin="round" strokeLinecap="round" />
+      <circle cx={sx(pts.length - 1)} cy={sy(pts[pts.length - 1])} r="1.3" fill={color} />
+    </svg>
   );
 }
 
@@ -653,6 +923,8 @@ function HorizontalBarChart({
           const isSel = seg.selectable && hasSel && selectedCands.has(seg.cand);
           const showLabel = wPct >= 14;          // room for "A12-B3 62%"
           const showPctOnly = !showLabel && wPct >= 6;
+          const txt = textColorFor(seg.color);
+          const txtShadow = txt === '#ffffff' ? '0 1px 2px rgba(0,0,0,0.55)' : '0 1px 1px rgba(255,255,255,0.4)';
           return (
             <div
               key={seg.cand}
@@ -673,12 +945,12 @@ function HorizontalBarChart({
               onMouseLeave={() => { setCard(null); if (seg.selectable) onHoverCandidate?.(null); }}
             >
               {showLabel && !isDim && (
-                <span className="px-1 font-mono font-semibold text-white truncate" style={{ fontSize: 11, textShadow: '0 1px 2px rgba(0,0,0,0.7)' }}>
+                <span className="px-1 font-mono font-semibold truncate" style={{ fontSize: 11, color: txt, textShadow: txtShadow }}>
                   {seg.label} <span className="tabular-nums opacity-90">{pct.toFixed(0)}%</span>
                 </span>
               )}
               {showPctOnly && !isDim && (
-                <span className="font-semibold text-white tabular-nums" style={{ fontSize: 10, textShadow: '0 1px 2px rgba(0,0,0,0.7)' }}>{pct.toFixed(0)}%</span>
+                <span className="font-semibold tabular-nums" style={{ fontSize: 10, color: txt, textShadow: txtShadow }}>{pct.toFixed(0)}%</span>
               )}
             </div>
           );
@@ -2478,6 +2750,8 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
           cand={detailCand}
           charts={data.charts}
           candColors={candColors}
+          aColors={aColors}
+          bColors={bColors}
           candidateIndex={candidateIndex}
           isSelected={selectedCands.has(detailCand)}
           onToggleSelect={() => toggleCand(detailCand)}
@@ -2781,11 +3055,26 @@ function Centered({ children }: { children: React.ReactNode }) {
 function CandidateLegendPanel({ chart, stats, candColors, selectedCands, onToggle, onHover, onOpenDetail, topN }: {
   chart: BarcodeChart; stats: ChartStats; candColors: Record<string, string>; selectedCands: Set<string>; onToggle: (c: string) => void; onHover?: (c: string | null) => void; onOpenDetail?: (c: string) => void; topN: number;
 }) {
-  void chart;
   const sorted = stats.candidateTotals;
   const rolled = topN > 0 && sorted.length > topN;
   const hasSelection = selectedCands.size > 0;
   const maxPct = sorted[0]?.total && stats.totalReads ? (100 * sorted[0].total / stats.totalReads) : 100;
+  // Per-candidate fraction-over-transfers arrays for the FOCUSED chart, computed
+  // once per chart. Fraction = candidate reads / column total at each transfer, so
+  // the inline sparkline shows the same trend the bars do. Memoized so re-renders
+  // from hover/select do not recompute it.
+  const sparkByCand = useMemo(() => {
+    const colTotals = chart.transfers.map((_, i) =>
+      Object.values(chart.candidates).reduce((a, arr) => a + (arr[i] || 0), 0));
+    const m: Record<string, number[]> = {};
+    for (const [cand, counts] of Object.entries(chart.candidates)) {
+      m[cand] = chart.transfers.map((_, i) => {
+        const tot = colTotals[i];
+        return tot > 0 ? (counts[i] || 0) / tot : 0;
+      });
+    }
+    return m;
+  }, [chart]);
   return (
     <div className="flex flex-col h-full">
       <div className="px-2.5 py-2 border-b border-slate-200 dark:border-gray-700 bg-slate-50/60 dark:bg-gray-800/60">
@@ -2842,6 +3131,9 @@ function CandidateLegendPanel({ chart, stats, candColors, selectedCands, onToggl
                     <span className="block h-full" style={{ width: `${barPct}%`, background: candColors[cand] }} />
                   </span>
                 </span>
+                {/* inline trend sparkline: this candidate's fraction over transfers
+                    in the focused chart, so trends read at a glance from the bar view. */}
+                <CandidateSparkline pts={sparkByCand[cand] || []} color={candColors[cand]} />
                 {/* big percentage, the metric that matters */}
                 <span className={cn(
                   'shrink-0 tabular-nums font-bold text-right',

@@ -2481,7 +2481,7 @@ function GrowthCurveModal({
       aria-modal="true"
     >
       <div
-        className="bg-[var(--surface)] text-[var(--text)] border border-[var(--border)] rounded-lg shadow-2xl w-full max-w-3xl max-h-[85vh] overflow-y-auto scroll-smooth"
+        className="bg-[var(--surface)] text-[var(--text)] border border-[var(--border)] rounded-lg shadow-2xl w-full max-w-5xl max-h-[85vh] flex flex-col overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header (sticky) */}
@@ -2509,7 +2509,11 @@ function GrowthCurveModal({
           </button>
         </div>
 
-        <div className="px-5 py-4 space-y-4">
+        {/* Body: main content (scrolls) on the left, peer compare list as an
+            independently-scrolling sidebar on the right so overlaid curves stay
+            in view while you scroll through and hover samples to compare. */}
+        <div className="flex-1 min-h-0 flex overflow-hidden">
+        <div className="flex-1 min-w-0 overflow-y-auto px-5 py-4 space-y-4 scroll-smooth">
           {/* Chart */}
           <ModalSection title="Growth curve" hint="OD600 vs time (h)">
             {!hasCurve ? (
@@ -2722,44 +2726,54 @@ function GrowthCurveModal({
             </ModalSection>
           )}
 
-          {/* Compare with group */}
-          {overlayPeers.length > 0 && (
-            <ModalSection title="Compare with group" hint={`${overlayPeers.length} peer curve${overlayPeers.length === 1 ? '' : 's'} share this sample's experiment, replicate and donor DNA`}>
-              <div className="flex flex-wrap gap-x-4 gap-y-1">
-                {shownPeers.map((p, i) => {
-                  const emphasized = p.id === hoveredPeerId || p.id === focusedPeerId;
-                  const isFocused = p.id === focusedPeerId;
-                  return (
-                    <button
-                      key={p.id}
-                      type="button"
-                      className={cn(
-                        'inline-flex items-center gap-1.5 text-[10.5px] rounded px-1 py-0.5 transition-colors',
-                        emphasized ? 'bg-[var(--surface-3)]' : 'hover:bg-[var(--surface-2)]',
-                      )}
-                      title={`${p.name}\nHover to emphasize, click to ${isFocused ? 'release' : 'pin'} this curve`}
-                      onMouseEnter={() => setHoveredPeerId(p.id)}
-                      onMouseLeave={() => setHoveredPeerId(prev => (prev === p.id ? null : prev))}
-                      onClick={() => setFocusedPeerId(prev => (prev === p.id ? null : p.id))}
-                    >
-                      <span
-                        className="inline-block w-3"
-                        style={{ background: PEER_HUES[i % PEER_HUES.length], height: emphasized ? 3 : 2 }}
-                      />
-                      <span className={cn('font-mono truncate max-w-[160px]', emphasized ? 'text-[var(--text)] font-semibold' : 'text-[var(--text-soft)]')}>{p.name}</span>
-                      {isFocused && <span className="text-[9px] text-[var(--data-grow)]">pinned</span>}
-                    </button>
-                  );
-                })}
+        </div>
+        {/* Peer compare sidebar: independently scrollable so the chart + its
+            overlaid curves stay in view. Hover a sample to emphasize its curve;
+            click to pin it. */}
+        {overlayPeers.length > 0 && (
+          <div className="w-60 shrink-0 border-l border-[var(--border)] flex flex-col min-h-0 bg-[var(--surface-2)]">
+            <div className="px-3 py-2 border-b border-[var(--border)] shrink-0">
+              <div className="text-[12px] font-semibold text-[var(--text)]">Compare with group</div>
+              <div className="text-[10px] text-[var(--text-faint)] mt-0.5 leading-snug">
+                {overlayPeers.length} peer{overlayPeers.length === 1 ? '' : 's'} sharing experiment, replicate and donor DNA. Hover to emphasize, click to pin.
               </div>
-              <div className="mt-1.5 text-[10px] text-[var(--text-faint)]">
-                Hover a peer (legend or curve) to emphasize it; click to pin it.
-              </div>
+              <label className="mt-1.5 flex items-center gap-1.5 text-[10.5px] text-[var(--text-soft)] cursor-pointer">
+                <input type="checkbox" checked={showOverlay} onChange={() => setShowOverlay(v => !v)} className="w-3 h-3" />
+                Overlay peer curves
+              </label>
+            </div>
+            <div className="flex-1 min-h-0 overflow-y-auto py-1">
+              {shownPeers.map((p, i) => {
+                const emphasized = p.id === hoveredPeerId || p.id === focusedPeerId;
+                const isFocused = p.id === focusedPeerId;
+                return (
+                  <button
+                    key={p.id}
+                    type="button"
+                    className={cn(
+                      'w-full flex items-center gap-2 text-left px-3 py-1.5 text-[11px] transition-colors',
+                      emphasized ? 'bg-[var(--surface-3)]' : 'hover:bg-[var(--surface-3)]/60',
+                    )}
+                    title={`${p.name}\nHover to emphasize, click to ${isFocused ? 'release' : 'pin'} this curve`}
+                    onMouseEnter={() => setHoveredPeerId(p.id)}
+                    onMouseLeave={() => setHoveredPeerId(prev => (prev === p.id ? null : prev))}
+                    onClick={() => setFocusedPeerId(prev => (prev === p.id ? null : p.id))}
+                  >
+                    <span
+                      className="inline-block w-4 shrink-0 rounded"
+                      style={{ background: PEER_HUES[i % PEER_HUES.length], height: emphasized ? 4 : 2.5 }}
+                    />
+                    <span className={cn('font-mono truncate flex-1', emphasized ? 'text-[var(--text)] font-semibold' : 'text-[var(--text-soft)]')}>{p.name}</span>
+                    {isFocused && <span className="text-[9px] text-[var(--data-grow)] shrink-0">pinned</span>}
+                  </button>
+                );
+              })}
               {hiddenPeerCount > 0 && (
-                <div className="mt-1 text-[10px] text-[var(--text-faint)]">{hiddenPeerCount} more peer curve{hiddenPeerCount === 1 ? '' : 's'} hidden (capped at {PEER_CAP} for legibility).</div>
+                <div className="px-3 py-1.5 text-[10px] text-[var(--text-faint)]">{hiddenPeerCount} more hidden (capped at {PEER_CAP} for legibility).</div>
               )}
-            </ModalSection>
-          )}
+            </div>
+          </div>
+        )}
         </div>
       </div>
     </div>
