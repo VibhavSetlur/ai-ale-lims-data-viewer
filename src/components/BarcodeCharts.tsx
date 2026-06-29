@@ -122,28 +122,45 @@ function CandidateDetailModal({
   // Build one fraction-over-transfers series per chart that contains this candidate.
   // Fraction = candidate reads / total reads at that transfer, so charts with very
   // different depths are comparable. Track the global peak fraction and where.
-  const { series, xMax, peak } = useMemo(() => {
+  const { series, xMax, peak, perChart, dominantCount, meanLast } = useMemo(() => {
     const out: { key: string; label: string; pts: { x: number; y: number }[] }[] = [];
+    const rows: { key: string; label: string; peak: number; first: number; last: number; reads: number; dominant: boolean }[] = [];
     let xMaxLocal = 1;
     let peakLocal = { frac: 0, transfer: 0, label: '' };
+    let domCount = 0;
+    let lastSum = 0, lastN = 0;
     for (const c of charts) {
       const counts = c.candidates[cand];
       if (!counts) continue;
       const pts: { x: number; y: number }[] = [];
+      let firstFrac = 0, lastFrac = 0, peakFrac = 0, reads = 0, dominantHere = false;
       c.transfers.forEach((t, i) => {
         const tot = Object.values(c.candidates).reduce((a, arr) => a + (arr[i] || 0), 0);
         const frac = tot > 0 ? (counts[i] || 0) / tot : 0;
         pts.push({ x: t, y: frac });
+        reads += counts[i] || 0;
+        if (i === 0) firstFrac = frac;
+        if (i === c.transfers.length - 1) lastFrac = frac;
+        if (frac > peakFrac) peakFrac = frac;
+        // dominant in this chart at this transfer?
+        let bestOther = 0;
+        for (const arr of Object.values(c.candidates)) { const v = arr[i] || 0; if (v > bestOther) bestOther = v; }
+        if ((counts[i] || 0) > 0 && (counts[i] || 0) === bestOther) dominantHere = true;
         if (t > xMaxLocal) xMaxLocal = t;
         if (frac > peakLocal.frac) {
           peakLocal = { frac, transfer: t, label: `${c.well || c.strain || c.library} r${c.replicate}` };
         }
       });
       if (pts.some(p => p.y > 0)) {
-        out.push({ key: chartKey(c), label: `${c.well || c.strain} r${c.replicate} (${c.library})`, pts });
+        const label = `${c.well || c.strain} r${c.replicate} (${c.library})`;
+        out.push({ key: chartKey(c), label, pts });
+        rows.push({ key: chartKey(c), label, peak: peakFrac, first: firstFrac, last: lastFrac, reads, dominant: dominantHere });
+        if (dominantHere) domCount += 1;
+        lastSum += lastFrac; lastN += 1;
       }
     }
-    return { series: out, xMax: xMaxLocal, peak: peakLocal };
+    rows.sort((a, b) => b.peak - a.peak);
+    return { series: out, xMax: xMaxLocal, peak: peakLocal, perChart: rows, dominantCount: domCount, meanLast: lastN ? lastSum / lastN : 0 };
   }, [cand, charts]);
 
   // Chart geometry (fraction 0..1 on Y, transfer on X).
@@ -185,9 +202,11 @@ function CandidateDetailModal({
         {/* Stat cards */}
         <div className="px-4 py-3 grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11.5px]">
           <Stat label="appears in" value={`${idx.charts} chart${idx.charts === 1 ? '' : 's'}`} />
+          <Stat label="dominant in" value={`${dominantCount} chart${dominantCount === 1 ? '' : 's'}`} />
           <Stat label="total reads" value={idx.total.toLocaleString()} />
           <Stat label="peak fraction" value={`${(peak.frac * 100).toFixed(1)}%`} accent />
           <Stat label="peak at" value={peak.frac > 0 ? `T${peak.transfer} · ${peak.label}` : 'n/a'} />
+          <Stat label="mean final share" value={`${(meanLast * 100).toFixed(1)}%`} />
         </div>
 
         {/* Cross-chart fraction-over-transfers chart */}
@@ -228,6 +247,45 @@ function CandidateDetailModal({
             </svg>
           )}
         </div>
+
+        {/* Per-chart breakdown table: where this combination appears, its peak, its
+            first to last fraction (the trajectory), reads, and whether it dominated. */}
+        {perChart.length > 0 && (
+          <div className="px-4 pb-4">
+            <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-gray-400 mb-1">Per-chart breakdown</div>
+            <div className="overflow-x-auto rounded border border-slate-200 dark:border-gray-700">
+              <table className="w-full text-[11.5px]">
+                <thead className="bg-slate-50 dark:bg-gray-800 text-slate-500 dark:text-gray-400">
+                  <tr>
+                    <th className="text-left px-2 py-1 font-semibold">Chart</th>
+                    <th className="text-right px-2 py-1 font-semibold" title="Highest fraction this combination reached in this chart">Peak</th>
+                    <th className="text-right px-2 py-1 font-semibold" title="Fraction at the first transfer to the last transfer (its trajectory)">First to last</th>
+                    <th className="text-right px-2 py-1 font-semibold">Reads</th>
+                    <th className="text-center px-2 py-1 font-semibold" title="Was this the most abundant combination at any transfer in this chart?">Dominant</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {perChart.map(rrow => {
+                    const trend = rrow.last - rrow.first;
+                    const arrow = Math.abs(trend) < 0.02 ? '→' : trend > 0 ? '▲' : '▼';
+                    const trendColor = Math.abs(trend) < 0.02 ? 'text-slate-400' : trend > 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500 dark:text-red-400';
+                    return (
+                      <tr key={rrow.key} className="border-t border-slate-100 dark:border-gray-700/60">
+                        <td className="px-2 py-1 font-mono text-slate-700 dark:text-gray-200 truncate max-w-[220px]" title={rrow.label}>{rrow.label}</td>
+                        <td className="px-2 py-1 text-right tabular-nums font-semibold">{(rrow.peak * 100).toFixed(0)}%</td>
+                        <td className={cn('px-2 py-1 text-right tabular-nums', trendColor)}>
+                          {(rrow.first * 100).toFixed(0)}% {arrow} {(rrow.last * 100).toFixed(0)}%
+                        </td>
+                        <td className="px-2 py-1 text-right tabular-nums text-slate-500 dark:text-gray-400">{rrow.reads.toLocaleString()}</td>
+                        <td className="px-2 py-1 text-center">{rrow.dominant ? <span className="text-emerald-600 dark:text-emerald-400 font-bold">✓</span> : <span className="text-slate-300 dark:text-gray-600">·</span>}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -465,6 +523,175 @@ function statsFor(c: BarcodeChart): ChartStats {
     uniqueCandidates: Object.keys(c.candidates).length,
     candidateTotals,
   };
+}
+
+// ---------------------------------------------------------------------------
+// HorizontalBarChart: an HTML (not SVG) horizontal stacked-bar chart for FOCUS
+// mode. Each transfer is a full-width row; candidate reads stack left-to-right.
+// Because it is plain HTML/flex, the text NEVER scales down to fit (the root
+// cause of the unreadable SVG vertical bars). Rows have a generous fixed height
+// so labels, counts and percentages are always legible. Supports the same
+// selection / hover / split-A|B / count-vs-fraction semantics as ChartCard.
+// ---------------------------------------------------------------------------
+interface HBarProps {
+  chart: BarcodeChart;
+  stats: ChartStats;
+  colorMode: ColorMode;
+  splitAB: boolean;
+  normalize: Normalize;
+  aColors: Record<string, string>;
+  bColors: Record<string, string>;
+  candColors: Record<string, string>;
+  selectedCands: Set<string>;
+  isolateSelected: boolean;
+  topN: number;
+  hoverCand?: string | null;
+  hoverSubunit?: SubunitRef | null;
+  onPickCandidate?: (cand: string) => void;
+  onHoverCandidate?: (cand: string | null) => void;
+}
+function HorizontalBarChart({
+  chart, stats, colorMode, splitAB, normalize, aColors, bColors, candColors,
+  selectedCands, isolateSelected, topN, hoverCand, hoverSubunit, onPickCandidate, onHoverCandidate,
+}: HBarProps) {
+  const { visibleCands, otherCands } = useMemo(() => {
+    let all = Object.keys(chart.candidates);
+    if (isolateSelected && selectedCands.size > 0) all = all.filter(c => selectedCands.has(c));
+    if (topN <= 0 || all.length <= topN) return { visibleCands: all, otherCands: [] as string[] };
+    const ordered = stats.candidateTotals.map(t => t.cand).filter(c => all.includes(c));
+    return { visibleCands: ordered.slice(0, topN), otherCands: ordered.slice(topN) };
+  }, [chart.candidates, isolateSelected, selectedCands, topN, stats.candidateTotals]);
+
+  const otherByTransfer = useMemo(() => {
+    if (!otherCands.length) return null;
+    const arr = Array(chart.transfers.length).fill(0);
+    for (const c of otherCands) chart.candidates[c].forEach((v, i) => { arr[i] += v || 0; });
+    return arr;
+  }, [otherCands, chart.candidates, chart.transfers.length]);
+
+  const totals = useMemo(() => chart.transfers.map((_, ti) =>
+    visibleCands.reduce((acc, c) => acc + (chart.candidates[c][ti] || 0), 0) + (otherByTransfer?.[ti] || 0)
+  ), [chart, visibleCands, otherByTransfer]);
+
+  const hasSel = selectedCands.size > 0;
+  const subHover = hoverSubunit;
+  const emphasized = (cand: string) => {
+    if (subHover) return candMatchesSubunit(cand, subHover);
+    if (hoverCand) return cand === hoverCand;
+    if (hasSel) return selectedCands.has(cand);
+    return true;
+  };
+  const dimmed = (cand: string) => cand !== '__OTHER__' && !emphasized(cand) && (!!hoverCand || hasSel || !!subHover);
+
+  const colorOf = (cand: string): string => {
+    if (cand === '__OTHER__') return '#94a3b8';
+    if (colorMode === 'partner-a') { const p = parseCandidate(cand); return p ? aColors[p.a] : '#888'; }
+    if (colorMode === 'partner-b') { const p = parseCandidate(cand); return p ? bColors[p.b] : '#888'; }
+    return candColors[cand] || '#888';
+  };
+
+  // Build the ordered segment list for one transfer (a single stacking).
+  const buildSegs = (ti: number): { cand: string; label: string; v: number; color: string; selectable: boolean }[] => {
+    const segs = visibleCands
+      .map(c => ({ cand: c, label: c, v: chart.candidates[c]?.[ti] || 0, color: colorOf(c), selectable: true }))
+      .filter(s => s.v > 0)
+      .sort((a, b) => b.v - a.v);
+    if (otherByTransfer && otherByTransfer[ti] > 0) segs.push({ cand: '__OTHER__', label: `Other (${otherCands.length})`, v: otherByTransfer[ti], color: '#94a3b8', selectable: false });
+    return segs;
+  };
+  // Aggregate by subunit for the split sub-rows.
+  const buildSubunitSegs = (ti: number, kind: 'A' | 'B') => {
+    const agg = new Map<string, number>();
+    for (const [cand, counts] of Object.entries(chart.candidates)) {
+      const v = counts[ti] || 0; if (!v) continue;
+      const p = parseCandidate(cand); if (!p) continue;
+      const key = kind === 'A' ? p.a : p.b;
+      agg.set(key, (agg.get(key) || 0) + v);
+    }
+    return [...agg.entries()].sort((a, b) => b[1] - a[1]).map(([id, v]) => ({
+      cand: id, label: id, v, color: kind === 'A' ? (aColors[id] || '#888') : (bColors[id] || '#888'), selectable: false, kind,
+    }));
+  };
+
+  // One stacked horizontal bar (a flex row of segments). Fixed height -> crisp text.
+  const renderBar = (segs: { cand: string; label: string; v: number; color: string; selectable: boolean; kind?: 'A' | 'B' }[], total: number, barH: number, rowLabel?: string) => (
+    <div className="flex items-stretch w-full" style={{ height: barH }}>
+      {rowLabel != null && (
+        <span className="shrink-0 w-12 pr-1 flex items-center justify-end text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-gray-500">{rowLabel}</span>
+      )}
+      <div className="relative flex-1 flex items-stretch rounded overflow-hidden bg-slate-50 dark:bg-gray-900/40 ring-1 ring-slate-200/70 dark:ring-gray-700/50">
+        {total === 0 ? (
+          <span className="flex items-center pl-2 text-[11px] text-slate-300 dark:text-gray-600">no reads</span>
+        ) : segs.map(seg => {
+          const pct = total ? (100 * seg.v / total) : 0;
+          // Width is fraction of THIS bar (so each row reads as 0-100% composition);
+          // the read-count scale is conveyed by the count chip at the row end.
+          const wPct = total ? (seg.v / total) * 100 : 0;
+          const isDim = !!seg.selectable && dimmed(seg.cand);
+          const isSel = seg.selectable && hasSel && selectedCands.has(seg.cand);
+          const showLabel = wPct >= 14;          // room for "A12-B3 62%"
+          const showPctOnly = !showLabel && wPct >= 6;
+          const tip = `${seg.kind ? (seg.kind === 'A' ? 'VarA ' : 'VarB ') : ''}${seg.label}\n${seg.v.toLocaleString()} reads · ${pct.toFixed(1)}% of bar`;
+          return (
+            <div
+              key={seg.cand}
+              className={cn('group/seg relative flex items-center justify-center overflow-hidden transition-opacity', seg.selectable && onPickCandidate ? 'cursor-pointer' : 'cursor-default')}
+              style={{ width: `${wPct}%`, background: seg.color, opacity: isDim ? 0.2 : 1, boxShadow: isSel ? 'inset 0 0 0 2px #0f172a' : 'inset 0 0 0 0.5px rgba(255,255,255,0.35)' }}
+              title={tip}
+              onClick={() => seg.selectable && onPickCandidate?.(seg.cand)}
+              onMouseEnter={() => seg.selectable && onHoverCandidate?.(seg.cand)}
+              onMouseLeave={() => seg.selectable && onHoverCandidate?.(null)}
+            >
+              {showLabel && !isDim && (
+                <span className="px-1 font-mono font-semibold text-white truncate" style={{ fontSize: 11, textShadow: '0 1px 2px rgba(0,0,0,0.7)' }}>
+                  {seg.label} <span className="tabular-nums opacity-90">{pct.toFixed(0)}%</span>
+                </span>
+              )}
+              {showPctOnly && !isDim && (
+                <span className="font-semibold text-white tabular-nums" style={{ fontSize: 10, textShadow: '0 1px 2px rgba(0,0,0,0.7)' }}>{pct.toFixed(0)}%</span>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      {/* read-count chip + a proportional total-width cue */}
+      <span className="shrink-0 w-20 pl-2 flex items-center text-[11px] font-semibold tabular-nums text-slate-600 dark:text-gray-300" title="Total reads at this transfer">
+        {normalize === 'fraction' ? '100%' : total.toLocaleString()}
+      </span>
+    </div>
+  );
+
+  return (
+    <div className="h-full w-full overflow-y-auto px-2 py-2">
+      {/* column hint */}
+      <div className="flex items-center w-full text-[10px] uppercase tracking-wider text-slate-400 dark:text-gray-500 mb-1 pl-12 pr-20">
+        <span className="flex-1">Composition of reads (each row is one transfer, segments sized by share of that transfer)</span>
+        <span className="shrink-0 w-20 pl-2">Total reads</span>
+      </div>
+      <div className="flex flex-col gap-2">
+        {chart.transfers.map((t, ti) => {
+          const total = totals[ti];
+          return (
+            <div key={ti} className="flex items-stretch gap-2">
+              {/* transfer label */}
+              <span className="shrink-0 w-9 flex items-center justify-center rounded bg-slate-100 dark:bg-gray-700 text-[12px] font-bold tabular-nums text-slate-700 dark:text-gray-200" title={`Transfer ${t}`}>T{t}</span>
+              <div className="flex-1 min-w-0 flex flex-col gap-0.5">
+                {splitAB ? (
+                  <>
+                    {renderBar(buildSegs(ti), total, 26, 'A-B')}
+                    {renderBar(buildSubunitSegs(ti, 'A'), total, 20, 'VarA')}
+                    {renderBar(buildSubunitSegs(ti, 'B'), total, 20, 'VarB')}
+                  </>
+                ) : (
+                  renderBar(buildSegs(ti), total, 30)
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
 
 interface ChartProps {
@@ -1012,6 +1239,11 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
   // see how the individual VarA and VarB subunits behave alongside the combination,
   // all in stable per-identity colors (Nidhi 2026-06).
   const [splitAB, setSplitAB] = useState(false);
+  // Focus-mode orientation. 'horizontal' renders each transfer as a full-width HTML
+  // row of stacked segments with crisp, non-scaling labels (far more readable than
+  // the SVG vertical bars, which shrink their text to fit width). Default horizontal
+  // in focus because that is what humans can actually read (Nidhi 2026-06).
+  const [focusOrient, setFocusOrient] = useState<'horizontal' | 'vertical'>('horizontal');
   const [normalize, setNormalize] = useState<Normalize>('count');
   const [topN, setTopN] = useState(10);
   const [sortKey, setSortKey] = useState<SortKey>('natural');
@@ -1372,6 +1604,18 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
           Split A|B
         </button>
 
+        {/* Focus orientation: horizontal (readable rows) vs vertical (compact SVG) */}
+        {view === 'focus' && (
+          <div className="flex items-center border border-slate-200 dark:border-gray-600 rounded overflow-hidden" title="Focus chart orientation. Horizontal rows keep the labels and percentages readable at any width.">
+            {(['horizontal', 'vertical'] as const).map((o, i) => (
+              <button key={o} onClick={() => setFocusOrient(o)}
+                className={cn('px-2 py-1 text-[10.5px] font-medium', i > 0 && 'border-l border-slate-200 dark:border-gray-600',
+                  focusOrient === o ? 'bg-emerald-600 text-white' : 'bg-white dark:bg-gray-700 text-slate-600 dark:text-gray-300')}>
+                {o === 'horizontal' ? 'Rows' : 'Bars'}
+              </button>
+            ))}
+          </div>
+        )}
         {/* Y axis */}
         <div className="flex items-center border border-slate-200 dark:border-gray-600 rounded overflow-hidden">
           {(['count','fraction'] as Normalize[]).map((n, i) => (
@@ -1696,6 +1940,7 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
               chart={focusedChart}
               stats={statsByKey.get(chartKey(focusedChart))!}
               colorMode={colorMode} splitAB={splitAB} normalize={normalize}
+              orientation={focusOrient}
               aColors={aColors} bColors={bColors} candColors={candColors}
               selectedCands={selectedCands} isolateSelected={isolateSelected} topN={topN}
               onToggleCand={toggleCand} onOpenDetail={setDetailCand}
@@ -1934,10 +2179,10 @@ function CandidatesSidebar(p: CandidatesSidebarProps) {
                 <span className="text-slate-400 font-normal normal-case tabular-nums">({grp.rows.length} · {grpReads >= 1000 ? `${(grpReads / 1000).toFixed(1)}k` : grpReads})</span>
                 <button
                   onClick={(e) => { e.stopPropagation(); p.onOpenSubunitDetail({ kind: subKind, id: grp.label! }); }}
-                  className="ml-auto shrink-0 p-0.5 rounded text-slate-400 dark:text-gray-500 opacity-0 group-hover/hdr:opacity-100 hover:text-blue-600 dark:hover:text-blue-300"
+                  className="ml-auto shrink-0 flex items-center gap-0.5 px-1 py-0.5 rounded text-[9px] font-semibold text-blue-600 dark:text-blue-300 bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800 hover:bg-blue-100 dark:hover:bg-blue-900/50"
                   title={`Open ${subKind === 'A' ? 'VarA' : 'VarB'} ${grp.label} detail: behavior aggregated across all its partner combinations and charts`}
                 >
-                  <Info className="w-3.5 h-3.5" />
+                  <Info className="w-3 h-3" /> info
                 </button>
               </div>
             )}
@@ -1992,10 +2237,10 @@ function CandidatesSidebar(p: CandidatesSidebarProps) {
                   </button>
                   <button
                     onClick={(e) => { e.stopPropagation(); p.onOpenDetail(cand); }}
-                    className="shrink-0 p-0.5 rounded text-slate-400 dark:text-gray-500 opacity-0 group-hover:opacity-100 hover:text-blue-600 dark:hover:text-blue-300 hover:bg-slate-200/60 dark:hover:bg-gray-700"
+                    className="shrink-0 flex items-center gap-0.5 px-1 py-0.5 rounded text-[9px] font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-300 bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800 hover:bg-blue-100 dark:hover:bg-blue-900/50"
                     title={`Open ${cand} detail: how this A-B combination behaves across all charts and transfers`}
                   >
-                    <Info className="w-3.5 h-3.5" />
+                    <Info className="w-3 h-3" /> info
                   </button>
                 </div>
               );
@@ -2111,9 +2356,9 @@ function CandidateLegendPanel({ chart, stats, candColors, selectedCands, onToggl
                 </span>
               </button>
               <button onClick={(e) => { e.stopPropagation(); onOpenDetail?.(cand); }}
-                className="shrink-0 p-0.5 rounded text-slate-400 dark:text-gray-500 opacity-0 group-hover:opacity-100 hover:text-blue-600 dark:hover:text-blue-300 hover:bg-slate-200/60 dark:hover:bg-gray-700"
+                className="shrink-0 flex items-center gap-0.5 px-1 py-0.5 rounded text-[9px] font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-300 bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800 hover:bg-blue-100 dark:hover:bg-blue-900/50"
                 title={`Open ${cand} detail across all charts and transfers`}>
-                <Info className="w-3.5 h-3.5" />
+                <Info className="w-3 h-3" /> info
               </button>
             </div>
           );
@@ -2141,6 +2386,7 @@ interface FocusViewProps {
   onToggleCand: (c: string) => void;
   onOpenDetail: (c: string) => void;
   onBack: () => void;
+  orientation: 'horizontal' | 'vertical';
   hoveredCand?: string | null;
   onHoverCandidate?: (c: string | null) => void;
   hoveredSubunit?: SubunitRef | null;
@@ -2151,7 +2397,7 @@ interface FocusViewProps {
   isInCompare: boolean;
 }
 function FocusView(props: FocusViewProps) {
-  const { charts, focusKey, setFocusKey, chart, stats, colorMode, splitAB, normalize,
+  const { charts, focusKey, setFocusKey, chart, stats, colorMode, splitAB, normalize, orientation,
     aColors, bColors, candColors, selectedCands, isolateSelected, topN, onToggleCand, onOpenDetail,
     onBack, hoveredCand, onHoverCandidate, hoveredSubunit, onAddToCompare, isInCompare } = props;
   const idx = charts.findIndex(c => chartKey(c) === focusKey);
@@ -2249,16 +2495,28 @@ function FocusView(props: FocusViewProps) {
       <div className="flex-1 min-h-0 flex overflow-hidden">
         <div ref={containerRef} className="flex-1 min-w-0 min-h-0 p-2 flex">
           <div className="flex-1 min-w-0 min-h-0">
-            <ChartCard
-              chart={chart} stats={stats}
-              colorMode={colorMode} splitAB={splitAB} normalize={normalize}
-              aColors={aColors} bColors={bColors} candColors={candColors}
-              selectedCands={selectedCands} isolateSelected={isolateSelected} topN={topN}
-              height={chartHeight}
-              hoverCand={hoveredCand}
-              hoverSubunit={hoveredSubunit}
-              onPickCandidate={onToggleCand}
-            />
+            {orientation === 'horizontal' ? (
+              <HorizontalBarChart
+                chart={chart} stats={stats}
+                colorMode={colorMode} splitAB={splitAB} normalize={normalize}
+                aColors={aColors} bColors={bColors} candColors={candColors}
+                selectedCands={selectedCands} isolateSelected={isolateSelected} topN={topN}
+                hoverCand={hoveredCand} hoverSubunit={hoveredSubunit}
+                onPickCandidate={onToggleCand} onHoverCandidate={onHoverCandidate}
+              />
+            ) : (
+              <ChartCard
+                chart={chart} stats={stats}
+                colorMode={colorMode} splitAB={splitAB} normalize={normalize}
+                aColors={aColors} bColors={bColors} candColors={candColors}
+                selectedCands={selectedCands} isolateSelected={isolateSelected} topN={topN}
+                height={chartHeight}
+                hoverCand={hoveredCand}
+                hoverSubunit={hoveredSubunit}
+                onPickCandidate={onToggleCand}
+                onHoverCandidate={onHoverCandidate}
+              />
+            )}
           </div>
         </div>
         <div className="w-80 shrink-0 border-l border-slate-200 dark:border-gray-700 bg-white dark:bg-gray-800 flex flex-col overflow-hidden">
