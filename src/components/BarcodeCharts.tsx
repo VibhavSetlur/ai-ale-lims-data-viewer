@@ -554,6 +554,28 @@ function HorizontalBarChart({
   chart, stats, colorMode, splitAB, normalize, aColors, bColors, candColors,
   selectedCands, isolateSelected, topN, hoverCand, hoverSubunit, onPickCandidate, onHoverCandidate,
 }: HBarProps) {
+  // Rich floating hover card state (replaces the native title= tooltips on
+  // segments). We track the candidate / subunit, its reads, % of the bar and the
+  // transfer, plus a pixel position RELATIVE to the scroll container so the card
+  // never escapes the chart. flipX/flipY render the card on the other side near
+  // edges so it is never clipped.
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const [card, setCard] = useState<null | {
+    label: string; kind?: 'A' | 'B'; cand: string; reads: number; pct: number;
+    transfer: number; color: string; x: number; y: number; flipX: boolean; flipY: boolean;
+  }>(null);
+  const showCard = (e: React.MouseEvent, seg: { cand: string; label: string; v: number; color: string; kind?: 'A' | 'B' }, total: number, transfer: number) => {
+    const box = scrollRef.current?.getBoundingClientRect();
+    if (!box) return;
+    const x = e.clientX - box.left + (scrollRef.current?.scrollLeft || 0);
+    const y = e.clientY - box.top + (scrollRef.current?.scrollTop || 0);
+    setCard({
+      label: seg.label, kind: seg.kind, cand: seg.cand, reads: seg.v,
+      pct: total ? (100 * seg.v / total) : 0, transfer, color: seg.color,
+      x, y, flipX: (e.clientX - box.left) > box.width * 0.62, flipY: (e.clientY - box.top) > box.height * 0.7,
+    });
+  };
+
   const { visibleCands, otherCands } = useMemo(() => {
     let all = Object.keys(chart.candidates);
     if (isolateSelected && selectedCands.size > 0) all = all.filter(c => selectedCands.has(c));
@@ -614,7 +636,7 @@ function HorizontalBarChart({
   };
 
   // One stacked horizontal bar (a flex row of segments). Fixed height -> crisp text.
-  const renderBar = (segs: { cand: string; label: string; v: number; color: string; selectable: boolean; kind?: 'A' | 'B' }[], total: number, barH: number, rowLabel?: string) => (
+  const renderBar = (segs: { cand: string; label: string; v: number; color: string; selectable: boolean; kind?: 'A' | 'B' }[], total: number, barH: number, transfer: number, rowLabel?: string) => (
     <div className="flex items-stretch w-full" style={{ height: barH }}>
       {rowLabel != null && (
         <span className="shrink-0 w-12 pr-1 flex items-center justify-end text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-gray-500">{rowLabel}</span>
@@ -631,16 +653,24 @@ function HorizontalBarChart({
           const isSel = seg.selectable && hasSel && selectedCands.has(seg.cand);
           const showLabel = wPct >= 14;          // room for "A12-B3 62%"
           const showPctOnly = !showLabel && wPct >= 6;
-          const tip = `${seg.kind ? (seg.kind === 'A' ? 'VarA ' : 'VarB ') : ''}${seg.label}\n${seg.v.toLocaleString()} reads · ${pct.toFixed(1)}% of bar`;
           return (
             <div
               key={seg.cand}
               className={cn('group/seg relative flex items-center justify-center overflow-hidden transition-opacity', seg.selectable && onPickCandidate ? 'cursor-pointer' : 'cursor-default')}
-              style={{ width: `${wPct}%`, background: seg.color, opacity: isDim ? 0.2 : 1, boxShadow: isSel ? 'inset 0 0 0 2px #0f172a' : 'inset 0 0 0 0.5px rgba(255,255,255,0.35)' }}
-              title={tip}
+              style={{
+                width: `${wPct}%`, background: seg.color,
+                // Dimmed segments stay at 0.25 (not 0.16) so they remain visible.
+                opacity: isDim ? 0.25 : 1,
+                // Selected segments get a clear dark outline; everything else a
+                // thin contrasting separator so adjacent segments stay distinct.
+                boxShadow: isSel
+                  ? 'inset 0 0 0 2.5px #0f172a, inset 0 0 0 4px rgba(255,255,255,0.85)'
+                  : 'inset 0 0 0 0.75px rgba(255,255,255,0.45)',
+              }}
               onClick={() => seg.selectable && onPickCandidate?.(seg.cand)}
-              onMouseEnter={() => seg.selectable && onHoverCandidate?.(seg.cand)}
-              onMouseLeave={() => seg.selectable && onHoverCandidate?.(null)}
+              onMouseEnter={(e) => { showCard(e, seg, total, transfer); if (seg.selectable) onHoverCandidate?.(seg.cand); }}
+              onMouseMove={(e) => showCard(e, seg, total, transfer)}
+              onMouseLeave={() => { setCard(null); if (seg.selectable) onHoverCandidate?.(null); }}
             >
               {showLabel && !isDim && (
                 <span className="px-1 font-mono font-semibold text-white truncate" style={{ fontSize: 11, textShadow: '0 1px 2px rgba(0,0,0,0.7)' }}>
@@ -662,34 +692,492 @@ function HorizontalBarChart({
   );
 
   return (
-    <div className="h-full w-full overflow-y-auto px-2 py-2">
+    <div ref={scrollRef} className="relative h-full w-full overflow-y-auto px-2 py-2">
       {/* column hint */}
       <div className="flex items-center w-full text-[10px] uppercase tracking-wider text-slate-400 dark:text-gray-500 mb-1 pl-12 pr-20">
         <span className="flex-1">Composition of reads (each row is one transfer, segments sized by share of that transfer)</span>
         <span className="shrink-0 w-20 pl-2">Total reads</span>
       </div>
-      <div className="flex flex-col gap-2">
+      <div className="flex flex-col gap-4">
         {chart.transfers.map((t, ti) => {
           const total = totals[ti];
           return (
-            <div key={ti} className="flex items-stretch gap-2">
+            <div key={ti} className={cn('flex items-stretch gap-2', splitAB && 'rounded-lg bg-slate-50/60 dark:bg-gray-800/40 ring-1 ring-slate-200/60 dark:ring-gray-700/40 p-1.5')}>
               {/* transfer label */}
-              <span className="shrink-0 w-9 flex items-center justify-center rounded bg-slate-100 dark:bg-gray-700 text-[12px] font-bold tabular-nums text-slate-700 dark:text-gray-200" title={`Transfer ${t}`}>T{t}</span>
-              <div className="flex-1 min-w-0 flex flex-col gap-0.5">
+              <span className="shrink-0 w-10 flex items-center justify-center rounded bg-slate-100 dark:bg-gray-700 text-[13px] font-bold tabular-nums text-slate-700 dark:text-gray-200" title={`Transfer ${t}`}>T{t}</span>
+              <div className="flex-1 min-w-0 flex flex-col gap-1.5">
                 {splitAB ? (
                   <>
-                    {renderBar(buildSegs(ti), total, 26, 'A-B')}
-                    {renderBar(buildSubunitSegs(ti, 'A'), total, 20, 'VarA')}
-                    {renderBar(buildSubunitSegs(ti, 'B'), total, 20, 'VarB')}
+                    {renderBar(buildSegs(ti), total, 30, t, 'A-B')}
+                    {renderBar(buildSubunitSegs(ti, 'A'), total, 26, t, 'VarA')}
+                    {renderBar(buildSubunitSegs(ti, 'B'), total, 26, t, 'VarB')}
                   </>
                 ) : (
-                  renderBar(buildSegs(ti), total, 30)
+                  renderBar(buildSegs(ti), total, 32, t)
                 )}
               </div>
             </div>
           );
         })}
       </div>
+
+      {/* Rich floating hover card (replaces native title tooltips). Positioned
+          inside the scroll container so it is never clipped; flips near edges. */}
+      {card && (
+        <div
+          className="pointer-events-none absolute z-30 rounded-lg bg-slate-900/95 dark:bg-black/90 text-white shadow-xl ring-1 ring-white/10 px-3 py-2 text-[11.5px] leading-snug"
+          style={{
+            left: card.x, top: card.y,
+            transform: `translate(${card.flipX ? 'calc(-100% - 14px)' : '14px'}, ${card.flipY ? 'calc(-100% - 12px)' : '12px'})`,
+            minWidth: 180, maxWidth: 260,
+          }}
+        >
+          <div className="flex items-center gap-1.5 mb-1">
+            <span className="inline-block w-3 h-3 rounded-sm ring-1 ring-white/40 shrink-0" style={{ background: card.color }} />
+            <span className="font-mono font-bold text-[12.5px]">{card.kind === 'A' ? `VarA ${card.label}` : card.kind === 'B' ? `VarB ${card.label}` : card.label}</span>
+          </div>
+          {/* For a full A-B candidate, break out its VarA and VarB subunits. */}
+          {!card.kind && (() => {
+            const p = parseCandidate(card.cand);
+            if (!p) return null;
+            return (
+              <div className="flex items-center gap-2 mb-1 text-[10.5px] text-slate-300">
+                <span className="font-mono">VarA {p.a}</span>
+                <span className="text-slate-500">+</span>
+                <span className="font-mono">VarB {p.b}</span>
+              </div>
+            );
+          })()}
+          <div className="tabular-nums">
+            <span className="font-semibold">{card.reads.toLocaleString()}</span> reads
+            <span className="text-slate-400"> · </span>
+            <span className="font-semibold">{card.pct.toFixed(1)}%</span> of bar
+          </div>
+          {card.kind && (
+            <div className="text-[10px] text-slate-400 mt-0.5">sum of all {card.label}-{card.kind === 'A' ? '*' : ''}{card.kind === 'B' ? '*' : ''} combinations</div>
+          )}
+          <div className="text-[10px] text-slate-400 mt-0.5">Transfer T{card.transfer}</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// TrajectoryChart: an SVG line chart that tracks how each candidate's share (or
+// read count) rises and falls across the transfer time course. This is the
+// timeline-tracking feature requested by Nidhi: one line per candidate, X =
+// transfer, Y = fraction of reads (default) or read count. Big readable axes,
+// light gridlines, a hover crosshair that snaps to the nearest transfer and
+// lists that transfer's candidates with reads + %, click-to-select, hover
+// highlight, and selection / subunit emphasis. topN collapses the long tail
+// into a single faint grey "other" line (summed).
+// ---------------------------------------------------------------------------
+interface TrajectoryProps {
+  chart: BarcodeChart;
+  stats: ChartStats;
+  colorMode: ColorMode;
+  normalize: Normalize;
+  aColors: Record<string, string>;
+  bColors: Record<string, string>;
+  candColors: Record<string, string>;
+  selectedCands: Set<string>;
+  isolateSelected: boolean;
+  topN: number;
+  hoverCand?: string | null;
+  hoverSubunit?: SubunitRef | null;
+  onPickCandidate?: (cand: string) => void;
+  onHoverCandidate?: (cand: string | null) => void;
+}
+function TrajectoryChart({
+  chart, stats, colorMode, normalize, aColors, bColors, candColors,
+  selectedCands, isolateSelected, topN, hoverCand, hoverSubunit, onPickCandidate, onHoverCandidate,
+}: TrajectoryProps) {
+  const svgRef = useRef<SVGSVGElement | null>(null);
+  // Snapped transfer index under the cursor (for the crosshair + tooltip).
+  const [hoverIdx, setHoverIdx] = useState<number | null>(null);
+  const [mouse, setMouse] = useState<{ x: number; y: number } | null>(null);
+
+  const { visibleCands, otherCands } = useMemo(() => {
+    let all = Object.keys(chart.candidates);
+    if (isolateSelected && selectedCands.size > 0) all = all.filter(c => selectedCands.has(c));
+    if (topN <= 0 || all.length <= topN) return { visibleCands: all, otherCands: [] as string[] };
+    const ordered = stats.candidateTotals.map(t => t.cand).filter(c => all.includes(c));
+    return { visibleCands: ordered.slice(0, topN), otherCands: ordered.slice(topN) };
+  }, [chart.candidates, isolateSelected, selectedCands, topN, stats.candidateTotals]);
+
+  // Per-transfer column total (across ALL candidates) so fractions are honest.
+  const colTotals = useMemo(() => chart.transfers.map((_, ti) => {
+    let s = 0;
+    for (const counts of Object.values(chart.candidates)) s += counts[ti] || 0;
+    return s;
+  }), [chart.candidates, chart.transfers]);
+
+  // "Other" line = summed reads of the collapsed tail per transfer.
+  const otherSeries = useMemo(() => {
+    if (!otherCands.length) return null;
+    return chart.transfers.map((_, ti) => otherCands.reduce((a, c) => a + (chart.candidates[c]?.[ti] || 0), 0));
+  }, [otherCands, chart.candidates, chart.transfers]);
+
+  // Y axis maximum. Fraction -> 1 (shown as 0..100%). Count -> max read count
+  // seen in any single candidate line (so the tallest line uses the full height).
+  const yMax = useMemo(() => {
+    if (normalize === 'fraction') return 1;
+    let m = 1;
+    for (const c of visibleCands) for (const v of chart.candidates[c] || []) if (v > m) m = v;
+    if (otherSeries) for (const v of otherSeries) if (v > m) m = v;
+    return m;
+  }, [normalize, visibleCands, chart.candidates, otherSeries]);
+
+  const colorOf = (cand: string): string => {
+    if (cand === '__OTHER__') return '#94a3b8';
+    if (colorMode === 'partner-a') { const p = parseCandidate(cand); return p ? aColors[p.a] : '#888'; }
+    if (colorMode === 'partner-b') { const p = parseCandidate(cand); return p ? bColors[p.b] : '#888'; }
+    return candColors[cand] || '#888';
+  };
+
+  const hasSel = selectedCands.size > 0;
+  const subHover = hoverSubunit;
+  const emphasized = (cand: string) => {
+    if (subHover) return candMatchesSubunit(cand, subHover);
+    if (hoverCand) return cand === hoverCand;
+    if (hasSel) return selectedCands.has(cand);
+    return true;
+  };
+  const anyFocus = !!hoverCand || hasSel || !!subHover;
+
+  // Value of a candidate at a transfer in current Y units (fraction or count).
+  const valAt = (cand: string, ti: number): number => {
+    const raw = chart.candidates[cand]?.[ti] || 0;
+    if (normalize === 'fraction') return colTotals[ti] ? raw / colTotals[ti] : 0;
+    return raw;
+  };
+
+  // Layout. Generous margins so the big axis labels and titles have room.
+  const W = 880, H = 460;
+  const m = { top: 24, right: 24, bottom: 56, left: 78 };
+  const iw = W - m.left - m.right;
+  const ih = H - m.top - m.bottom;
+  const n = chart.transfers.length;
+  const xOf = (ti: number) => m.left + (n <= 1 ? iw / 2 : (ti / (n - 1)) * iw);
+  const yOf = (v: number) => m.top + ih - (yMax ? (v / yMax) * ih : 0);
+
+  // Gridline ticks. 5 horizontal bands.
+  const yTicks = useMemo(() => {
+    const out: { v: number; label: string }[] = [];
+    for (let i = 0; i <= 5; i++) {
+      const v = (yMax * i) / 5;
+      out.push({ v, label: normalize === 'fraction' ? `${Math.round(v * 100)}%` : (v >= 1000 ? `${Math.round(v / 1000)}k` : `${Math.round(v)}`) });
+    }
+    return out;
+  }, [yMax, normalize]);
+
+  // Map a pixel x to the nearest transfer index for the crosshair.
+  const handleMove = (e: React.MouseEvent) => {
+    const svg = svgRef.current;
+    if (!svg) return;
+    const r = svg.getBoundingClientRect();
+    const px = ((e.clientX - r.left) / r.width) * W;       // svg user units
+    const py = ((e.clientY - r.top) / r.height) * H;
+    if (n <= 1) { setHoverIdx(0); setMouse({ x: px, y: py }); return; }
+    const frac = (px - m.left) / iw;
+    let idx = Math.round(frac * (n - 1));
+    idx = Math.max(0, Math.min(n - 1, idx));
+    setHoverIdx(idx);
+    setMouse({ x: px, y: py });
+  };
+
+  // The candidates listed in the crosshair tooltip for the snapped transfer.
+  const tipRows = useMemo(() => {
+    if (hoverIdx == null) return [] as { cand: string; reads: number; pct: number; color: string }[];
+    const ti = hoverIdx;
+    const rows = visibleCands.map(c => {
+      const reads = chart.candidates[c]?.[ti] || 0;
+      return { cand: c, reads, pct: colTotals[ti] ? (100 * reads / colTotals[ti]) : 0, color: colorOf(c) };
+    }).filter(r => r.reads > 0).sort((a, b) => b.reads - a.reads).slice(0, 8);
+    return rows;
+    // colorOf is stable-enough for memo deps via colorMode/colors.
+  }, [hoverIdx, visibleCands, chart.candidates, colTotals, colorMode, aColors, bColors, candColors]);
+
+  // Build a polyline points string for one candidate.
+  const pointsFor = (cand: string): string => chart.transfers.map((_, ti) => `${xOf(ti)},${yOf(valAt(cand, ti))}`).join(' ');
+  const otherPoints = useMemo(() => {
+    if (!otherSeries) return null;
+    return chart.transfers.map((_, ti) => {
+      const v = normalize === 'fraction' ? (colTotals[ti] ? otherSeries[ti] / colTotals[ti] : 0) : otherSeries[ti];
+      return `${xOf(ti)},${yOf(v)}`;
+    }).join(' ');
+  }, [otherSeries, normalize, colTotals, yMax, n]);
+
+  // Draw order: dimmed first, emphasized last (so highlighted lines sit on top).
+  const drawOrder = useMemo(() => {
+    const em: string[] = [], dim: string[] = [];
+    for (const c of visibleCands) (emphasized(c) ? em : dim).push(c);
+    return [...dim, ...em];
+  }, [visibleCands, hoverCand, hoverSubunit, selectedCands]);
+
+  return (
+    <div className="relative h-full w-full overflow-hidden flex flex-col">
+      <div className="px-2 pt-1 pb-0.5 text-[11px] text-slate-500 dark:text-gray-400">
+        Trajectory: each line is one candidate over the transfer time course. Hover for the per-transfer breakdown; click a line to select it.
+        {otherCands.length > 0 && <span className="ml-1">Top {visibleCands.length} shown; the remaining {otherCands.length} are summed as a grey Other line.</span>}
+      </div>
+      <div className="flex-1 min-h-0 w-full">
+        <svg
+          ref={svgRef}
+          viewBox={`0 0 ${W} ${H}`}
+          preserveAspectRatio="xMidYMid meet"
+          className="w-full h-full"
+          onMouseMove={handleMove}
+          onMouseLeave={() => { setHoverIdx(null); setMouse(null); onHoverCandidate?.(null); }}
+        >
+          {/* horizontal gridlines + y tick labels */}
+          {yTicks.map((t, i) => (
+            <g key={i}>
+              <line x1={m.left} x2={W - m.right} y1={yOf(t.v)} y2={yOf(t.v)} stroke="currentColor" className="text-slate-200 dark:text-gray-700" strokeWidth={1} />
+              <text x={m.left - 10} y={yOf(t.v) + 4} textAnchor="end" className="fill-slate-700 dark:fill-gray-200" style={{ fontSize: 13, fontWeight: 600 }}>{t.label}</text>
+            </g>
+          ))}
+          {/* x axis ticks + labels */}
+          {chart.transfers.map((t, ti) => (
+            <g key={ti}>
+              <line x1={xOf(ti)} x2={xOf(ti)} y1={m.top} y2={m.top + ih} stroke="currentColor" className="text-slate-100 dark:text-gray-800" strokeWidth={1} />
+              <text x={xOf(ti)} y={m.top + ih + 22} textAnchor="middle" className="fill-slate-700 dark:fill-gray-200" style={{ fontSize: 13, fontWeight: 700 }}>T{t}</text>
+            </g>
+          ))}
+          {/* axis titles */}
+          <text x={m.left + iw / 2} y={H - 8} textAnchor="middle" className="fill-slate-800 dark:fill-gray-100" style={{ fontSize: 14, fontWeight: 700 }}>Transfer</text>
+          <text x={16} y={m.top + ih / 2} textAnchor="middle" transform={`rotate(-90 16 ${m.top + ih / 2})`} className="fill-slate-800 dark:fill-gray-100" style={{ fontSize: 14, fontWeight: 700 }}>
+            {normalize === 'fraction' ? 'Fraction of reads' : 'Read count'}
+          </text>
+
+          {/* the faint grey Other line (drawn under everything) */}
+          {otherPoints && (
+            <polyline points={otherPoints} fill="none" stroke="#94a3b8" strokeWidth={1.5} strokeDasharray="4 3" opacity={0.5} />
+          )}
+
+          {/* candidate lines */}
+          {drawOrder.map(cand => {
+            const em = emphasized(cand);
+            const dim = !em && anyFocus;
+            const col = colorOf(cand);
+            const isSel = hasSel && selectedCands.has(cand);
+            return (
+              <g key={cand} style={{ cursor: onPickCandidate ? 'pointer' : 'default' }}
+                onClick={() => onPickCandidate?.(cand)}
+                onMouseEnter={() => onHoverCandidate?.(cand)}
+              >
+                {/* fat invisible hit line for easy hovering/clicking */}
+                <polyline points={pointsFor(cand)} fill="none" stroke="transparent" strokeWidth={12} />
+                <polyline
+                  points={pointsFor(cand)} fill="none" stroke={col}
+                  strokeWidth={em ? 3.5 : 1.6}
+                  opacity={dim ? 0.22 : 1}
+                  strokeLinejoin="round" strokeLinecap="round"
+                />
+                {/* dots only when emphasized or selected, to keep it clean */}
+                {(em || isSel) && chart.transfers.map((_, ti) => (
+                  <circle key={ti} cx={xOf(ti)} cy={yOf(valAt(cand, ti))} r={isSel ? 4 : 3} fill={col} stroke="#fff" strokeWidth={isSel ? 1.5 : 1} opacity={dim ? 0.22 : 1} />
+                ))}
+              </g>
+            );
+          })}
+
+          {/* crosshair at the snapped transfer */}
+          {hoverIdx != null && (
+            <line x1={xOf(hoverIdx)} x2={xOf(hoverIdx)} y1={m.top} y2={m.top + ih} stroke="#0f172a" className="dark:stroke-white" strokeWidth={1.5} strokeDasharray="3 3" opacity={0.6} />
+          )}
+        </svg>
+      </div>
+
+      {/* crosshair tooltip: lists candidates at the snapped transfer */}
+      {hoverIdx != null && mouse && tipRows.length > 0 && (() => {
+        const svg = svgRef.current;
+        const r = svg?.getBoundingClientRect();
+        // Convert svg user-units back to displayed pixels for placement.
+        const left = r ? (mouse.x / W) * r.width : 0;
+        const top = r ? (mouse.y / H) * r.height : 0;
+        const flipX = left > (r ? r.width * 0.6 : 9999);
+        return (
+          <div
+            className="pointer-events-none absolute z-30 rounded-lg bg-slate-900/95 dark:bg-black/90 text-white shadow-xl ring-1 ring-white/10 px-3 py-2 text-[11.5px] leading-snug"
+            style={{ left, top, transform: `translate(${flipX ? 'calc(-100% - 16px)' : '16px'}, -50%)`, minWidth: 200, maxWidth: 280 }}
+          >
+            <div className="font-bold mb-1 tabular-nums">Transfer T{chart.transfers[hoverIdx]}</div>
+            {tipRows.map(row => (
+              <div key={row.cand} className="flex items-center gap-1.5">
+                <span className="inline-block w-2.5 h-2.5 rounded-sm ring-1 ring-white/40 shrink-0" style={{ background: row.color }} />
+                <span className="font-mono">{row.cand}</span>
+                <span className="ml-auto tabular-nums text-slate-300">{row.reads.toLocaleString()} ({row.pct.toFixed(1)}%)</span>
+              </div>
+            ))}
+          </div>
+        );
+      })()}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// HeatmapChart: a candidate (rows) x transfer (columns) grid for FOCUS mode. Each
+// cell's colour is the candidate's own stable colour (candColors), with opacity =
+// that candidate's FRACTION of reads at that transfer. A single-hue intensity
+// ramp PER ROW is clearer than a shared blue ramp here because it keeps each
+// candidate's identity colour (so a reviewer can still recognise A1-B1 by its
+// hue) while the intensity conveys magnitude. Readable mono labels in a left
+// gutter, transfer labels across the top, per-cell hover tooltip, row click to
+// select, row hover highlight, selection emphasis, capped at ~30 rows.
+// ---------------------------------------------------------------------------
+interface HeatmapProps {
+  chart: BarcodeChart;
+  stats: ChartStats;
+  colorMode: ColorMode;
+  aColors: Record<string, string>;
+  bColors: Record<string, string>;
+  candColors: Record<string, string>;
+  selectedCands: Set<string>;
+  isolateSelected: boolean;
+  topN: number;
+  hoverCand?: string | null;
+  hoverSubunit?: SubunitRef | null;
+  onPickCandidate?: (cand: string) => void;
+  onHoverCandidate?: (cand: string | null) => void;
+}
+const HEATMAP_MAX_ROWS = 30;
+function HeatmapChart({
+  chart, stats, colorMode, aColors, bColors, candColors,
+  selectedCands, isolateSelected, topN, hoverCand, hoverSubunit, onPickCandidate, onHoverCandidate,
+}: HeatmapProps) {
+  const [cell, setCell] = useState<null | { cand: string; ti: number; reads: number; pct: number; color: string; x: number; y: number; flipX: boolean }>(null);
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+
+  // Per-transfer totals for honest fractions.
+  const colTotals = useMemo(() => chart.transfers.map((_, ti) => {
+    let s = 0;
+    for (const counts of Object.values(chart.candidates)) s += counts[ti] || 0;
+    return s;
+  }), [chart.candidates, chart.transfers]);
+
+  // Rows = top candidates by total reads, but ALWAYS include selected ones.
+  const rows = useMemo(() => {
+    let all = Object.keys(chart.candidates);
+    if (isolateSelected && selectedCands.size > 0) all = all.filter(c => selectedCands.has(c));
+    const ordered = stats.candidateTotals.map(t => t.cand).filter(c => all.includes(c));
+    const cap = HEATMAP_MAX_ROWS;
+    const head = ordered.slice(0, cap);
+    // Make sure every selected candidate is visible even if outside the cap.
+    for (const c of selectedCands) if (all.includes(c) && !head.includes(c)) head.push(c);
+    return head;
+  }, [chart.candidates, isolateSelected, selectedCands, stats.candidateTotals]);
+  const hiddenCount = Math.max(0, Object.keys(chart.candidates).length - rows.length);
+
+  const colorOf = (cand: string): string => {
+    if (colorMode === 'partner-a') { const p = parseCandidate(cand); return p ? aColors[p.a] : '#888'; }
+    if (colorMode === 'partner-b') { const p = parseCandidate(cand); return p ? bColors[p.b] : '#888'; }
+    return candColors[cand] || '#888';
+  };
+
+  const hasSel = selectedCands.size > 0;
+  const subHover = hoverSubunit;
+  const emphasized = (cand: string) => {
+    if (subHover) return candMatchesSubunit(cand, subHover);
+    if (hoverCand) return cand === hoverCand;
+    if (hasSel) return selectedCands.has(cand);
+    return true;
+  };
+  const anyFocus = !!hoverCand || hasSel || !!subHover;
+
+  const showCell = (e: React.MouseEvent, cand: string, ti: number, reads: number, pct: number, color: string) => {
+    const box = wrapRef.current?.getBoundingClientRect();
+    if (!box) return;
+    const x = e.clientX - box.left + (wrapRef.current?.scrollLeft || 0);
+    const y = e.clientY - box.top + (wrapRef.current?.scrollTop || 0);
+    setCell({ cand, ti, reads, pct, color, x, y, flipX: (e.clientX - box.left) > box.width * 0.6 });
+  };
+
+  const n = chart.transfers.length;
+
+  return (
+    <div ref={wrapRef} className="relative h-full w-full overflow-auto px-2 py-2">
+      <div className="text-[11px] text-slate-500 dark:text-gray-400 mb-1">
+        Heatmap: rows are candidates (top {rows.length} by reads), columns are transfers. Cell intensity = that candidate&apos;s fraction of reads at that transfer.
+        {hiddenCount > 0 && <span className="ml-1">{hiddenCount} lower candidate{hiddenCount === 1 ? '' : 's'} not shown (cap {HEATMAP_MAX_ROWS} rows).</span>}
+      </div>
+      <table className="border-separate" style={{ borderSpacing: 2 }}>
+        <thead>
+          <tr>
+            <th className="sticky left-0 z-10 bg-white dark:bg-gray-800 text-left text-[10px] uppercase tracking-wide text-slate-400 dark:text-gray-500 pr-2 align-bottom" style={{ minWidth: 110 }}>Candidate</th>
+            {chart.transfers.map((t, ti) => (
+              <th key={ti} className="text-[12px] font-bold tabular-nums text-slate-700 dark:text-gray-200 text-center align-bottom px-0.5" style={{ minWidth: 34 }}>T{t}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(cand => {
+            const em = emphasized(cand);
+            const dim = !em && anyFocus;
+            const isSel = hasSel && selectedCands.has(cand);
+            const baseColor = colorOf(cand);
+            return (
+              <tr key={cand}
+                className={cn(onPickCandidate ? 'cursor-pointer' : '', 'group/row')}
+                style={{ opacity: dim ? 0.35 : 1 }}
+                onClick={() => onPickCandidate?.(cand)}
+                onMouseEnter={() => onHoverCandidate?.(cand)}
+                onMouseLeave={() => onHoverCandidate?.(null)}
+              >
+                <th className={cn('sticky left-0 z-10 text-left pr-2 font-normal', 'bg-white dark:bg-gray-800')} style={{ minWidth: 110 }}>
+                  <span className="flex items-center gap-1.5">
+                    <span className="inline-block w-3 h-3 rounded-sm ring-1 ring-black/10 shrink-0" style={{ background: baseColor }} />
+                    <span className={cn('font-mono', isSel ? 'font-bold text-slate-900 dark:text-white' : 'text-slate-700 dark:text-gray-200')} style={{ fontSize: 11.5 }}>{cand}</span>
+                  </span>
+                </th>
+                {chart.transfers.map((t, ti) => {
+                  const reads = chart.candidates[cand]?.[ti] || 0;
+                  const frac = colTotals[ti] ? reads / colTotals[ti] : 0;
+                  const pct = frac * 100;
+                  // Opacity ramp: faint floor so non-zero low cells stay visible.
+                  const op = reads > 0 ? Math.max(0.12, Math.min(1, frac)) : 0;
+                  return (
+                    <td key={ti} className="p-0">
+                      <div
+                        className={cn('h-7 rounded-sm flex items-center justify-center transition-transform', isSel && 'ring-2 ring-slate-900 dark:ring-white')}
+                        style={{ width: 34, background: reads > 0 ? baseColor : 'transparent', opacity: reads > 0 ? op : 1, boxShadow: reads > 0 ? 'none' : 'inset 0 0 0 1px rgba(148,163,184,0.2)' }}
+                        onMouseEnter={(e) => showCell(e, cand, ti, reads, pct, baseColor)}
+                        onMouseMove={(e) => showCell(e, cand, ti, reads, pct, baseColor)}
+                        onMouseLeave={() => setCell(null)}
+                        title=""
+                      >
+                        {frac >= 0.5 && <span className="text-[9px] font-bold tabular-nums text-white" style={{ textShadow: '0 1px 1px rgba(0,0,0,0.6)' }}>{Math.round(pct)}</span>}
+                      </div>
+                    </td>
+                  );
+                })}
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      {n === 0 && <div className="text-[12px] text-slate-400 mt-2">No transfers.</div>}
+
+      {/* cell hover tooltip */}
+      {cell && (
+        <div
+          className="pointer-events-none absolute z-30 rounded-lg bg-slate-900/95 dark:bg-black/90 text-white shadow-xl ring-1 ring-white/10 px-3 py-2 text-[11.5px] leading-snug"
+          style={{ left: cell.x, top: cell.y, transform: `translate(${cell.flipX ? 'calc(-100% - 14px)' : '14px'}, 14px)`, minWidth: 170 }}
+        >
+          <div className="flex items-center gap-1.5 mb-1">
+            <span className="inline-block w-3 h-3 rounded-sm ring-1 ring-white/40 shrink-0" style={{ background: cell.color }} />
+            <span className="font-mono font-bold">{cell.cand}</span>
+          </div>
+          <div className="tabular-nums">
+            <span className="font-semibold">{cell.reads.toLocaleString()}</span> reads
+            <span className="text-slate-400"> · </span>
+            <span className="font-semibold">{cell.pct.toFixed(1)}%</span>
+          </div>
+          <div className="text-[10px] text-slate-400 mt-0.5">Transfer T{chart.transfers[cell.ti]}</div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1227,7 +1715,7 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
   // Rendering controls
   const [view, setView] = useState<ViewMode>('grid');
   const [comparing, setComparing] = useState<string[]>([]); // up to 4 chart keys
-  const COMPARE_MAX = 4;
+  const COMPARE_MAX = 24;
   const [filtersOpen, setFiltersOpen] = useState(false);
   const filtersBtnRef = useRef<HTMLButtonElement | null>(null);
   const filtersPopRef = useRef<HTMLDivElement | null>(null);
@@ -1241,9 +1729,11 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
   const [splitAB, setSplitAB] = useState(false);
   // Focus-mode orientation. 'horizontal' renders each transfer as a full-width HTML
   // row of stacked segments with crisp, non-scaling labels (far more readable than
-  // the SVG vertical bars, which shrink their text to fit width). Default horizontal
+  // the SVG vertical bars, which shrink their text to fit width). Default 'rows'
   // in focus because that is what humans can actually read (Nidhi 2026-06).
-  const [focusOrient, setFocusOrient] = useState<'horizontal' | 'vertical'>('horizontal');
+  // 'rows' = HorizontalBarChart, 'bars' = ChartCard (vertical SVG),
+  // 'lines' = TrajectoryChart (time-course tracker), 'heatmap' = HeatmapChart.
+  const [focusChart, setFocusChart] = useState<'rows' | 'bars' | 'lines' | 'heatmap'>('rows');
   const [normalize, setNormalize] = useState<Normalize>('count');
   const [topN, setTopN] = useState(10);
   const [sortKey, setSortKey] = useState<SortKey>('natural');
@@ -1604,14 +2094,21 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
           Split A|B
         </button>
 
-        {/* Focus orientation: horizontal (readable rows) vs vertical (compact SVG) */}
+        {/* Focus chart-type selector: Rows (readable HTML stacks) / Bars (vertical
+            SVG) / Lines (time-course trajectory tracker) / Heatmap (candidate x
+            transfer grid). Replaces the old Rows/Bars orientation toggle. */}
         {view === 'focus' && (
-          <div className="flex items-center border border-slate-200 dark:border-gray-600 rounded overflow-hidden" title="Focus chart orientation. Horizontal rows keep the labels and percentages readable at any width.">
-            {(['horizontal', 'vertical'] as const).map((o, i) => (
-              <button key={o} onClick={() => setFocusOrient(o)}
+          <div className="flex items-center border border-slate-200 dark:border-gray-600 rounded overflow-hidden" title="Focus chart type. Rows and Bars show one transfer at a time; Lines tracks each candidate over the time course; Heatmap scans many candidates x transfers at once.">
+            {([
+              { id: 'rows', label: 'Rows', title: 'Horizontal stacked rows: readable labels and percentages at any width' },
+              { id: 'bars', label: 'Bars', title: 'Vertical SVG bars: compact stacked composition per transfer' },
+              { id: 'lines', label: 'Lines', title: 'Trajectory lines: track how each candidate rises and falls over transfers' },
+              { id: 'heatmap', label: 'Heatmap', title: 'Heatmap grid: candidate rows x transfer columns, colour = fraction of reads' },
+            ] as const).map((o, i) => (
+              <button key={o.id} onClick={() => setFocusChart(o.id)} title={o.title}
                 className={cn('px-2 py-1 text-[10.5px] font-medium', i > 0 && 'border-l border-slate-200 dark:border-gray-600',
-                  focusOrient === o ? 'bg-emerald-600 text-white' : 'bg-white dark:bg-gray-700 text-slate-600 dark:text-gray-300')}>
-                {o === 'horizontal' ? 'Rows' : 'Bars'}
+                  focusChart === o.id ? 'bg-emerald-600 text-white' : 'bg-white dark:bg-gray-700 text-slate-600 dark:text-gray-300')}>
+                {o.label}
               </button>
             ))}
           </div>
@@ -1904,7 +2401,7 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
                             // Always visible (subtle) so the affordance is discoverable; pops on hover.
                             : 'bg-white dark:bg-gray-900/80 text-slate-500 dark:text-gray-300 border border-slate-300 dark:border-gray-600 hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-400 dark:hover:bg-emerald-900/30'
                         )}
-                        title={inCompare ? 'Remove from compare' : `Add to compare (max ${COMPARE_MAX} side-by-side)`}
+                        title={inCompare ? 'Remove from compare' : 'Add to compare'}
                       >
                         {inCompare ? '✓' : '+'}
                       </button>
@@ -1940,7 +2437,7 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
               chart={focusedChart}
               stats={statsByKey.get(chartKey(focusedChart))!}
               colorMode={colorMode} splitAB={splitAB} normalize={normalize}
-              orientation={focusOrient}
+              orientation={focusChart}
               aColors={aColors} bColors={bColors} candColors={candColors}
               selectedCands={selectedCands} isolateSelected={isolateSelected} topN={topN}
               onToggleCand={toggleCand} onOpenDetail={setDetailCand}
@@ -2386,7 +2883,7 @@ interface FocusViewProps {
   onToggleCand: (c: string) => void;
   onOpenDetail: (c: string) => void;
   onBack: () => void;
-  orientation: 'horizontal' | 'vertical';
+  orientation: 'rows' | 'bars' | 'lines' | 'heatmap';
   hoveredCand?: string | null;
   onHoverCandidate?: (c: string | null) => void;
   hoveredSubunit?: SubunitRef | null;
@@ -2495,10 +2992,28 @@ function FocusView(props: FocusViewProps) {
       <div className="flex-1 min-h-0 flex overflow-hidden">
         <div ref={containerRef} className="flex-1 min-w-0 min-h-0 p-2 flex">
           <div className="flex-1 min-w-0 min-h-0">
-            {orientation === 'horizontal' ? (
+            {orientation === 'rows' ? (
               <HorizontalBarChart
                 chart={chart} stats={stats}
                 colorMode={colorMode} splitAB={splitAB} normalize={normalize}
+                aColors={aColors} bColors={bColors} candColors={candColors}
+                selectedCands={selectedCands} isolateSelected={isolateSelected} topN={topN}
+                hoverCand={hoveredCand} hoverSubunit={hoveredSubunit}
+                onPickCandidate={onToggleCand} onHoverCandidate={onHoverCandidate}
+              />
+            ) : orientation === 'lines' ? (
+              <TrajectoryChart
+                chart={chart} stats={stats}
+                colorMode={colorMode} normalize={normalize}
+                aColors={aColors} bColors={bColors} candColors={candColors}
+                selectedCands={selectedCands} isolateSelected={isolateSelected} topN={topN}
+                hoverCand={hoveredCand} hoverSubunit={hoveredSubunit}
+                onPickCandidate={onToggleCand} onHoverCandidate={onHoverCandidate}
+              />
+            ) : orientation === 'heatmap' ? (
+              <HeatmapChart
+                chart={chart} stats={stats}
+                colorMode={colorMode}
                 aColors={aColors} bColors={bColors} candColors={candColors}
                 selectedCands={selectedCands} isolateSelected={isolateSelected} topN={topN}
                 hoverCand={hoveredCand} hoverSubunit={hoveredSubunit}
@@ -2565,7 +3080,7 @@ function CompareView(props: CompareViewProps) {
   // Column-count control. 'auto' picks a sensible layout from the count; the
   // explicit 1 / 2 / 3 options let a reviewer force a wide single column (great
   // for reading tall stacks) or pack more charts in.
-  const [colChoice, setColChoice] = useState<'auto' | 1 | 2 | 3>('auto');
+  const [colChoice, setColChoice] = useState<'auto' | 1 | 2 | 3 | 4>('auto');
   // Cap the union legend; the rest are summarised as "N more".
   const LEGEND_CAP = 15;
 
@@ -2641,7 +3156,7 @@ function CompareView(props: CompareViewProps) {
   const legendMore = legendSorted.length - legendShown.length;
 
   const cols = colChoice === 'auto'
-    ? (resolved.length <= 1 ? 1 : resolved.length === 2 ? 2 : 3)
+    ? (resolved.length <= 1 ? 1 : resolved.length === 2 ? 2 : resolved.length <= 6 ? 3 : 4)
     : colChoice;
   // Tile height scales with how many columns we show: fewer columns => taller
   // charts. Keeps tall stacks readable when packing 3-up.
@@ -2675,6 +3190,7 @@ function CompareView(props: CompareViewProps) {
             <button className={colBtnCls(colChoice === 1)} onClick={() => setColChoice(1)} title="One column (tall)">1</button>
             <button className={colBtnCls(colChoice === 2)} onClick={() => setColChoice(2)} title="Two columns">2</button>
             <button className={colBtnCls(colChoice === 3)} onClick={() => setColChoice(3)} title="Three columns">3</button>
+            <button className={colBtnCls(colChoice === 4)} onClick={() => setColChoice(4)} title="Four columns (many charts)">4</button>
           </div>
         </div>
 
