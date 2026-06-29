@@ -42,10 +42,10 @@ type Normalize = 'count' | 'fraction';
 type SortKey = 'natural' | 'totalReads' | 'transfers' | 'candidates' | 'flipped';
 type CandSortKey = 'reads' | 'charts' | 'name' | 'varA' | 'varB';
 type CandGroupKey = 'none' | 'varA' | 'varB';
-// Transient subunit highlight: hovering a VarA or VarB group header lights up
+// Transient subunit highlight: hovering a VerA or VerB group header lights up
 // EVERY candidate that shares that subunit across the visible charts, without
-// committing a selection. kind 'A' = a VarA subunit id (e.g. A81); kind 'B' = a
-// VarB subunit id (e.g. B151). null = nothing hovered.
+// committing a selection. kind 'A' = a VerA subunit id (e.g. A81); kind 'B' = a
+// VerB subunit id (e.g. B151). null = nothing hovered.
 type SubunitRef = { kind: 'A' | 'B'; id: string };
 // Test whether a candidate label belongs to a hovered subunit. O(1) per call.
 function candMatchesSubunit(cand: string, sub: SubunitRef | null): boolean {
@@ -314,10 +314,10 @@ function CandidateDetailModal({
         <div className="flex flex-wrap items-center gap-2 px-4 py-3 border-b border-slate-200 dark:border-gray-700 sticky top-0 bg-white dark:bg-gray-900 z-10">
           <span className="inline-block w-4 h-4 rounded-sm shrink-0" style={{ background: color }} />
           <span className="font-mono font-semibold text-[15px] text-slate-800 dark:text-gray-100">{cand}</span>
-          {/* Composition diagram: which VarA + VarB subunits compose this combination,
+          {/* Composition diagram: which VerA + VerB subunits compose this combination,
               each shown as its own stable swatch with a contrast-checked label. */}
           {parts && (
-            <span className="flex items-center gap-1" title={`Composed of VarA ${parts.a} and VarB ${parts.b}`}>
+            <span className="flex items-center gap-1" title={`Composed of VerA ${parts.a} and VerB ${parts.b}`}>
               <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold border border-black/10 dark:border-white/10"
                 style={{ background: aColors[parts.a] || '#888', color: textColorFor(aColors[parts.a] || 'hsl(0 0% 40%)') }}>
                 {parts.a}
@@ -526,7 +526,7 @@ function CandidateDetailModal({
 }
 
 // Per-SUBUNIT cross-chart detail popup. Mirrors CandidateDetailModal but aggregates
-// EVERY A-B partner that shares one VarA subunit (e.g. all A81-*) or one VarB subunit
+// EVERY A-B partner that shares one VerA subunit (e.g. all A81-*) or one VerB subunit
 // (e.g. all *-B151). Shows total reads, in how many charts the subunit appears, its
 // peak aggregated fraction and where, the list of partner combinations, and one
 // faint fraction-over-transfers line per chart (aggregating all partners). This is
@@ -547,7 +547,7 @@ function SubunitDetailModal({
   }, [onClose]);
 
   const color = (sub.kind === 'A' ? aColors[sub.id] : bColors[sub.id]) || '#2563eb';
-  const kindLabel = sub.kind === 'A' ? 'VarA subunit' : 'VarB subunit';
+  const kindLabel = sub.kind === 'A' ? 'VerA subunit' : 'VerB subunit';
 
   // Aggregate this subunit across every chart. For each chart, sum the reads of all
   // candidates that share this subunit at each transfer, then express as a fraction of
@@ -981,8 +981,8 @@ function HorizontalBarChart({
                 {splitAB ? (
                   <>
                     {renderBar(buildSegs(ti), total, 30, t, 'A-B')}
-                    {renderBar(buildSubunitSegs(ti, 'A'), total, 26, t, 'VarA')}
-                    {renderBar(buildSubunitSegs(ti, 'B'), total, 26, t, 'VarB')}
+                    {renderBar(buildSubunitSegs(ti, 'A'), total, 26, t, 'VerA')}
+                    {renderBar(buildSubunitSegs(ti, 'B'), total, 26, t, 'VerB')}
                   </>
                 ) : (
                   renderBar(buildSegs(ti), total, 32, t)
@@ -1006,17 +1006,17 @@ function HorizontalBarChart({
         >
           <div className="flex items-center gap-1.5 mb-1">
             <span className="inline-block w-3 h-3 rounded-sm ring-1 ring-white/40 shrink-0" style={{ background: card.color }} />
-            <span className="font-mono font-bold text-[12.5px]">{card.kind === 'A' ? `VarA ${card.label}` : card.kind === 'B' ? `VarB ${card.label}` : card.label}</span>
+            <span className="font-mono font-bold text-[12.5px]">{card.kind === 'A' ? `VerA ${card.label}` : card.kind === 'B' ? `VerB ${card.label}` : card.label}</span>
           </div>
-          {/* For a full A-B candidate, break out its VarA and VarB subunits. */}
+          {/* For a full A-B candidate, break out its VerA and VerB subunits. */}
           {!card.kind && (() => {
             const p = parseCandidate(card.cand);
             if (!p) return null;
             return (
               <div className="flex items-center gap-2 mb-1 text-[10.5px] text-slate-300">
-                <span className="font-mono">VarA {p.a}</span>
+                <span className="font-mono">VerA {p.a}</span>
                 <span className="text-slate-500">+</span>
-                <span className="font-mono">VarB {p.b}</span>
+                <span className="font-mono">VerB {p.b}</span>
               </div>
             );
           })()}
@@ -1566,7 +1566,7 @@ function ChartCard({
   const yTicks = 4;
   const tickValues = Array.from({ length: yTicks + 1 }, (_, i) => (maxY * i) / yTicks);
   // Emphasis rules (consistent across grid / focus / compare):
-  //   - a hovered subunit wins instantly: every candidate sharing that VarA/VarB
+  //   - a hovered subunit wins instantly: every candidate sharing that VerA/VerB
   //     subunit is solid while the hover is active (lets a reviewer light up all
   //     A81-* or all *-B151 at once by hovering a group header).
   //   - else hoveredCand wins: it is the only solid bar while a hover is active.
@@ -1671,9 +1671,9 @@ function ChartCard({
 
             // Build the three stackings for this transfer:
             //  - AB:   full A-B candidates (candColors)
-            //  - A:    reads aggregated by VarA subunit (aColors)
-            //  - B:    reads aggregated by VarB subunit (bColors)
-            // VarA/VarB are the SAME total reads, just grouped differently, so all
+            //  - A:    reads aggregated by VerA subunit (aColors)
+            //  - B:    reads aggregated by VerB subunit (bColors)
+            // VerA/VerB are the SAME total reads, just grouped differently, so all
             // three sub-bars are the same height and directly comparable.
             const abStack: { key: string; label: string; v: number; color: string; cand?: string }[] =
               visibleCands.map(c => ({ key: c, label: c, v: chart.candidates[c]?.[ti] || 0, color: candColors[c] || '#888', cand: c }));
@@ -1720,17 +1720,17 @@ function ChartCard({
                 const midY = y + h / 2;
                 const subCx = subX + subW / 2;
                 const inlineLabel = showName ? `${seg.label} · ${total ? `${pctNum.toFixed(0)}%` : seg.v}` : `${total ? `${pctNum.toFixed(0)}%` : seg.v}`;
-                // Richer tooltip. For the A-B sub-bar, break out the VarA and VarB
-                // subunits. For the VarA / VarB sub-bars, note that the segment is the
+                // Richer tooltip. For the A-B sub-bar, break out the VerA and VerB
+                // subunits. For the VerA / VerB sub-bars, note that the segment is the
                 // sum of every combination sharing that subunit.
                 let tipText: string;
                 if (groupLabel === 'A-B') {
                   const pp = isCandSeg ? parseCandidate(seg.cand!) : null;
-                  const breakout = pp ? `\nVarA ${pp.a}  ·  VarB ${pp.b}` : '';
+                  const breakout = pp ? `\nVerA ${pp.a}  ·  VerB ${pp.b}` : '';
                   tipText = `A-B: ${seg.label}${breakout}\nreads: ${seg.v}${total ? `   (${pctStrFine} of bar)` : ''}\nT${t} · bar total ${total}`;
                 } else {
-                  const kindWord = groupLabel === 'VarA' ? 'VarA' : 'VarB';
-                  const combos = groupLabel === 'VarA' ? `${seg.label}-*` : `*-${seg.label}`;
+                  const kindWord = groupLabel === 'VerA' ? 'VerA' : 'VerB';
+                  const combos = groupLabel === 'VerA' ? `${seg.label}-*` : `*-${seg.label}`;
                   tipText = `${kindWord} ${seg.label}: ${seg.v} reads${total ? `, ${pctStrFine} of bar` : ''}\n(sum of all ${combos} combinations)\nT${t} · bar total ${total}`;
                 }
                 return (
@@ -1769,22 +1769,33 @@ function ChartCard({
             };
 
             if (splitAB) {
-              // Three side-by-side sub-bars within the slot: A-B | VarA | VarB.
-              // Generous inter-bar spacing so the three groups read as distinct
-              // (the bars are narrower than a single combined bar on purpose).
-              const gap = Math.max(8, slotW * 0.06);
-              const groupW = Math.min(BAR_CAP * 2.1, slotW * 0.92);
-              const subW = Math.max(8, (groupW - gap * 2) / 3);
+              // Three side-by-side sub-bars within the slot: A-B | VerA | VerB.
+              // The 3-bar group takes ~68% of the slot so there is a CLEAR gap
+              // between consecutive transfers (Nidhi: hard to tell transfers apart
+              // when the groups nearly touch). A faint divider reinforces the break.
+              const gap = Math.max(6, slotW * 0.04);
+              const groupW = Math.min(BAR_CAP * 1.7, slotW * 0.68);
+              const subW = Math.max(7, (groupW - gap * 2) / 3);
               const gx = cx - groupW / 2;
+              const showDivider = ti < chart.transfers.length - 1;
               return (
                 <g key={ti}>
+                  {/* faint divider in the gap after this transfer group */}
+                  {showDivider && (
+                    <line
+                      x1={PAD_L + xStep * (ti + 1)} x2={PAD_L + xStep * (ti + 1)}
+                      y1={PAD_T} y2={baseY}
+                      stroke="currentColor" strokeWidth={1} strokeDasharray="3 3"
+                      className="text-slate-200 dark:text-gray-700"
+                    />
+                  )}
                   <text x={cx} y={H - PAD_B + 16} textAnchor="middle" fontSize={13} fontWeight={600} className="fill-slate-700 dark:fill-gray-200 tabular-nums">T{t}</text>
                   {renderSubBar(abStack, gx, subW, 'A-B')}
-                  {renderSubBar(aStack, gx + subW + gap, subW, 'VarA')}
-                  {renderSubBar(bStack, gx + (subW + gap) * 2, subW, 'VarB')}
+                  {renderSubBar(aStack, gx + subW + gap, subW, 'VerA')}
+                  {renderSubBar(bStack, gx + (subW + gap) * 2, subW, 'VerB')}
                   {/* sub-bar group labels under each */}
-                  {[['A-B', gx], ['VarA', gx + subW + gap], ['VarB', gx + (subW + gap) * 2]].map(([lab, sx]) => (
-                    <text key={lab as string} x={(sx as number) + subW / 2} y={H - PAD_B + 30} textAnchor="middle" fontSize={10.5} fontWeight={600} className="fill-slate-500 dark:fill-gray-400">{lab}</text>
+                  {[['A-B', gx], ['VerA', gx + subW + gap], ['VerB', gx + (subW + gap) * 2]].map(([lab, sx]) => (
+                    <text key={lab as string} x={(sx as number) + subW / 2} y={H - PAD_B + 30} textAnchor="middle" fontSize={10} fontWeight={600} className="fill-slate-500 dark:fill-gray-400">{lab}</text>
                   ))}
                   {total > 0 && (() => {
                     // All three sub-bars are the same total height; label sits just above.
@@ -1830,12 +1841,12 @@ function ChartCard({
                       : showName
                         ? `${cand} · ${pctStr || v}`
                         : `${v}${pctStr ? ` · ${pctStr}` : ''}`;
-                  // Richer tooltip: candidate, VarA / VarB broken out, reads, % of
+                  // Richer tooltip: candidate, VerA / VerB broken out, reads, % of
                   // bar, the transfer, and the bar total. Built per-segment (cheap).
                   const pp = cand !== '__OTHER__' ? parseCandidate(cand) : null;
                   const tipText = cand === '__OTHER__'
                     ? `Other (${otherCands.length} candidates)\nreads: ${v}${total ? `   (${pctStrFine} of bar)` : ''}\nT${t} · bar total ${total}`
-                    : `A-B: ${cand}${pp ? `\nVarA ${pp.a}  ·  VarB ${pp.b}` : ''}\nreads: ${v}${total ? `   (${pctStrFine} of bar)` : ''}\nT${t} · bar total ${total}`;
+                    : `A-B: ${cand}${pp ? `\nVerA ${pp.a}  ·  VerB ${pp.b}` : ''}\nreads: ${v}${total ? `   (${pctStrFine} of bar)` : ''}\nT${t} · bar total ${total}`;
                   return (
                     <g key={cand}>
                       <rect
@@ -1979,7 +1990,7 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
   // Candidate whose cross-chart detail popup is open (null = closed).
   const [detailCand, setDetailCand] = useState<string | null>(null);
   // Subunit whose cross-chart detail popup is open (null = closed). Mirrors detailCand
-  // but for a whole VarA or VarB subunit aggregated across its A-B partners.
+  // but for a whole VerA or VerB subunit aggregated across its A-B partners.
   const [detailSubunit, setDetailSubunit] = useState<SubunitRef | null>(null);
   const [candidateQuery, setCandidateQuery] = useState('');
   const [onlyFlipped, setOnlyFlipped] = useState(false);
@@ -1995,8 +2006,8 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
   const [candGroup, setCandGroup] = useState<CandGroupKey>('none');
   const [colorMode, setColorMode] = useState<ColorMode>('candidate');
   // Split-bar view: when on, each transfer bar is subdivided into three side-by-side
-  // sub-bars (A-B combined, VarA-only breakdown, VarB-only breakdown) so the user can
-  // see how the individual VarA and VarB subunits behave alongside the combination,
+  // sub-bars (A-B combined, VerA-only breakdown, VerB-only breakdown) so the user can
+  // see how the individual VerA and VerB subunits behave alongside the combination,
   // all in stable per-identity colors (Nidhi 2026-06).
   const [splitAB, setSplitAB] = useState(false);
   // Focus-mode orientation. 'horizontal' renders each transfer as a full-width HTML
@@ -2013,7 +2024,7 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
   // Transient hover highlight: hovering a candidate row in the sidebar lights up
   // that candidate's segments across every visible chart (without committing a pin).
   const [hoveredCand, setHoveredCand] = useState<string | null>(null);
-  // Transient subunit hover: hovering a VarA/VarB group header in the sidebar lights
+  // Transient subunit hover: hovering a VerA/VerB group header in the sidebar lights
   // up EVERY candidate sharing that subunit across all visible charts (no commit).
   const [hoveredSubunit, setHoveredSubunit] = useState<SubunitRef | null>(null);
   const [focusKey, setFocusKey] = useState<string | null>(null);
@@ -2204,7 +2215,7 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
   }, []);
 
   // Select/deselect an ENTIRE subunit at once. Given the candidate ids that share a
-  // VarA or VarB subunit, if all are currently selected we remove them (toggle off);
+  // VerA or VerB subunit, if all are currently selected we remove them (toggle off);
   // otherwise we add the missing ones (toggle on). Used by the sidebar group headers.
   const toggleSubunitCands = useCallback((cands: string[]) => {
     setSelectedCands(prev => {
@@ -2348,20 +2359,20 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
             <button key={m} onClick={() => setColorMode(m)}
               className={cn('px-1.5 py-1 text-[10.5px] font-medium', i > 0 && 'border-l border-slate-200 dark:border-gray-600',
                 colorMode === m ? 'bg-emerald-600 text-white' : 'bg-white dark:bg-gray-700 text-slate-600 dark:text-gray-300')}
-              title={m === 'partner-a' ? "Color by VarA partner" : m === 'partner-b' ? 'Color by VarB partner' : 'Color by full A-B candidate'}>
-              {m === 'candidate' ? 'A-B' : m === 'partner-a' ? 'VarA' : 'VarB'}
+              title={m === 'partner-a' ? "Color by VerA partner" : m === 'partner-b' ? 'Color by VerB partner' : 'Color by full A-B candidate'}>
+              {m === 'candidate' ? 'A-B' : m === 'partner-a' ? 'VerA' : 'VerB'}
             </button>
           ))}
         </div>
 
-        {/* Split each bar into A-B / VarA / VarB sub-bars */}
+        {/* Split each bar into A-B / VerA / VerB sub-bars */}
         <button
           onClick={() => setSplitAB(v => !v)}
           className={cn('px-2 py-1 text-[10.5px] font-medium rounded border',
             splitAB
               ? 'bg-emerald-600 text-white border-emerald-600'
               : 'bg-white dark:bg-gray-700 text-slate-600 dark:text-gray-300 border-slate-200 dark:border-gray-600')}
-          title="Split each transfer bar into three sub-bars: the A-B combination, the VarA subunit breakdown, and the VarB subunit breakdown (same stable colors)."
+          title="Split each transfer bar into three sub-bars: the A-B combination, the VerA subunit breakdown, and the VerB subunit breakdown (same stable colors)."
         >
           Split A|B
         </button>
@@ -2760,7 +2771,7 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
       )}
 
       {/* Per-subunit cross-chart detail popup (aggregates all A-B partners of a
-          VarA or VarB subunit). */}
+          VerA or VerB subunit). */}
       {detailSubunit && data && (
         <SubunitDetailModal
           sub={detailSubunit}
@@ -2860,15 +2871,15 @@ function CandidatesSidebar(p: CandidatesSidebarProps) {
           <option value="reads">reads ↓</option>
           <option value="charts">in N charts ↓</option>
           <option value="name">name A→Z</option>
-          <option value="varA">VarA #</option>
-          <option value="varB">VarB #</option>
+          <option value="varA">VerA #</option>
+          <option value="varB">VerB #</option>
         </select>
         <span className="text-[10px] uppercase tracking-wider text-slate-500 dark:text-gray-400">Group</span>
         <select value={p.candGroup} onChange={e => p.setCandGroup(e.target.value as CandGroupKey)}
           className="text-[11px] border border-slate-200 dark:border-gray-600 rounded px-1.5 py-0.5 bg-white dark:bg-gray-700 dark:text-gray-100 outline-none">
           <option value="none">none</option>
-          <option value="varA">by VarA</option>
-          <option value="varB">by VarB</option>
+          <option value="varA">by VerA</option>
+          <option value="varB">by VerB</option>
         </select>
       </div>
 
@@ -2940,7 +2951,7 @@ function CandidatesSidebar(p: CandidatesSidebarProps) {
                 onMouseEnter={() => p.setHoveredSubunit({ kind: subKind, id: grp.label! })}
                 onMouseLeave={() => p.setHoveredSubunit(null)}
                 onClick={() => p.toggleSubunitCands(grpCands)}
-                title={`${subKind === 'A' ? 'VarA' : 'VarB'} ${grp.label}: ${grpCands.length} combination${grpCands.length === 1 ? '' : 's'}, ${grpReads.toLocaleString()} reads. Click to ${allSel ? 'deselect' : 'select'} all; hover highlights across charts; info opens the subunit detail.`}
+                title={`${subKind === 'A' ? 'VerA' : 'VerB'} ${grp.label}: ${grpCands.length} combination${grpCands.length === 1 ? '' : 's'}, ${grpReads.toLocaleString()} reads. Click to ${allSel ? 'deselect' : 'select'} all; hover highlights across charts; info opens the subunit detail.`}
               >
                 <span className={cn('inline-flex items-center justify-center w-3.5 h-3.5 rounded-sm border shrink-0',
                   allSel ? 'bg-blue-600 border-blue-600 text-white' : someSel ? 'bg-blue-300 border-blue-400 dark:bg-blue-700' : 'border-slate-400 dark:border-gray-500')}>
@@ -2951,7 +2962,7 @@ function CandidatesSidebar(p: CandidatesSidebarProps) {
                 <button
                   onClick={(e) => { e.stopPropagation(); p.onOpenSubunitDetail({ kind: subKind, id: grp.label! }); }}
                   className="ml-auto shrink-0 flex items-center gap-0.5 px-1 py-0.5 rounded text-[9px] font-semibold text-blue-600 dark:text-blue-300 bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800 hover:bg-blue-100 dark:hover:bg-blue-900/50"
-                  title={`Open ${subKind === 'A' ? 'VarA' : 'VarB'} ${grp.label} detail: behavior aggregated across all its partner combinations and charts`}
+                  title={`Open ${subKind === 'A' ? 'VerA' : 'VerB'} ${grp.label} detail: behavior aggregated across all its partner combinations and charts`}
                 >
                   <Info className="w-3 h-3" /> info
                 </button>
@@ -3536,7 +3547,7 @@ function CompareView(props: CompareViewProps) {
                   onClick={() => onToggleCand(row.cand)}
                   onMouseEnter={() => onHoverCandidate?.(row.cand)}
                   onMouseLeave={() => onHoverCandidate?.(null)}
-                  title={`${row.cand}  (VarA ${row.a} · VarB ${row.b})\n${row.total.toLocaleString()} reads across ${row.charts}/${resolved.length} compared charts\nclick to ${isSel ? 'deselect' : 'select'} in all charts`}
+                  title={`${row.cand}  (VerA ${row.a} · VerB ${row.b})\n${row.total.toLocaleString()} reads across ${row.charts}/${resolved.length} compared charts\nclick to ${isSel ? 'deselect' : 'select'} in all charts`}
                   className={cn(
                     'flex items-center gap-1.5 px-2 py-1 rounded border text-[11px] tabular-nums transition-colors',
                     isSel
