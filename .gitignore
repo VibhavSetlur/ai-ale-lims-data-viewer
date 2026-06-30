@@ -61,3 +61,14 @@ archive/
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+.scratch/
+
+# local-only notes (deploy recipe, archived meeting/audit notes) - not for publication
+.local-notes/
+
+# generated static-export artifacts (built per deploy, never committed)
+/out/
+public/db/
+public/data/*.json
+public/data/*.json.gz
+public/data/manifest.json

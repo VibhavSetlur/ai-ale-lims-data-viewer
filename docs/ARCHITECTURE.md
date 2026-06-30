@@ -47,8 +47,8 @@ future data type: add the table, the flag flips, the view appears - no code fork
 redeploy of different code.
 
 This is what lets the publication schedule drive the site: launch the public site with
-TFMN1 only; when VarAB publishes, the VarAB data lands in the database and the existing
-site automatically exposes the additional features.
+TFMN1 only; when the VerAB barcode experiments publish, that data lands in the database and
+the existing site automatically exposes the additional features.
 
 ## 4. The two live deployments
 
@@ -119,11 +119,45 @@ a clean server `.next` if it detects `exportTrailingSlash: true`. Symptom to rec
 root page 200 but all API routes 404 with a 308.
 
 WEBROOT PERMISSIONS. nginx returns 403 on files that are not world-readable. After any
-copy into a webroot, set files 644 and dirs 755. We deploy with `rsync -a --delete
---no-perms` (mirror without trying to chmod fliu's top directory, which we do not own),
-then `find <webroot> -mindepth 1 -type f -exec chmod 644` and `-type d -exec chmod 755`.
+copy into a webroot, set files 644 and dirs 755. Mirror `out/` into the webroot, then
+`find <webroot> -mindepth 1 -type f -exec chmod 644` and `-type d -exec chmod 755` (never
+chmod the top directory, which fliu owns).
 
-## 8. Repository map
+## 8. Re-deploy procedure (both instances)
+
+Each instance is built against ITS database, so the only per-instance differences are the
+database, the `SRC` for the httpvfs copy, the `BASE_PATH`, and the destination webroot.
+
+```bash
+cd /scratch/vsetlur/ai-ale-lims-data-viewer
+conda activate ai-ale-dev
+
+# --- choose ONE instance ---
+# PUBLIC (TFMN1 trimmed): DB=data/lims_TFMN1_indexed.db; BP=/annotation/projects/aiale;            DST=/scratch1/fliu/html/modelseed_annotation/projects/aiale
+# PRIVATE (full):         DB=data/lims_indexed.db;        BP=/annotation/projects/aiale-06-25-2026; DST=/scratch1/fliu/html/modelseed_annotation/projects/aiale-06-25-2026
+
+# 1. point a server at this instance's DB so prebake snapshots the right capability flags
+SQLITE_PATH="$PWD/$DB" PORT=3457 npm start &   # or ops/serve.sh on poplar
+# 2. bake curated-view JSON from THIS db (hasBarcodes etc. are baked here)
+BASE=http://localhost:3457 npm run prebake
+# 3. build the client-queryable SQLite for the raw Tables browser FROM THIS db
+SRC="$DB" bash scripts/prepare-httpvfs-db.sh
+# 4. build the static bundle with this instance's base path
+rm -rf out && BASE_PATH="$BP" npm run build:static
+# 5. publish into the webroot, then fix perms on CONTENTS only
+rsync -a --delete --no-perms --omit-dir-times out/ "$DST/"
+find "$DST" -mindepth 1 -type d -exec chmod 755 {} \; ; find "$DST" -mindepth 1 -type f -exec chmod 644 {} \;
+# 6. verify: root + data/manifest.json return 200, and the .db serves byte ranges (206)
+curl -s -o /dev/null -w "root %{http_code}\n" "https://modelseed.org$BP/"
+curl -s -D - -o /dev/null -H "Range: bytes=0-99" "https://modelseed.org$BP/db/lims.db" | grep -i 206
+```
+
+Expect `hasBarcodes` false for the public/TFMN1 instance and true for the private/full
+instance, from the identical code. Repeat the block for the other instance. Because
+`build:static` wipes `.next`, run a fresh `npm run build` before restarting any long-lived
+server afterward (see Pitfalls).
+
+## 9. Repository map
 
 ```
 src/app/api/            Server-mode API route handlers (stashed during static export)
@@ -131,21 +165,28 @@ src/app/api/            Server-mode API route handlers (stashed during static ex
   barcode-counts/route.ts  verAB barcode charts (mock fallback when table absent)
   data/[tableName]/     Raw table browser (server mode)
 src/components/
+  Dashboard.tsx         App shell: workspace switcher, left sidebar, and the in-app
+                        Help / Guide / Interactive-tutorial system + navigation events
   MutationExplorer.tsx  Sample Selection, Comparative view, Copy Number, growth curves,
                         the mutation + sample detail popups, and the data-driven tab gating
-  BarcodeCharts.tsx     verAB barcode grid / focus / compare views
+  BarcodeCharts.tsx     VerA/VerB barcode grid / focus / compare views
   DataTable.tsx         Raw Database-Tables browser (server API or sql.js-httpvfs)
+  HelpCenter.tsx        Deep searchable in-app documentation
+  GuideAssistant.tsx    "How do I..." helper that navigates the user + external-prompt builder
+  Tutorial.tsx          Interactive on-screen highlighted walkthrough
+  ExportFigureMenu.tsx  Shared PNG / SVG / HTML / Print export control
 src/lib/
   db.ts                 SQLite/MySQL access + query building (server mode)
   dataSource.ts         fetchData() server/static switch + IS_STATIC
   sqlClient.ts          sql.js-httpvfs client (static raw-table browser)
+  figureExport.ts       Browser-side PNG/SVG/HTML/print figure export (no dependencies)
 scripts/                prebake.mjs, build-static.sh, prepare-httpvfs-db.sh
 ops/                    serve.sh, stop.sh, refresh-db.sh (server lifecycle on poplar)
 next.config.ts          Dual-mode config (server vs output:export + basePath)
-docs/                   This document, deploy runbook, deployment design, archive/
+docs/                   ARCHITECTURE.md, RESEARCHER_GUIDE.md, MANUSCRIPT_INTEGRATION.md
 ```
 
-## 9. Provenance / citation
+## 10. Provenance / citation
 
 This viewer is referenced by the robotic-experiment paper. It contains no scientific
 algorithms itself; it is a presentation layer over the LIMS database. The code repository
