@@ -2793,7 +2793,7 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
               keys={comparing}
               charts={data?.charts ?? []}
               statsByKey={statsByKey}
-              colorMode={colorMode} splitAB={splitAB} normalize={normalize}
+              colorMode={colorMode} splitAB={splitAB} normalize={normalize} onNormalize={setNormalize}
               aColors={aColors} bColors={bColors} candColors={candColors}
               selectedCands={selectedCands} isolateSelected={isolateSelected} topN={topN}
               onToggleCand={toggleCand}
@@ -3409,6 +3409,7 @@ interface CompareViewProps {
   colorMode: ColorMode;
   splitAB: boolean;
   normalize: Normalize;
+  onNormalize?: (n: Normalize) => void;
   aColors: Record<string, string>;
   bColors: Record<string, string>;
   candColors: Record<string, string>;
@@ -3429,7 +3430,7 @@ interface CompareViewProps {
   onToggleSubunitCands?: (cands: string[]) => void;
 }
 function CompareView(props: CompareViewProps) {
-  const { keys, charts, statsByKey, colorMode, splitAB, normalize, aColors, bColors,
+  const { keys, charts, statsByKey, colorMode, splitAB, normalize, onNormalize, aColors, bColors,
     candColors, selectedCands, isolateSelected, topN, onToggleCand, onBack, hoveredCand, hoveredSubunit, onRemove, onHoverCandidate, onHoverSubunit, onToggleSubunitCands } = props;
 
   useEffect(() => {
@@ -3448,6 +3449,47 @@ function CompareView(props: CompareViewProps) {
   const resolved = useMemo(() => keys
     .map(k => charts.find(c => chartKey(c) === k))
     .filter((c): c is BarcodeChart => !!c), [keys, charts]);
+
+  // How to ORDER the compared panels. Researchers rarely want insertion order:
+  // sorting by final-transfer richness, total reads, or dominant outcome makes a
+  // multi-panel comparison scan like a result. 'name' keeps a stable A->Z order.
+  const [chartSort, setChartSort] = useState<'added' | 'name' | 'reads' | 'richness' | 'dominant'>('added');
+
+  // Per-panel outcome at the LAST sampled transfer: the dominant A-B combination,
+  // its fraction, and how many distinct combinations remain (richness). This is
+  // the one-line "what happened" summary shown under each panel and used for sort.
+  const outcomeByKey = useMemo(() => {
+    const m = new Map<string, { dominant: string; fraction: number; richness: number; totalReads: number }>();
+    for (const c of resolved) {
+      const lastIdx = c.transfers.length - 1;
+      let total = 0, allReads = 0, dominant = '', best = -1, richness = 0;
+      for (const [cand, counts] of Object.entries(c.candidates)) {
+        const last = counts[lastIdx] || 0;
+        total += last;
+        allReads += counts.reduce((s, v) => s + (v || 0), 0);
+        if (last > 0) richness++;
+        if (last > best) { best = last; dominant = cand; }
+      }
+      m.set(chartKey(c), { dominant: dominant || '—', fraction: total ? best / total : 0, richness, totalReads: allReads });
+    }
+    return m;
+  }, [resolved]);
+
+  const sortedResolved = useMemo(() => {
+    const arr = [...resolved];
+    if (chartSort === 'added') return arr;
+    arr.sort((a, b) => {
+      const ka = chartKey(a), kb = chartKey(b);
+      if (chartSort === 'name') return ka.localeCompare(kb);
+      const oa = outcomeByKey.get(ka), ob = outcomeByKey.get(kb);
+      if (chartSort === 'reads') return (ob?.totalReads || 0) - (oa?.totalReads || 0);
+      if (chartSort === 'richness') return (ob?.richness || 0) - (oa?.richness || 0);
+      // 'dominant': group by which combination won, then by its strength
+      const da = oa?.dominant || '', db = ob?.dominant || '';
+      return da.localeCompare(db) || (ob?.fraction || 0) - (oa?.fraction || 0);
+    });
+    return arr;
+  }, [resolved, chartSort, outcomeByKey]);
 
   // COMMON Y-MAX across the compared charts so bars are truly comparable. We take
   // the per-chart maximum bar total (sum of candidate reads at the tallest
@@ -3635,6 +3677,34 @@ function CompareView(props: CompareViewProps) {
           {useCommonY ? `Y locked to ${commonMaxY.toLocaleString()}` : 'Y = 0 to 100%'}
         </span>
 
+        {/* Reads vs Fraction: composition (fraction) is what most cross-condition
+            comparisons want; reads keeps absolute depth. Toggling here avoids
+            leaving Compare to change it on the main toolbar. */}
+        {onNormalize && (
+          <div className="flex items-center gap-1">
+            <span className="text-slate-500 dark:text-gray-400">Y</span>
+            <button className={colBtnCls(normalize === 'count')} onClick={() => onNormalize('count')} title="Absolute read counts (depth)">Reads</button>
+            <button className={colBtnCls(normalize === 'fraction')} onClick={() => onNormalize('fraction')} title="Composition: each bar normalized to 0-100% so you compare proportions, not depth">Fraction</button>
+          </div>
+        )}
+
+        {/* Order the panels so a multi-chart comparison reads like a result. */}
+        <div className="flex items-center gap-1">
+          <span className="text-slate-500 dark:text-gray-400">Sort</span>
+          <select
+            value={chartSort}
+            onChange={e => setChartSort(e.target.value as typeof chartSort)}
+            className="px-1.5 py-0.5 rounded border border-slate-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-slate-700 dark:text-gray-200 text-[10.5px]"
+            title="Order the compared panels"
+          >
+            <option value="added">As added</option>
+            <option value="name">Name (A-Z)</option>
+            <option value="dominant">Dominant combination</option>
+            <option value="richness">Final richness</option>
+            <option value="reads">Total reads</option>
+          </select>
+        </div>
+
         <span className="text-slate-500 dark:text-gray-400 tabular-nums">
           {selectedCands.size} candidate{selectedCands.size === 1 ? '' : 's'} selected
         </span>
@@ -3744,8 +3814,9 @@ function CompareView(props: CompareViewProps) {
           </Centered>
         ) : (
           <div className="grid gap-4 items-stretch" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}>
-            {resolved.map(c => {
+            {sortedResolved.map(c => {
               const stats = statsByKey.get(chartKey(c))!;
+              const outcome = outcomeByKey.get(chartKey(c));
               return (
                 <div key={chartKey(c)} className="relative flex flex-col rounded-lg border border-slate-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-sm overflow-hidden group">
                   {/* PER-CHART HEADER: identity, totals, flip badge, remove */}
@@ -3780,6 +3851,17 @@ function CompareView(props: CompareViewProps) {
                     <span className="text-slate-300 dark:text-gray-600">·</span>
                     <span title="Number of sequenced transfers">{c.transfers.length} transfer{c.transfers.length === 1 ? '' : 's'}</span>
                   </div>
+                  {/* OUTCOME: the dominant A-B combination at the final transfer and
+                      its share, so a reviewer can read each panel's result at a glance. */}
+                  {outcome && outcome.dominant !== '—' && (
+                    <div className="px-3 py-1 border-b border-slate-100 dark:border-gray-700/60 text-[10.5px] flex items-center gap-1.5 shrink-0 bg-emerald-50/40 dark:bg-emerald-900/10">
+                      <span className="text-slate-500 dark:text-gray-400">Final:</span>
+                      <span className="inline-block w-2.5 h-2.5 rounded-sm shrink-0" style={{ background: candColors[outcome.dominant] || '#888' }} />
+                      <span className="font-mono font-semibold text-slate-800 dark:text-gray-100">{outcome.dominant}</span>
+                      <span className="tabular-nums text-emerald-700 dark:text-emerald-300 font-semibold">{(outcome.fraction * 100).toFixed(0)}%</span>
+                      <span className="text-slate-400 dark:text-gray-500 tabular-nums" title="Distinct A-B combinations still present at the final transfer">· {outcome.richness} present</span>
+                    </div>
+                  )}
                   {/* CHART: pass the COMMON y-max so bars are comparable */}
                   <div className="flex-1 min-h-0" style={{ minHeight: tileHeight }}>
                     <ChartCard
