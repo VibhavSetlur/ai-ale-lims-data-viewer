@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import BarcodeCharts from './BarcodeCharts';
 import { fetchData, IS_STATIC } from '../lib/dataSource';
+import ExportFigureMenu from './ExportFigureMenu';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
@@ -26,6 +27,12 @@ interface MutationSample {
   donor_dna?: string;
   selection_note?: string;
   growth_curve?: { t: number; od: number }[];
+  growth_curve_source?: {
+    table: 'Robotic_OD';
+    sample_name: string;
+    transfer: number;
+    points: number;
+  };
   od_sources?: { type: string; source: string }[];
 }
 
@@ -212,11 +219,9 @@ function snpTypeBadgeClass(snpType?: string): string {
   return 'bg-slate-100 text-slate-600 border-slate-300 dark:bg-gray-700 dark:text-gray-300 dark:border-gray-600';
 }
 
-// Continuous heatmap color scaled to a [min,max] domain rather than fixed
-// thresholds, so the gradient always spans the actual values on screen. Returns
-// inline style (bg + readable text) so a researcher can tell apart, say, CN 3.1
-// vs 4.6 even when both would have been the same fixed bucket. `t` is the
-// normalized position 0..1 of the value within its domain.
+// Continuous heatmap color scaled to a [min,max] domain. Frequency cells pass the
+// fixed 0..1 domain so 50% always has the same color. Copy-number rows pass their
+// row-local min/max so region-specific amplification gradients stay readable.
 function rampStyle(value: number, min: number, max: number, metric: string): React.CSSProperties {
   if (!Number.isFinite(value)) return {};
   const span = max - min;
@@ -470,6 +475,20 @@ export default function MutationExplorer() {
   const [forceMetric, setForceMetric] = useState<{ metric: 'copy_number'; nonce: number } | null>(null);
   const [showNotes, setShowNotes] = useState(false);
 
+  // Cross-component navigation: the Guide/Tutorial dispatch `aiale:navigate`
+  // CustomEvents to jump straight to a tab (and optionally a sub-mode). This
+  // keeps the help system decoupled from this component's internal tab state.
+  useEffect(() => {
+    const onNav = (e: Event) => {
+      const detail = (e as CustomEvent).detail as { tab?: Tab } | undefined;
+      if (detail?.tab && (detail.tab === 'samples' || detail.tab === 'compare' || detail.tab === 'copynumber' || detail.tab === 'barcodes')) {
+        setTab(detail.tab);
+      }
+    };
+    window.addEventListener('aiale:navigate', onNav as EventListener);
+    return () => window.removeEventListener('aiale:navigate', onNav as EventListener);
+  }, []);
+
   useEffect(() => {
     try {
       const s = localStorage.getItem(SELECTED_KEY);
@@ -537,25 +556,25 @@ export default function MutationExplorer() {
     <div className="flex flex-col h-full min-h-0 bg-[var(--surface)] rounded-lg border border-[var(--border)] overflow-hidden" style={{ boxShadow: 'var(--shadow-sm)' }}>
       <div className="flex items-center justify-between border-b border-[var(--border)] px-2">
         <div className="flex items-stretch">
-          <TabButton active={tab === 'samples'} onClick={() => setTab('samples')} icon={<FlaskConical className="w-3.5 h-3.5" />}>
+          <TabButton active={tab === 'samples'} onClick={() => setTab('samples')} icon={<FlaskConical className="w-3.5 h-3.5" />} tour="tab-samples">
             Sample Selection
             <span className="ml-1.5 px-1.5 py-0.5 rounded text-[10px] bg-[var(--surface-3)] text-[var(--text-soft)] tabular-nums">{data?.samples.length ?? 0}</span>
           </TabButton>
-          <TabButton active={tab === 'compare'} onClick={() => setTab('compare')} icon={<GitCompare className="w-3.5 h-3.5" />}>
+          <TabButton active={tab === 'compare'} onClick={() => setTab('compare')} icon={<GitCompare className="w-3.5 h-3.5" />} tour="tab-compare">
             Comparative View
             <span className={cn(
               "ml-1.5 px-1.5 py-0.5 rounded text-[10px] tabular-nums",
               selected.size > 0 ? "bg-[var(--accent-600)] text-white" : "bg-[var(--surface-3)] text-[var(--text-soft)]"
             )}>{selected.size}</span>
           </TabButton>
-          <TabButton active={tab === 'copynumber'} onClick={() => setTab('copynumber')} icon={<Dna className="w-3.5 h-3.5" />}>
+          <TabButton active={tab === 'copynumber'} onClick={() => setTab('copynumber')} icon={<Dna className="w-3.5 h-3.5" />} tour="tab-copynumber">
             Copy Number
             {(data?.stats?.cnRegionCount ?? 0) > 0 && (
               <span className="ml-1.5 px-1.5 py-0.5 rounded text-[10px] tabular-nums lims-pill-cn">{data!.stats!.cnRegionCount}</span>
             )}
           </TabButton>
           {data?.stats?.hasBarcodes && (
-            <TabButton active={tab === 'barcodes'} onClick={() => setTab('barcodes')} icon={<BarChart3 className="w-3.5 h-3.5" />}>
+            <TabButton active={tab === 'barcodes'} onClick={() => setTab('barcodes')} icon={<BarChart3 className="w-3.5 h-3.5" />} tour="tab-barcodes">
               Barcode Charts
             </TabButton>
           )}
@@ -727,9 +746,9 @@ export default function MutationExplorer() {
   );
 }
 
-function TabButton({ active, onClick, icon, children }: { active: boolean; onClick: () => void; icon: React.ReactNode; children: React.ReactNode }) {
+function TabButton({ active, onClick, icon, children, tour }: { active: boolean; onClick: () => void; icon: React.ReactNode; children: React.ReactNode; tour?: string }) {
   return (
-    <button onClick={onClick} data-active={active} className="lims-tab">
+    <button onClick={onClick} data-active={active} data-tour={tour} className="lims-tab">
       {icon}
       {children}
     </button>
@@ -1319,6 +1338,7 @@ function ComparativePanel({
   const [growthCurveSample, setGrowthCurveSample] = useState<MutationSample | null>(null);
   // The sample whose column-header name was clicked; drives the sample-detail modal.
   const [detailSample, setDetailSample] = useState<MutationSample | null>(null);
+  const heatmapFigureRef = useRef<HTMLDivElement | null>(null);
   const [filtersHydrated, setFiltersHydrated] = useState(false);
 
   // Distinct mutation-call count per sample (>0 value), matching the count the
@@ -1566,24 +1586,9 @@ function ComparativePanel({
     return visibleSamples.filter(s => key(s) === k);
   }, [growthCurveSample, visibleSamples]);
 
-  // Per-COLUMN (sample) min/max of frequency values across the rendered rows, so
-  // each sample column's heatmap gradient spans that column's own value range
-  // (the user asked the color to represent the selected samples' min/max per
-  // column). Copy-number rows scale per-ROW instead (rowRange), since
-  // amplification is read across samples within a region.
-  const columnFreqRange = useMemo(() => {
-    const range = new Map<string, { min: number; max: number }>();
-    for (const s of visibleSamples) {
-      let min = Infinity, max = -Infinity;
-      for (const m of renderedMutations) {
-        if (m.metric !== 'frequency') continue;
-        const v = m.values[s.id];
-        if (typeof v === 'number' && !Number.isNaN(v)) { if (v < min) min = v; if (v > max) max = v; }
-      }
-      range.set(s.id, Number.isFinite(min) ? { min, max } : { min: 0, max: 1 });
-    }
-    return range;
-  }, [visibleSamples, renderedMutations]);
+  // Frequency cells always use the scientific absolute domain: 0% to 100%.
+  // Only copy-number rows use data-dependent ranges below.
+  const frequencyRange = { min: 0, max: 1 };
 
   // Per-ROW min/max (copy_number rows) across the visible samples.
   const rowRange = (m: MutationRow): { min: number; max: number } => {
@@ -1800,6 +1805,12 @@ function ComparativePanel({
           <Download className="w-3 h-3" />
           CSV
         </button>
+        <ExportFigureMenu
+          getTarget={() => heatmapFigureRef.current}
+          title={`AI-ALE comparative heatmap (${visibleSamples.length} samples)`}
+          filenameBase={`comparative-heatmap-${visibleSamples.length}samples`}
+          disabled={renderedMutations.length === 0}
+        />
       </div>
 
       {/* SNP type filter pills */}
@@ -1930,7 +1941,7 @@ function ComparativePanel({
           lets scrolling cell colors bleed through the 1px seams behind sticky
           cells regardless of z-index. border-separate + spacing 0 makes every
           sticky cell paint its own full opaque background with no seams. */}
-      <div className="flex-1 min-h-0 overflow-auto relative">
+      <div ref={heatmapFigureRef} className="flex-1 min-h-0 overflow-auto relative">
         <table className="text-[12px] border-separate" style={{ borderSpacing: 0 }}>
           {/* Sticky top: column groups + sample info rows + growth curves */}
           <thead className="sticky top-0 z-30 bg-white dark:bg-gray-800">
@@ -2069,7 +2080,7 @@ function ComparativePanel({
             {renderedMutations.map(m => {
               const isChecked = selectedMutations.has(m.id);
               // Copy-number rows scale their color by the ROW's own min/max across
-              // samples; frequency cells scale per-COLUMN (see columnFreqRange).
+              // samples; frequency cells use a fixed 0% to 100% domain.
               const cnRange = m.metric === 'copy_number' ? rowRange(m) : null;
               return (
               <tr
@@ -2124,8 +2135,8 @@ function ComparativePanel({
                   // = outline with no fill (provided, not observed).
                   const provided = !!m.providedIn && m.providedIn.includes(s.id);
                   const providedUnobserved = provided && (!hasVal || v === 0);
-                  // Scaled gradient: per-row range for CN, per-column range for freq.
-                  const range = cnRange ?? columnFreqRange.get(s.id) ?? { min: 0, max: 1 };
+                  // Scaled gradient: per-row range for CN, fixed 0..1 for frequency.
+                  const range = cnRange ?? frequencyRange;
                   const style = hasVal ? rampStyle(v, range.min, range.max, m.metric) : undefined;
                   // Amber inset ring marks a provided cell without recoloring the fill.
                   const providedStyle = provided
@@ -2142,7 +2153,7 @@ function ComparativePanel({
                       title={
                         (provided ? `PROVIDED in donor DNA (${s.donor_dna || 'donor'})${providedUnobserved ? ', not observed (0%)' : ''}. ` : '') +
                         (hasVal
-                          ? `${m.gene} ${m.variant} in ${s.name}: ${formatMetric(v, m.metric)}${m.metric === 'frequency' ? ` (raw ${v.toFixed(3)})` : ''} · color scaled to ${m.metric === 'copy_number' ? 'this row' : 'this column'} range ${range.min.toFixed(m.metric === 'copy_number' ? 1 : 2)} to ${range.max.toFixed(m.metric === 'copy_number' ? 1 : 2)}`
+                          ? `${m.gene} ${m.variant} in ${s.name}: ${formatMetric(v, m.metric)}${m.metric === 'frequency' ? ` (raw ${v.toFixed(3)})` : ''} · color scaled to ${m.metric === 'copy_number' ? `this copy-number row range ${range.min.toFixed(1)} to ${range.max.toFixed(1)}` : 'fixed frequency range 0% to 100%'}`
                           : `${m.gene} ${m.variant} in ${s.name}: no data`)
                       }
                     >
@@ -2326,6 +2337,7 @@ function GrowthCurveModal({
   const [hoveredPeerId, setHoveredPeerId] = useState<string | null>(null);
   // Peer toggled (clicked) to stay emphasized even without an active hover.
   const [focusedPeerId, setFocusedPeerId] = useState<string | null>(null);
+  const growthSvgRef = useRef<SVGSVGElement | null>(null);
 
   // Close on Esc.
   useEffect(() => {
@@ -2576,13 +2588,19 @@ function GrowthCurveModal({
                         : 'bg-[var(--surface-2)] border-[var(--border)] text-[var(--text-soft)]')}
                     >{showOverlay ? 'Hide group overlay' : 'Show group overlay'}</button>
                   )}
+                  <ExportFigureMenu
+                    getTarget={() => growthSvgRef.current}
+                    title={`Growth curve for ${sample.name}`}
+                    filenameBase={`growth-curve-${sample.name}`}
+                    compact
+                  />
                   <span className="text-[10px] text-[var(--text-faint)]">
                     {logScale ? 'Log axis: exponential phase reads as a straight line.' : 'Linear axis.'}
                   </span>
                 </div>
 
                 <div className="relative inline-block max-w-full">
-                <svg width={chart.W} height={chart.H} className="block max-w-full h-auto select-none" role="img" aria-label={`Growth curve for ${sample.name}`}>
+                <svg ref={growthSvgRef} width={chart.W} height={chart.H} className="block max-w-full h-auto select-none" role="img" aria-label={`Growth curve for ${sample.name}`}>
                   {/* Gridlines + Y ticks */}
                   {chart.yTicks.map((v, i) => {
                     const y = chart.sy(v);
@@ -2738,10 +2756,20 @@ function GrowthCurveModal({
                   </div>
                 ))}
               </div>
-              <div className="mt-2 text-[10px] text-[var(--text-faint)] leading-snug">
-                Note: mu is the steepest single ln(OD) interval and lag uses a 2x-baseline threshold heuristic.
-                These are point-to-point estimates from sparse readings, not a Gompertz/logistic fit.
-              </div>
+              <details className="mt-2 text-[10.5px] text-[var(--text-soft)] leading-snug">
+                <summary className="cursor-pointer text-[var(--accent-700)] hover:underline select-none">How is each value computed? (click)</summary>
+                <div className="mt-1.5 space-y-1 rounded border border-[var(--border)] bg-[var(--surface-2)] p-2">
+                  <p>These are <b>descriptive statistics of the observed OD600 points</b>, computed in the browser from the numeric series. They are not Gompertz/logistic/Richards model fits, and nothing is invented: if no numeric series exists, the chart above says so.</p>
+                  <ul className="list-disc pl-4 space-y-0.5">
+                    <li><b>Max OD600 (K)</b> = the largest observed OD600 (not a fitted asymptote).</li>
+                    <li><b>Max growth rate mu</b> = the steepest slope of ln(OD) between two consecutive points: max of (ln(OD[i+1]) - ln(OD[i])) / (t[i+1] - t[i]). The interval that produced it is highlighted on the curve.</li>
+                    <li><b>Doubling time</b> = ln(2) / mu, at that maximum rate.</li>
+                    <li><b>Lag time</b> = first time OD reaches at least 2x the baseline (minimum of the first few points). A coarse heuristic, not a tangent intercept.</li>
+                    <li><b>AUC</b> = trapezoid-rule area under the OD-vs-time curve (OD*hours).</li>
+                  </ul>
+                  <p className="text-[var(--text-faint)]">Source: numeric rows from the LIMS <span className="font-mono">Robotic_OD</span> table, matched to this sample by ALE lineage and transfer.</p>
+                </div>
+              </details>
             </ModalSection>
           )}
 
@@ -4104,6 +4132,14 @@ function CopyNumberChart({
     <div className="flex flex-col lg:flex-row gap-4 h-full min-h-0">
       {/* Chart column */}
       <div className="relative flex-1 min-w-0 min-h-0 flex items-center justify-center">
+        <div className="absolute top-2 right-2 z-10">
+          <ExportFigureMenu
+            getTarget={() => svgRef.current}
+            title={`Copy number trend for ${regionLabel}`}
+            filenameBase={`copy-number-${regionLabel}`}
+            compact
+          />
+        </div>
         <div className="relative w-full h-full flex items-center justify-center">
           <svg
             ref={svgRef}

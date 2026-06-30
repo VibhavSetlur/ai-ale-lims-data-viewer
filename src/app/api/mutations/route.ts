@@ -13,10 +13,14 @@ export interface MutationSample {
   donor_dna?: string;
   selection_note?: string;
   growth_curve?: { t: number; od: number }[];
-  // OD measurements tracked in the LIMS for this sample. We surface them even
-  // when the numeric time-series isn't in the mirror (the Data field is then
-  // a filename pointer, e.g. "TFMN1_roboticOD_final.pdf"). Researchers can
-  // see which samples have OD data captured and where to find the file.
+  growth_curve_source?: {
+    table: 'Robotic_OD';
+    sample_name: string;
+    transfer: number;
+    points: number;
+  };
+  // OD measurements tracked in the LIMS for this sample. We surface them only
+  // when a numeric Robotic_OD curve was not matched for the seq sample.
   od_sources?: { type: string; source: string }[];
 }
 
@@ -678,6 +682,9 @@ export async function GET(req: NextRequest) {
       // Real growth curve from Robotic_OD (joined by lineage + transfer).
       const lt = parseLineageTransfer(r.seq_sample);
       const growth_curve = lt ? finalizedCurves.get(`${lt.lineage}\u0000${lt.transfer}`) : undefined;
+      const growth_curve_source = (lt && growth_curve && growth_curve.length >= 2)
+        ? { table: 'Robotic_OD' as const, sample_name: lt.lineage, transfer: lt.transfer, points: growth_curve.length }
+        : undefined;
       // Only fall back to the filename pointer when there's no numeric curve.
       const od_sources = (!growth_curve || growth_curve.length < 2)
         ? odBySample.get(r.seq_sample)
@@ -694,6 +701,7 @@ export async function GET(req: NextRequest) {
         donor_dna,
         selection_note: describeSelection(popOrColony ?? undefined, r.notes),
         growth_curve: growth_curve && growth_curve.length >= 2 ? growth_curve : undefined,
+        growth_curve_source,
         od_sources: od_sources && od_sources.length > 0 ? od_sources : undefined,
       };
     });

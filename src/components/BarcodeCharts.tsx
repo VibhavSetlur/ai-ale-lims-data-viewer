@@ -11,8 +11,47 @@ import {
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { fetchData } from '../lib/dataSource';
+import ExportFigureMenu from './ExportFigureMenu';
 
 function cn(...inputs: ClassValue[]) { return twMerge(clsx(inputs)); }
+
+/**
+ * InfoPopover: a small always-visible (i) button that opens a short, plain
+ * explanation. Used to make the VerA/VerB / split semantics self-documenting so
+ * a non-expert never has to guess what a control or number means -- and so that
+ * any DERIVED quantity (e.g. the three-way split) is explained on the spot.
+ */
+function InfoPopover({ title, children, align = 'left' }: { title: string; children: React.ReactNode; align?: 'left' | 'right' }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', onDoc);
+    document.addEventListener('keydown', onKey);
+    return () => { document.removeEventListener('mousedown', onDoc); document.removeEventListener('keydown', onKey); };
+  }, [open]);
+  return (
+    <div className="relative inline-flex" ref={ref} data-figure-omit>
+      <button
+        onClick={() => setOpen(o => !o)}
+        className={cn('inline-flex items-center justify-center w-4 h-4 rounded-full border text-[10px]',
+          open ? 'bg-blue-600 text-white border-blue-600' : 'text-blue-600 border-blue-300 bg-blue-50 dark:bg-blue-900/20 dark:border-blue-700 hover:bg-blue-100')}
+        title={title}
+        aria-label={title}
+      >
+        <Info className="w-2.5 h-2.5" />
+      </button>
+      {open && (
+        <div className={cn('absolute top-full mt-1 z-50 w-72 rounded-lg border border-slate-200 dark:border-gray-600 bg-white dark:bg-gray-800 p-3 text-[11px] leading-relaxed text-slate-600 dark:text-gray-300 shadow-xl', align === 'right' ? 'right-0' : 'left-0')}>
+          <div className="font-semibold text-slate-800 dark:text-gray-100 mb-1">{title}</div>
+          {children}
+        </div>
+      )}
+    </div>
+  );
+}
 
 interface BarcodeChart {
   well: string;
@@ -1992,6 +2031,7 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
   // Subunit whose cross-chart detail popup is open (null = closed). Mirrors detailCand
   // but for a whole VerA or VerB subunit aggregated across its A-B partners.
   const [detailSubunit, setDetailSubunit] = useState<SubunitRef | null>(null);
+  const figureRef = useRef<HTMLDivElement | null>(null);
   const [candidateQuery, setCandidateQuery] = useState('');
   const [onlyFlipped, setOnlyFlipped] = useState(false);
 
@@ -2377,6 +2417,12 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
           Split A|B
         </button>
 
+        <InfoPopover title="VerA / VerB and the A|B split" align="left">
+          <p className="mb-1.5">A barcode label <span className="font-mono">A#-B#</span> is one <b>VerA</b> subunit paired with one <b>VerB</b> subunit. VerB is required for VerA activity and the pairing affects the substrate, so the VerA/VerB mix is what governs substrate specificity as the population evolves.</p>
+          <p className="mb-1.5"><b>Color by</b> A-B, VerA, or VerB to ask different questions: track one exact combination, or all combinations sharing a VerA (or VerB) subunit.</p>
+          <p><b>Split A|B</b> shows three sub-bars per transfer: the full A-B combinations, the same reads grouped by VerA, and grouped by VerB. They are the <i>same reads</i> shown three ways (a derived breakdown, not three different measurements), so all three sub-bars have the same total height per transfer.</p>
+        </InfoPopover>
+
         {/* Focus chart-type selector: Rows (readable HTML stacks) / Bars (vertical
             SVG) / Lines (time-course trajectory tracker) / Heatmap (candidate x
             transfer grid). Replaces the old Rows/Bars orientation toggle. */}
@@ -2580,6 +2626,12 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
             title="Download visible charts as CSV">
             <Download className="w-3 h-3" /> CSV
           </button>
+          <ExportFigureMenu
+            getTarget={() => figureRef.current}
+            title={`AI-ALE barcode chart (${view} view)`}
+            filenameBase={`barcode-${view}-${focusKey || comparing.length || visibleCharts.length}`}
+            disabled={!data || visibleCharts.length === 0}
+          />
           <button onClick={load} className="p-1 rounded text-slate-500 dark:text-gray-400 hover:bg-slate-100 dark:hover:bg-gray-700" title="Reload">
             <RefreshCw className={cn('w-3.5 h-3.5', loading && 'animate-spin')} />
           </button>
@@ -2624,7 +2676,7 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
         {/* Chart area — internal scroll behavior depends on the view mode:
             grid scrolls vertically (thumbnails); focus & compare fill the
             viewport and only the candidate legend scrolls inside its column. */}
-        <div className="flex-1 min-w-0 flex flex-col bg-slate-100/30 dark:bg-gray-900/30 overflow-hidden">
+        <div ref={figureRef} className="flex-1 min-w-0 flex flex-col bg-slate-100/30 dark:bg-gray-900/30 overflow-hidden">
           {loading && <div className="flex-1 overflow-auto"><Centered><Loader2 className="w-4 h-4 animate-spin" /> Loading…</Centered></div>}
           {error && <div className="flex-1 overflow-auto"><Centered><AlertTriangle className="w-4 h-4 text-red-500" /> {error}</Centered></div>}
           {!loading && !error && data && visibleCharts.length === 0 && (
@@ -2750,6 +2802,8 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
               hoveredSubunit={hoveredSubunit}
               onRemove={(k) => setComparing(prev => prev.filter(x => x !== k))}
               onHoverCandidate={setHoveredCand}
+              onHoverSubunit={setHoveredSubunit}
+              onToggleSubunitCands={toggleSubunitCands}
             />
           )}
         </div>
@@ -3369,10 +3423,14 @@ interface CompareViewProps {
   // Cross-chart hover sync. Threaded from the parent's setHoveredCand so the
   // shared legend (and bar hovers) light up the same candidate in every chart.
   onHoverCandidate?: (c: string | null) => void;
+  // Subunit-level sync so the shared legend can group by VerA/VerB (consistent
+  // with the sidebar group headers) when the color mode is partner-a/partner-b.
+  onHoverSubunit?: (s: SubunitRef | null) => void;
+  onToggleSubunitCands?: (cands: string[]) => void;
 }
 function CompareView(props: CompareViewProps) {
   const { keys, charts, statsByKey, colorMode, splitAB, normalize, aColors, bColors,
-    candColors, selectedCands, isolateSelected, topN, onToggleCand, onBack, hoveredCand, hoveredSubunit, onRemove, onHoverCandidate } = props;
+    candColors, selectedCands, isolateSelected, topN, onToggleCand, onBack, hoveredCand, hoveredSubunit, onRemove, onHoverCandidate, onHoverSubunit, onToggleSubunitCands } = props;
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onBack(); };
@@ -3468,6 +3526,60 @@ function CompareView(props: CompareViewProps) {
     return candColors[cand] || '#888';
   };
 
+  // SUBUNIT-GROUPED legend. In VerA / VerB color mode, listing every A-B combo is
+  // inconsistent with the sidebar (which lets you act on a whole subunit) and the
+  // swatches collapse to one color per subunit anyway -- so selecting one combo
+  // while the bars are colored by subunit felt broken (Nidhi's "inconsistency
+  // with VerA/VerB highlighting and candidate selecting in compare"). When the
+  // color mode is by subunit we therefore group the shared legend by subunit:
+  // one row per VerA (or VerB), clicking selects ALL its A-B partners, hovering
+  // highlights the whole subunit across every chart. This makes the compare
+  // legend behave exactly like the sidebar group headers.
+  const subunitMode: 'A' | 'B' | null = colorMode === 'partner-a' ? 'A' : colorMode === 'partner-b' ? 'B' : null;
+  const subunitLegend = useMemo(() => {
+    if (!subunitMode) return [];
+    type Agg = { id: string; total: number; charts: Set<string>; cands: Set<string>; lastFractions: number[] };
+    const map = new Map<string, Agg>();
+    for (const c of resolved) {
+      const ck = chartKey(c);
+      const lastIdx = c.transfers.length - 1;
+      let lastBarTotal = 0;
+      for (const counts of Object.values(c.candidates)) lastBarTotal += counts[lastIdx] || 0;
+      const perSubLast = new Map<string, number>();
+      for (const [cand, counts] of Object.entries(c.candidates)) {
+        const p = parseCandidate(cand);
+        if (!p) continue;
+        const id = subunitMode === 'A' ? p.a : p.b;
+        let a = map.get(id);
+        if (!a) { a = { id, total: 0, charts: new Set(), cands: new Set(), lastFractions: [] }; map.set(id, a); }
+        const tot = counts.reduce((s, v) => s + (v || 0), 0);
+        a.total += tot;
+        a.cands.add(cand);
+        if (tot > 0) a.charts.add(ck);
+        perSubLast.set(id, (perSubLast.get(id) || 0) + (counts[lastIdx] || 0));
+      }
+      for (const [id, lastReads] of perSubLast) {
+        map.get(id)!.lastFractions.push(lastBarTotal ? lastReads / lastBarTotal : 0);
+      }
+    }
+    const rows = [...map.values()].map(a => {
+      const n = a.lastFractions.length;
+      const mean = n ? a.lastFractions.reduce((s, v) => s + v, 0) / n : 0;
+      const variance = n ? a.lastFractions.reduce((s, v) => s + (v - mean) * (v - mean), 0) / n : 0;
+      return { id: a.id, total: a.total, charts: a.charts.size, cands: [...a.cands], variance };
+    });
+    if (legendSort === 'divergence') rows.sort((x, y) => y.variance - x.variance || y.total - x.total);
+    else rows.sort((x, y) => y.total - x.total);
+    return rows.slice(0, LEGEND_CAP);
+  }, [subunitMode, resolved, legendSort]);
+
+  const subunitColor = (id: string): string => (subunitMode === 'A' ? aColors[id] : bColors[id]) || '#888';
+  const subunitSelState = (cands: string[]): 'all' | 'some' | 'none' => {
+    let sel = 0;
+    for (const c of cands) if (selectedCands.has(c)) sel++;
+    return sel === 0 ? 'none' : sel === cands.length ? 'all' : 'some';
+  };
+
   const cols = colChoice === 'auto'
     ? (resolved.length <= 1 ? 1 : resolved.length === 2 ? 2 : resolved.length <= 6 ? 3 : 4)
     : colChoice;
@@ -3535,52 +3647,89 @@ function CompareView(props: CompareViewProps) {
         </button>
       </div>
 
-      {/* SHARED CANDIDATE LEGEND / TRACKER */}
-      {resolved.length > 0 && legendShown.length > 0 && (
+      {/* SHARED CANDIDATE / SUBUNIT LEGEND / TRACKER */}
+      {resolved.length > 0 && ((subunitMode ? subunitLegend.length : legendShown.length) > 0) && (
         <div className="shrink-0 border-b border-slate-200 dark:border-gray-700 bg-slate-50/70 dark:bg-gray-800/50 px-3 py-2">
           <div className="flex items-center gap-2 mb-1.5">
-            <span className="text-[10.5px] font-semibold uppercase tracking-wider text-slate-500 dark:text-gray-400">Shared candidates</span>
-            <span className="text-[10px] text-slate-400 dark:text-gray-500">click to track in every chart · hover to highlight</span>
+            <span className="text-[10.5px] font-semibold uppercase tracking-wider text-slate-500 dark:text-gray-400">
+              {subunitMode ? `Shared Ver${subunitMode} subunits` : 'Shared candidates'}
+            </span>
+            <span className="text-[10px] text-slate-400 dark:text-gray-500">
+              {subunitMode ? `click a Ver${subunitMode} to track all its combinations in every chart · hover to highlight` : 'click to track in every chart · hover to highlight'}
+            </span>
             <div className="ml-auto flex items-center gap-1">
               <span className="text-[10px] text-slate-400 dark:text-gray-500">Sort</span>
               <button className={colBtnCls(legendSort === 'reads')} onClick={() => setLegendSort('reads')} title="Sort by total reads across compared charts">Reads</button>
-              <button className={colBtnCls(legendSort === 'divergence')} onClick={() => setLegendSort('divergence')} title="Sort by how differently this candidate ends up across the compared charts (variance of final-transfer fraction)">Divergent</button>
+              <button className={colBtnCls(legendSort === 'divergence')} onClick={() => setLegendSort('divergence')} title="Sort by how differently this ends up across the compared charts (variance of final-transfer fraction)">Divergent</button>
             </div>
           </div>
           <div className="flex flex-wrap gap-1.5">
-            {legendShown.map(row => {
-              const isSel = selectedCands.has(row.cand);
-              const isHov = hoveredCand === row.cand;
-              return (
-                <button
-                  key={row.cand}
-                  onClick={() => onToggleCand(row.cand)}
-                  onMouseEnter={() => onHoverCandidate?.(row.cand)}
-                  onMouseLeave={() => onHoverCandidate?.(null)}
-                  title={`${row.cand}  (VerA ${row.a} · VerB ${row.b})\n${row.total.toLocaleString()} reads across ${row.charts}/${resolved.length} compared charts\nclick to ${isSel ? 'deselect' : 'select'} in all charts`}
-                  className={cn(
-                    'flex items-center gap-1.5 px-2 py-1 rounded border text-[11px] tabular-nums transition-colors',
-                    isSel
-                      ? 'bg-blue-50 dark:bg-blue-900/30 border-blue-400 dark:border-blue-600 text-blue-800 dark:text-blue-200'
-                      : isHov
-                        ? 'bg-white dark:bg-gray-700 border-slate-300 dark:border-gray-500 text-slate-700 dark:text-gray-200'
+            {subunitMode ? (
+              subunitLegend.map(row => {
+                const sel = subunitSelState(row.cands);
+                const label = `Ver${subunitMode}${row.id}`;
+                return (
+                  <button
+                    key={row.id}
+                    onClick={() => onToggleSubunitCands?.(row.cands)}
+                    onMouseEnter={() => onHoverSubunit?.({ kind: subunitMode, id: row.id })}
+                    onMouseLeave={() => onHoverSubunit?.(null)}
+                    title={`${label} — ${row.cands.length} A-B combination${row.cands.length === 1 ? '' : 's'}\n${row.total.toLocaleString()} reads across ${row.charts}/${resolved.length} compared charts\nclick to ${sel === 'all' ? 'deselect' : 'select'} all its combinations`}
+                    className={cn(
+                      'flex items-center gap-1.5 px-2 py-1 rounded border text-[11px] tabular-nums transition-colors',
+                      sel !== 'none'
+                        ? 'bg-blue-50 dark:bg-blue-900/30 border-blue-400 dark:border-blue-600 text-blue-800 dark:text-blue-200'
                         : 'bg-white/70 dark:bg-gray-800/60 border-slate-200 dark:border-gray-600 text-slate-600 dark:text-gray-300 hover:border-slate-300 dark:hover:border-gray-500',
-                  )}
-                >
-                  <span className="w-3 h-3 rounded-sm shrink-0 ring-1 ring-black/10" style={{ background: legendSwatchColor(row.cand) }} />
-                  <span className="font-mono font-medium">{row.cand}</span>
-                  <span className="text-slate-400 dark:text-gray-500">{row.total.toLocaleString()}</span>
-                  <span className="text-[9.5px] text-slate-400 dark:text-gray-500" title={`Appears in ${row.charts} of ${resolved.length} compared charts`}>{row.charts}/{resolved.length}</span>
-                  {legendSort === 'divergence' && (
-                    <span className="text-[9.5px] text-amber-600 dark:text-amber-400" title="Spread of final-transfer fraction across the compared charts (higher = more divergent fate)">
-                      σ²{(row.variance * 100).toFixed(1)}
-                    </span>
-                  )}
-                </button>
-              );
-            })}
-            {legendMore > 0 && (
-              <span className="flex items-center px-2 py-1 text-[10.5px] text-slate-400 dark:text-gray-500">+{legendMore} more</span>
+                    )}
+                  >
+                    <span className="w-3 h-3 rounded-sm shrink-0 ring-1 ring-black/10" style={{ background: subunitColor(row.id) }} />
+                    <span className="font-mono font-medium">{label}</span>
+                    <span className="text-[9.5px] text-slate-400 dark:text-gray-500" title={`${row.cands.length} A-B combinations sharing this Ver${subunitMode}`}>×{row.cands.length}</span>
+                    <span className="text-slate-400 dark:text-gray-500">{row.total.toLocaleString()}</span>
+                    {sel === 'some' && <span className="text-[9px] text-blue-500" title="Some of this subunit's combinations are selected">partial</span>}
+                    {legendSort === 'divergence' && (
+                      <span className="text-[9.5px] text-amber-600 dark:text-amber-400" title="Spread of final-transfer fraction across the compared charts (higher = more divergent)">σ²{(row.variance * 100).toFixed(1)}</span>
+                    )}
+                  </button>
+                );
+              })
+            ) : (
+              <>
+                {legendShown.map(row => {
+                  const isSel = selectedCands.has(row.cand);
+                  const isHov = hoveredCand === row.cand;
+                  return (
+                    <button
+                      key={row.cand}
+                      onClick={() => onToggleCand(row.cand)}
+                      onMouseEnter={() => onHoverCandidate?.(row.cand)}
+                      onMouseLeave={() => onHoverCandidate?.(null)}
+                      title={`${row.cand}  (VerA ${row.a} · VerB ${row.b})\n${row.total.toLocaleString()} reads across ${row.charts}/${resolved.length} compared charts\nclick to ${isSel ? 'deselect' : 'select'} in all charts`}
+                      className={cn(
+                        'flex items-center gap-1.5 px-2 py-1 rounded border text-[11px] tabular-nums transition-colors',
+                        isSel
+                          ? 'bg-blue-50 dark:bg-blue-900/30 border-blue-400 dark:border-blue-600 text-blue-800 dark:text-blue-200'
+                          : isHov
+                            ? 'bg-white dark:bg-gray-700 border-slate-300 dark:border-gray-500 text-slate-700 dark:text-gray-200'
+                            : 'bg-white/70 dark:bg-gray-800/60 border-slate-200 dark:border-gray-600 text-slate-600 dark:text-gray-300 hover:border-slate-300 dark:hover:border-gray-500',
+                      )}
+                    >
+                      <span className="w-3 h-3 rounded-sm shrink-0 ring-1 ring-black/10" style={{ background: legendSwatchColor(row.cand) }} />
+                      <span className="font-mono font-medium">{row.cand}</span>
+                      <span className="text-slate-400 dark:text-gray-500">{row.total.toLocaleString()}</span>
+                      <span className="text-[9.5px] text-slate-400 dark:text-gray-500" title={`Appears in ${row.charts} of ${resolved.length} compared charts`}>{row.charts}/{resolved.length}</span>
+                      {legendSort === 'divergence' && (
+                        <span className="text-[9.5px] text-amber-600 dark:text-amber-400" title="Spread of final-transfer fraction across the compared charts (higher = more divergent fate)">
+                          σ²{(row.variance * 100).toFixed(1)}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+                {legendMore > 0 && (
+                  <span className="flex items-center px-2 py-1 text-[10.5px] text-slate-400 dark:text-gray-500">+{legendMore} more</span>
+                )}
+              </>
             )}
           </div>
         </div>
