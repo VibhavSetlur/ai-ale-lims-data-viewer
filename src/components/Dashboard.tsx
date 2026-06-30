@@ -137,7 +137,9 @@ export default function Dashboard({ initialTables }: DashboardProps) {
   };
 
   // Interactive tour flows. Each step spotlights a live element by its data-tour
-  // attribute and can run a setup (open a view/tab) before showing.
+  // attribute (the highlighted area stays clickable so the user can try it), can
+  // run a setup before it shows, and carries structured what-it-is / what-to-look
+  // -for / try-it content so a first-time user gets a complete understanding.
   function startTour(flow: string) {
     setShowHelp(false);
     setShowGuide(false);
@@ -145,41 +147,172 @@ export default function Dashboard({ initialTables }: DashboardProps) {
       setActiveView(view);
       if (tab) setTimeout(() => window.dispatchEvent(new CustomEvent('aiale:navigate', { detail: { tab } })), 60);
     };
+
+    // ---- the complete A-to-Z walkthrough (meeting-ready) ----
     const fullTour: TourStep[] = [
-      { target: 'nav-mutations', title: 'This is the Mutation Explorer', body: 'Everything scientific lives here: pick samples, then compare mutations, copy number, growth, and barcode composition. Click it to open.', before: () => setActiveView('mutations') },
-      { target: 'tab-samples', title: '1. Start at Sample Selection', body: 'Filter by experiment (genotype background), strain, condition, donor DNA, replicate, or transfer, and tick the samples you want to study.', before: () => go('mutations', 'samples') },
-      { target: 'tab-compare', title: '2. Comparative View = the mutation heatmap', body: 'Rows are mutations and copy-number regions, columns are your samples. Frequency colors are fixed 0-100%; copy-number rows use a row-local scale. Provided (donor DNA) mutations get an amber outline.', before: () => go('mutations', 'compare') },
-      { target: 'tab-copynumber', title: '3. Copy Number = the headline finding', body: 'dgoA* amplification is the convergent adaptive signal in this study. Each line is a lineage over transfers; click a legend entry to isolate one trajectory.', before: () => go('mutations', 'copynumber') },
-      { target: 'tab-samples', title: '4. Growth curves', body: 'Back in Sample Selection (or Comparative View), click any OD600 sparkline for the full growth-curve popup. Its metrics are descriptive point-to-point estimates, never model fits or invented values.', before: () => go('mutations', 'samples') },
-      ...(hasBarcodes ? [{ target: 'tab-barcodes', title: '5. Barcode Charts (VerA/VerB)', body: 'Track A#-B# VerA/VerB composition across transfers. Select a candidate or subunit group to filter and emphasize it; use Focus and Compare for readable, axis-shared views.', before: () => go('mutations', 'barcodes') } as TourStep] : []),
-      { target: 'help-guide', title: 'Stuck? Open the Guide', body: 'The Guide answers "how do I..." and walks you straight to the right view. The Help button opens the full searchable documentation. You are ready to explore.', before: () => setActiveView('mutations') },
+      {
+        title: 'Welcome to the AI-ALE LIMS viewer',
+        body: 'This is a read-only window onto the adaptive-laboratory-evolution data for Acinetobacter baylyi ADP1 (strain ACN2586) evolving on pyruvate. In the next few minutes you will see exactly where everything is and how to use it. The highlighted area in each step is live, so you can click and try things as we go.',
+        look: 'A left sidebar (navigation + help), a top bar (database status), and a main panel that changes with what you pick.',
+      },
+      {
+        target: 'nav-mutations',
+        title: 'Two workspaces live in the left sidebar',
+        body: 'Database Tables shows the raw LIMS tables. Mutation Explorer is the curated science: samples, mutations, copy number, growth, and barcodes. We will spend the tour in Mutation Explorer.',
+        tryIt: 'Click "Mutation Explorer" to open it (we just opened it for you).',
+        before: () => setActiveView('mutations'),
+      },
+      {
+        target: 'experiment-controls',
+        title: 'Scope the data: Experiment and Registry',
+        body: 'Experiment narrows everything to one genotype background (e.g. fba, tpiA, or a pairwise combination) for faster, focused analysis. Registry picks which breseq variant-calling run you are viewing when more than one exists.',
+        look: 'A dropdown of experiments with sample counts. "all" loads every experiment together.',
+        tryIt: 'Open the Experiment dropdown to see the available backgrounds.',
+        before: () => go('mutations', 'samples'),
+      },
+      {
+        target: 'stats-strip',
+        title: 'The dataset at a glance',
+        body: 'This thin strip always shows what the current dataset contains: how many samples, mutations, OD growth curves, and copy-number regions. It is the fastest way to confirm the data loaded and what is available.',
+        look: 'Counts for samples, mutations, OD curves, and CN regions. If a count is 0, that view will be empty for this selection.',
+        before: () => go('mutations', 'samples'),
+      },
+      {
+        target: 'tab-samples',
+        title: 'Step 1 — Sample Selection',
+        body: 'This is where every analysis starts. You filter the lineages you care about and tick them; everything downstream (Comparative, Copy Number, Barcode) then acts on exactly that selection.',
+        look: 'A filterable table of samples. Each row has metadata chips and a small OD600 growth sparkline on the right.',
+        tryIt: 'Tick a few sample checkboxes, then watch the count badge on the Comparative View tab go up.',
+        before: () => go('mutations', 'samples'),
+      },
+      {
+        target: 'tab-samples',
+        title: 'Filters cross-narrow each other',
+        body: 'The experiment / strain / condition / donor DNA / replicate / transfer filters are faceted: picking one factor hides the now-impossible options in the others, so you cannot build an empty combination by accident.',
+        look: 'As you pick a value in one filter, the choices in the other filters shrink to what is still possible.',
+        tryIt: 'Pick a strain or condition and notice the other filters update.',
+        before: () => go('mutations', 'samples'),
+      },
+      {
+        target: 'tab-samples',
+        title: 'Growth curves start here',
+        body: 'Every sample row has an OD600 sparkline. Click it to open the full growth-curve popup with a log/linear toggle, a peer-overlay sidebar, and descriptive metrics (max OD, growth rate mu, doubling time, lag, AUC). Those metrics are honest point-to-point estimates, never model fits, and the popup says so if a numeric series is missing.',
+        tryIt: 'Click a sparkline in a sample row to open the growth popup, then click "How is each value computed?" inside it.',
+        before: () => go('mutations', 'samples'),
+      },
+      {
+        target: 'tab-compare',
+        title: 'Step 2 — Comparative View (the heatmap)',
+        body: 'Your selected samples become columns; mutations and copy-number regions become rows; each cell is colored by its value. This is the figure most people put in a paper.',
+        look: 'A grid of colored cells. Click it to open the view if it has not opened yet.',
+        before: () => go('mutations', 'compare'),
+      },
+      {
+        target: 'compare-controls',
+        title: 'Comparative controls + the color rule',
+        body: 'Filter mutations by text, restrict to frequency-only or copy-number-only, and focus on a mutation class (missense, nonsense, indel, deletion). The key rule: frequency cells use a FIXED 0%-100% color scale, while copy-number rows use a row-local min/max scale. That difference is intentional.',
+        look: 'A filter box, a metric dropdown, mutation-class pills, and Export figure + CSV buttons.',
+        tryIt: 'Switch the metric dropdown to "copy number" to isolate the CN rows.',
+        before: () => go('mutations', 'compare'),
+      },
+      {
+        target: 'tab-compare',
+        title: 'Provided vs spontaneous mutations',
+        body: 'A mutation supplied as donor DNA is drawn with an amber outline over its frequency color. An amber outline with no fill and a 0% marker means it was provided but never observed (e.g. pgi/sohB that did not integrate). No outline means it arose spontaneously, like the secondary fba alleles. Click a mutation name for a genome-context popup.',
+        look: 'Amber outlines on donor-DNA mutation cells; plain cells are spontaneous.',
+        before: () => go('mutations', 'compare'),
+      },
+      {
+        target: 'tab-copynumber',
+        title: 'Step 3 — Copy Number (the headline result)',
+        body: 'dgoA* copy-number amplification is the convergent, genotype-independent signal that correlates with improved growth in this study. This tab plots it per lineage across transfers.',
+        look: 'One line per lineage; Y is copy number, X is transfer. A dashed CN = 1x line marks the pre-evolution baseline.',
+        tryIt: 'Click the Copy Number tab to open it; look for lines climbing above 1x toward 2-3x.',
+        before: () => go('mutations', 'copynumber'),
+      },
+      {
+        target: 'tab-copynumber',
+        title: 'Tame many lines: isolate and search',
+        body: 'With dozens of lineages the chart can look busy. Click a legend entry to isolate one trajectory (the rest are removed, not just dimmed). Use the legend search to jump to a background, toggle Log/Linear Y, and hover for a tooltip that snaps to the nearest point.',
+        tryIt: 'Click one lineage in the legend to isolate its trajectory, then click it again to bring the others back.',
+        before: () => go('mutations', 'copynumber'),
+      },
+      ...(hasBarcodes ? [
+        {
+          target: 'tab-barcodes',
+          title: 'Step 4 — Barcode Charts (VerA / VerB)',
+          body: 'These charts show how the population is composed of VerA/VerB barcode combinations across transfers. A label A#-B# is one VerA subunit paired with one VerB subunit. VerB is required for VerA activity and the pairing governs substrate specificity, so following which combinations rise and fall is following the evolution of substrate specificity.',
+          look: 'Stacked bars per transfer; the same A-B combination always has the same color so you can track it by eye.',
+          tryIt: 'Click the Barcode Charts tab to open it.',
+          before: () => go('mutations', 'barcodes'),
+        } as TourStep,
+        {
+          target: 'barcode-toolbar',
+          title: 'Barcode controls: color, split, chart type',
+          body: 'Color by A-B, VerA, or VerB to ask different questions. Split A|B shows the same reads three ways (full combo, VerA-grouped, VerB-grouped). The info (i) button explains the biology on the spot. In Focus you can switch chart type: Rows (most readable), Bars, Lines (trajectory over time), or Heatmap.',
+          look: 'A row of toggles: color mode, Split A|B, an info button, and (in Focus) the chart-type selector.',
+          tryIt: 'Click the info (i) button to read the VerA/VerB explanation, then try the VerA color mode.',
+          before: () => go('mutations', 'barcodes'),
+        } as TourStep,
+        {
+          target: 'barcode-sidebar',
+          title: 'The Candidates sidebar drives everything',
+          body: 'Hover a candidate to highlight it across all charts; click to select it (the chart set filters to charts that contain it and emphasizes it everywhere). Group by VerA or VerB and click a group header to act on a whole subunit at once. The always-visible info pills open a cross-chart detail popup.',
+          look: 'A searchable, groupable list of candidates with read counts and info pills.',
+          tryIt: 'Click a candidate to filter the charts to just the ones containing it.',
+          before: () => go('mutations', 'barcodes'),
+        } as TourStep,
+        {
+          target: 'tab-barcodes',
+          title: 'Compare conditions honestly',
+          body: 'Add charts to Compare for a side-by-side view with a shared Y-axis (so equal bar heights mean equal reads) and a shared legend that syncs selection and hover across every panel. When you color by VerA/VerB, the shared legend groups by subunit so selection stays consistent with the sidebar.',
+          look: 'A common-Y badge and a shared "Shared candidates / subunits" legend above the compared charts.',
+          before: () => go('mutations', 'barcodes'),
+        } as TourStep,
+      ] : []),
+      {
+        title: 'Exporting figures and data',
+        body: 'Every visualization has an Export figure button (top of its toolbar) with PNG (slides/email), SVG (editable vector for manuscripts), HTML (fixed-size labels), and Print/Save PDF. Use the separate CSV button whenever you will make a quantitative claim. Always record the snapshot date and your filters in the caption.',
+        look: 'An "Export figure" button and a "CSV" button on each chart toolbar.',
+      },
+      {
+        target: 'help-guide',
+        title: 'You are set — and help is always here',
+        body: 'The Guide answers "how do I..." and walks you straight to the right view (and can build a prompt for your own AI assistant). The Interactive tutorial re-runs this walkthrough. Help opens the full searchable documentation, including a glossary and troubleshooting. Click Finish and explore freely.',
+        look: 'The Help & Learning section at the bottom of the left sidebar: Guide, Interactive tutorial, Help & guide.',
+        before: () => setActiveView('mutations'),
+      },
     ];
+
+    // ---- focused per-view flows (also launchable from the Guide's "Show me") ----
     const flows: Record<string, TourStep[]> = {
       full: fullTour,
       samples: [
-        { target: 'tab-samples', title: 'Sample Selection', body: 'This is where you pick which lineages flow into every other view. Open it to begin.', before: () => go('mutations', 'samples') },
-        { target: 'tab-samples', title: 'Filter, then select', body: 'Use the experiment / strain / condition / donor DNA / replicate / transfer filters. They cross-narrow, so picking one factor hides impossible options. Tick the rows you want.', before: () => go('mutations', 'samples') },
-        { target: 'tab-compare', title: 'Carry the selection forward', body: 'Once samples are selected, every other tab (Comparative, Copy Number, Barcode) acts on exactly that selection. The count badge shows how many are selected.', before: () => go('mutations', 'samples') },
+        { target: 'tab-samples', title: 'Sample Selection', body: 'Where you pick which lineages flow into every other view. Open it to begin.', before: () => go('mutations', 'samples') },
+        { target: 'experiment-controls', title: 'Scope first', body: 'Use Experiment to focus on one genotype background before filtering, which keeps the table small and fast.', tryIt: 'Open the Experiment dropdown.', before: () => go('mutations', 'samples') },
+        { target: 'tab-samples', title: 'Filter, then select', body: 'The filters cross-narrow so impossible combinations disappear. Tick the rows you want.', tryIt: 'Pick a condition, then tick a couple of samples.', before: () => go('mutations', 'samples') },
+        { target: 'tab-compare', title: 'Carry the selection forward', body: 'Every other tab acts on exactly your selection; the badge shows the count.', before: () => go('mutations', 'samples') },
       ],
       comparative: [
-        { target: 'tab-compare', title: 'Comparative View', body: 'A heatmap of mutation frequency and copy-number rows across your selected samples. Open it.', before: () => go('mutations', 'compare') },
-        { target: 'tab-compare', title: 'Two color rules (important)', body: 'Frequency rows use a FIXED 0% to 100% color scale. Copy-number rows use a row-local min/max scale. That is the only place the scales differ, and it is intentional.', before: () => go('mutations', 'compare') },
-        { target: 'tab-compare', title: 'Provided vs spontaneous', body: 'A donor-DNA mutation has an amber outline; an outlined 0% cell was provided but never observed. No outline means it arose spontaneously (e.g. secondary fba alleles). Click a mutation name for genome context.', before: () => go('mutations', 'compare') },
-        { target: 'tab-compare', title: 'Export the figure', body: 'Use the Export figure button (PNG / SVG / HTML / Print) for the heatmap, and the CSV button for the underlying values.', before: () => go('mutations', 'compare') },
+        { target: 'tab-compare', title: 'Comparative View', body: 'A heatmap of mutation frequency + copy-number rows across your selected samples.', before: () => go('mutations', 'compare') },
+        { target: 'compare-controls', title: 'Controls + the color rule', body: 'Frequency cells use a fixed 0-100% scale; copy-number rows use a row-local scale. Filter by class or metric here.', tryIt: 'Switch the metric dropdown to "copy number".', before: () => go('mutations', 'compare') },
+        { target: 'tab-compare', title: 'Provided vs spontaneous', body: 'Amber outline = donor DNA; outline + 0% = provided but unobserved; no outline = spontaneous. Click a mutation name for genome context.', before: () => go('mutations', 'compare') },
+        { target: 'compare-controls', title: 'Export', body: 'Export figure (PNG/SVG/HTML/Print) for the heatmap; CSV for the values.', before: () => go('mutations', 'compare') },
       ],
       copynumber: [
-        { target: 'tab-copynumber', title: 'Copy Number = the main result', body: 'dgoA* copy-number amplification is the convergent, genotype-independent signal that correlates with growth. Open this tab.', before: () => go('mutations', 'copynumber') },
-        { target: 'tab-copynumber', title: 'Read the trajectories', body: 'Each line is one lineage; Y = copy number, X = transfer. Look for lines rising above the CN = 1x baseline toward 2-3x (outliers go higher). Hover for a snapping tooltip.', before: () => go('mutations', 'copynumber') },
-        { target: 'tab-copynumber', title: 'Isolate one lineage', body: 'Click a legend entry to isolate a single trajectory (the rest are removed, not just dimmed). Use the legend search to jump to a background, and toggle Log/Linear Y.', before: () => go('mutations', 'copynumber') },
+        { target: 'tab-copynumber', title: 'Copy Number = the main result', body: 'dgoA* amplification is the convergent adaptive signal. Each line is a lineage over transfers.', before: () => go('mutations', 'copynumber') },
+        { target: 'tab-copynumber', title: 'Read the trajectories', body: 'Look for lines rising above the CN = 1x baseline toward 2-3x (outliers go higher). Hover for a snapping tooltip.', before: () => go('mutations', 'copynumber') },
+        { target: 'tab-copynumber', title: 'Isolate one lineage', body: 'Click a legend entry to isolate a single trajectory; search the legend to jump to a background; toggle Log/Linear Y.', tryIt: 'Click a lineage in the legend to isolate it.', before: () => go('mutations', 'copynumber') },
       ],
       growth: [
-        { target: 'tab-samples', title: 'Find a growth curve', body: 'Every sample row (and Comparative column) has an OD600 sparkline. Click one to open the full growth-curve popup.', before: () => go('mutations', 'samples') },
-        { target: 'tab-samples', title: 'Honest, derived metrics', body: 'The popup shows max OD/K, mu, doubling, lag, and AUC. These are descriptive point-to-point estimates from the observed OD600 points (click "How is each value computed?"), never model fits. If a sample has no numeric series, the popup says so.', before: () => go('mutations', 'samples') },
+        { target: 'tab-samples', title: 'Find a growth curve', body: 'Every sample row (and Comparative column) has an OD600 sparkline. Click one to open the full growth popup.', tryIt: 'Click a sparkline in a sample row.', before: () => go('mutations', 'samples') },
+        { target: 'tab-samples', title: 'Honest, derived metrics', body: 'Max OD/K, mu, doubling, lag, AUC are descriptive point-to-point estimates (click "How is each value computed?"), never model fits. Missing series are reported as not found.', before: () => go('mutations', 'samples') },
       ],
       barcodes: hasBarcodes ? [
-        { target: 'tab-barcodes', title: 'Barcode Charts (VerA/VerB)', body: 'Each A#-B# is one VerA subunit paired with one VerB subunit, with a stable color. VerB modulates VerA, so the pairing governs substrate specificity. Open this tab.', before: () => go('mutations', 'barcodes') },
-        { target: 'tab-barcodes', title: 'Color, split, select', body: 'Color by A-B / VerA / VerB (the info button explains the difference). Split A|B shows the same reads three ways. Click a candidate (or a VerA/VerB group header) to filter and emphasize it everywhere.', before: () => go('mutations', 'barcodes') },
-        { target: 'tab-barcodes', title: 'Focus and Compare', body: 'In Focus pick a chart type (Rows are most readable, plus Bars / Lines / Heatmap). Add charts to Compare for a shared-Y, shared-legend side-by-side that syncs selection across panels.', before: () => go('mutations', 'barcodes') },
+        { target: 'tab-barcodes', title: 'Barcode Charts (VerA/VerB)', body: 'Each A#-B# is one VerA + one VerB subunit, stable color. VerB modulates VerA so the pairing governs substrate specificity.', before: () => go('mutations', 'barcodes') },
+        { target: 'barcode-toolbar', title: 'Color, split, chart type', body: 'Color by A-B/VerA/VerB; Split A|B shows the same reads three ways; the info button explains the biology; Focus has Rows/Bars/Lines/Heatmap.', tryIt: 'Click the info (i) button.', before: () => go('mutations', 'barcodes') },
+        { target: 'barcode-sidebar', title: 'Select to filter', body: 'Click a candidate (or a VerA/VerB group header) to filter charts to those containing it and emphasize it everywhere.', tryIt: 'Click a candidate row.', before: () => go('mutations', 'barcodes') },
+        { target: 'tab-barcodes', title: 'Compare honestly', body: 'Add charts to Compare for a shared-Y, shared-legend side-by-side that syncs selection across panels.', before: () => go('mutations', 'barcodes') },
       ] : fullTour,
     };
     setTourFlow(flows[flow] || fullTour);
@@ -638,7 +771,7 @@ export default function Dashboard({ initialTables }: DashboardProps) {
         />
       )}
       {tourFlow && tourFlow.length > 0 && (
-        <Tutorial steps={tourFlow} onClose={() => setTourFlow(null)} />
+        <Tutorial steps={tourFlow} onClose={() => setTourFlow(null)} title="AI-ALE viewer tour" />
       )}
     </div>
   );

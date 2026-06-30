@@ -2322,7 +2322,7 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
     <div className="flex flex-col h-full w-full overflow-hidden">
       {/* Compact, single-row toolbar. Heavy filters live behind the Filters
           popover so the candidate sidebar isn't squeezed. */}
-      <div className="px-2 py-1.5 border-b border-slate-200 dark:border-gray-700 bg-slate-50/80 dark:bg-gray-800/60 flex items-center gap-2 shrink-0">
+      <div className="px-2 py-1.5 border-b border-slate-200 dark:border-gray-700 bg-slate-50/80 dark:bg-gray-800/60 flex items-center gap-2 shrink-0" data-tour="barcode-toolbar">
         <button
           onClick={() => setShowSidebar(s => !s)}
           className="p-1 rounded text-slate-500 dark:text-gray-400 hover:bg-slate-200 dark:hover:bg-gray-700"
@@ -2886,7 +2886,7 @@ function CandidatesSidebar(p: CandidatesSidebarProps) {
   let rendered = 0;
 
   return (
-    <div className="w-72 shrink-0 border-r border-slate-200 dark:border-gray-700 flex flex-col overflow-hidden bg-white dark:bg-gray-800">
+    <div className="w-72 shrink-0 border-r border-slate-200 dark:border-gray-700 flex flex-col overflow-hidden bg-white dark:bg-gray-800" data-tour="barcode-sidebar">
       {/* Header — title + search */}
       <div className="px-2.5 py-2 border-b border-slate-200 dark:border-gray-700 bg-slate-50/60 dark:bg-gray-800/60">
         <div className="flex items-center justify-between mb-1.5">

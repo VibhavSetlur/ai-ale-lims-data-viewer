@@ -579,7 +579,7 @@ export default function MutationExplorer() {
             </TabButton>
           )}
         </div>
-        <div className="flex items-center gap-1.5 pr-1">
+        <div className="flex items-center gap-1.5 pr-1" data-tour="experiment-controls">
           <label className="flex items-center gap-1.5 text-[11px] text-[var(--text-soft)]">
             <span className="lims-label">Experiment</span>
             <select
@@ -639,7 +639,7 @@ export default function MutationExplorer() {
 
       {/* Compact context strip: stats + dataset-notes toggle in ONE thin row */}
       {!error && data?.stats && (
-        <div className="flex items-center gap-4 flex-wrap px-3 h-8 border-b border-[var(--border)] bg-[var(--surface-2)] text-[11px]">
+        <div className="flex items-center gap-4 flex-wrap px-3 h-8 border-b border-[var(--border)] bg-[var(--surface-2)] text-[11px]" data-tour="stats-strip">
           <StatPill label="samples" value={data.stats.sampleCount} />
           <StatPill label="mutations" value={data.stats.frequencyRowCount} accent="mut" />
           <StatPill label="OD curves" value={data.stats.curveCount} accent={data.stats.curveCount > 0 ? 'grow' : undefined} />
@@ -1726,7 +1726,7 @@ function ComparativePanel({
   return (
     <div className="flex flex-col h-full min-h-0">
       {/* Controls */}
-      <div className="px-3 py-2 border-b border-slate-200 dark:border-gray-700 bg-white dark:bg-gray-800 flex items-center gap-2 flex-wrap">
+      <div className="px-3 py-2 border-b border-slate-200 dark:border-gray-700 bg-white dark:bg-gray-800 flex items-center gap-2 flex-wrap" data-tour="compare-controls">
         <div className="relative">
           <Filter className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 dark:text-gray-500" />
           <input

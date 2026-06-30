@@ -1,30 +1,32 @@
 'use client';
 
-import React, { useEffect, useLayoutEffect, useState, useCallback } from 'react';
-import { X, ChevronLeft, ChevronRight, PlayCircle, CheckCircle2 } from 'lucide-react';
+import React, { useEffect, useLayoutEffect, useState, useCallback, useRef } from 'react';
+import { X, ChevronLeft, ChevronRight, PlayCircle, CheckCircle2, MousePointerClick, Hand, Eye } from 'lucide-react';
 
 /* ---------------------------------------------------------------------------
-   Tutorial: a real, click-through guided tour.
+   Tutorial: a deep, genuinely interactive click-through tour.
 
-   Each step targets a live DOM element by a data-tour attribute. The tour dims
-   the page, cuts a spotlight hole around the target, and floats a tooltip next
-   to it pointing at exactly what to click. Steps can run a small action (switch
-   tab, open a panel) before showing, so the walkthrough mirrors how a person
-   actually navigates the app: open Mutation Explorer, look at Sample Selection,
-   open Comparative View, read the color rule, open Barcode Charts, etc.
+   Each step spotlights a live DOM element by a data-tour attribute. Unlike a
+   passive overlay, the spotlight is a real hole punched through the dim layer
+   with FOUR rectangles (top/bottom/left/right of the target), so the highlighted
+   element stays fully clickable -- the user can actually try the control, type in
+   the box, open the menu, etc., and then press Next.
 
-   If a step's target is not on screen (e.g. a tab that has not been opened),
-   the tooltip falls back to screen-center and still explains the step, so the
-   tour never dead-ends.
+   Step content is structured (what it is / what to look for / try this) so a
+   newcomer who has never seen the app understands not just where to click but
+   what they are looking at and why it matters. Exit is always one click away.
+
+   If a step's target is missing (e.g. a tab not yet rendered), the card falls
+   back to screen-center and still explains the step, so the tour never dead-ends.
 --------------------------------------------------------------------------- */
 
 export type TourStep = {
   target?: string;            // data-tour value to spotlight (omit = centered card)
   title: string;
-  body: string;
-  // Optional side-effect to run before the step renders (navigate/setup).
-  before?: () => void;
-  placement?: 'auto' | 'top' | 'bottom' | 'left' | 'right';
+  body: string;               // the main explanation
+  look?: string;              // "what to look for" — what's visible / what it means
+  tryIt?: string;             // "try this" — an action the user can perform now (target stays clickable)
+  before?: () => void;        // side-effect to run before the step renders (navigate/setup)
 };
 
 type Rect = { top: number; left: number; width: number; height: number };
@@ -38,23 +40,26 @@ function getRect(selector: string): Rect | null {
 }
 
 export default function Tutorial({
-  steps, onClose,
+  steps, onClose, title = 'Guided tour',
 }: {
   steps: TourStep[];
   onClose: () => void;
+  title?: string;
 }) {
   const [i, setI] = useState(0);
   const [rect, setRect] = useState<Rect | null>(null);
+  const [minimized, setMinimized] = useState(false);
+  const cardRef = useRef<HTMLDivElement>(null);
   const step = steps[Math.max(0, Math.min(i, steps.length - 1))];
+  const isLast = i >= steps.length - 1;
 
   const measure = useCallback(() => {
     if (!step?.target) { setRect(null); return; }
-    // Retry a couple of times: the element may appear after a before() effect.
     let tries = 0;
     const tick = () => {
       const r = getRect(step.target!);
       if (r) { setRect(r); return; }
-      if (tries++ < 8) requestAnimationFrame(tick);
+      if (tries++ < 10) requestAnimationFrame(tick);
       else setRect(null);
     };
     tick();
@@ -65,7 +70,7 @@ export default function Tutorial({
     step?.before?.();
     const el = step?.target ? document.querySelector(`[data-tour="${step.target}"]`) as HTMLElement | null : null;
     if (el) el.scrollIntoView({ block: 'center', behavior: 'smooth' });
-    const t = setTimeout(measure, 120);
+    const t = setTimeout(measure, 160);
     return () => clearTimeout(t);
   }, [i, step, measure]);
 
@@ -78,95 +83,143 @@ export default function Tutorial({
     window.addEventListener('keydown', onKey);
     window.addEventListener('resize', measure);
     window.addEventListener('scroll', measure, true);
+    const iv = setInterval(measure, 600); // keep the hole aligned as the page settles
     return () => {
       window.removeEventListener('keydown', onKey);
       window.removeEventListener('resize', measure);
       window.removeEventListener('scroll', measure, true);
+      clearInterval(iv);
     };
   }, [measure, onClose, steps.length]);
 
-  const isLast = i >= steps.length - 1;
   const pad = 6;
+  const vw = typeof window !== 'undefined' ? window.innerWidth : 1280;
+  const vh = typeof window !== 'undefined' ? window.innerHeight : 800;
 
-  // Tooltip position: beside the spotlight, flipped to stay on screen.
-  let tipStyle: React.CSSProperties = { top: '50%', left: '50%', transform: 'translate(-50%, -50%)' };
-  if (rect) {
-    const spaceBelow = window.innerHeight - (rect.top + rect.height);
-    const spaceRight = window.innerWidth - (rect.left + rect.width);
-    const tipW = 340;
-    if (spaceBelow > 220) {
-      tipStyle = { top: rect.top + rect.height + pad + 8, left: Math.min(Math.max(8, rect.left), window.innerWidth - tipW - 8) };
-    } else if (rect.top > 240) {
-      tipStyle = { top: Math.max(8, rect.top - 8), left: Math.min(Math.max(8, rect.left), window.innerWidth - tipW - 8), transform: 'translateY(-100%)' };
-    } else if (spaceRight > tipW + 16) {
-      tipStyle = { top: Math.max(8, rect.top), left: rect.left + rect.width + pad + 8 };
+  // Card placement: beside the spotlight, flipped to stay on screen. When the
+  // card would overlap the hole we keep it on the side with the most room.
+  const cardW = 360;
+  let cardStyle: React.CSSProperties = { top: '50%', left: '50%', transform: 'translate(-50%, -50%)' };
+  if (rect && !minimized) {
+    const spaceBelow = vh - (rect.top + rect.height);
+    const spaceRight = vw - (rect.left + rect.width);
+    if (spaceRight > cardW + 24) {
+      cardStyle = { top: clamp(rect.top, 8, vh - 320), left: rect.left + rect.width + pad + 12 };
+    } else if (rect.left > cardW + 24) {
+      cardStyle = { top: clamp(rect.top, 8, vh - 320), left: rect.left - cardW - pad - 12 };
+    } else if (spaceBelow > 300) {
+      cardStyle = { top: rect.top + rect.height + pad + 10, left: clamp(rect.left, 8, vw - cardW - 8) };
     } else {
-      tipStyle = { top: Math.max(8, rect.top), left: Math.max(8, rect.left - tipW - pad - 8) };
+      cardStyle = { top: clamp(rect.top - 320, 8, vh - 320), left: clamp(rect.left, 8, vw - cardW - 8) };
     }
+  } else if (minimized) {
+    cardStyle = { bottom: 16, right: 16, top: 'auto', left: 'auto' };
   }
 
+  const hole = rect ? { top: rect.top - pad, left: rect.left - pad, width: rect.width + pad * 2, height: rect.height + pad * 2 } : null;
+
   return (
-    <div className="fixed inset-0 z-[60]" role="dialog" aria-modal="true">
-      {/* Dimmed backdrop with a spotlight cutout (via a big box-shadow ring). */}
-      {rect ? (
-        <div
-          className="absolute rounded-lg pointer-events-none transition-all duration-200"
-          style={{
-            top: rect.top - pad, left: rect.left - pad,
-            width: rect.width + pad * 2, height: rect.height + pad * 2,
-            boxShadow: '0 0 0 9999px rgba(15,23,42,0.62)',
-            outline: '2px solid var(--accent-400)',
-            outlineOffset: '2px',
-          }}
-        />
+    <div className="fixed inset-0 z-[60]" role="dialog" aria-modal="false" aria-label={title}>
+      {/* Dim layer made of FOUR rectangles so the hole is a real gap the user can
+          click through to the live element underneath. */}
+      {hole ? (
+        <>
+          <div className="absolute bg-black/55 transition-all duration-150" style={{ top: 0, left: 0, right: 0, height: Math.max(0, hole.top) }} />
+          <div className="absolute bg-black/55 transition-all duration-150" style={{ top: hole.top + hole.height, left: 0, right: 0, bottom: 0 }} />
+          <div className="absolute bg-black/55 transition-all duration-150" style={{ top: hole.top, left: 0, width: Math.max(0, hole.left), height: hole.height }} />
+          <div className="absolute bg-black/55 transition-all duration-150" style={{ top: hole.top, left: hole.left + hole.width, right: 0, height: hole.height }} />
+          {/* Ring around the live, clickable target */}
+          <div
+            className="absolute rounded-lg pointer-events-none transition-all duration-150"
+            style={{ top: hole.top, left: hole.left, width: hole.width, height: hole.height, outline: '2.5px solid var(--accent-400)', outlineOffset: 0, boxShadow: '0 0 0 2px rgba(255,255,255,0.35), 0 0 22px 4px rgba(56,189,172,0.35)' }}
+          />
+        </>
       ) : (
-        <div className="absolute inset-0 bg-black/60" />
+        <div className="absolute inset-0 bg-black/55" />
       )}
 
-      {/* Tooltip card */}
-      <div
-        className="absolute w-[340px] max-w-[92vw] rounded-xl border border-[var(--border)] bg-[var(--surface)] text-[var(--text)] shadow-2xl p-4"
-        style={tipStyle}
-      >
-        <div className="flex items-start gap-2.5">
-          <span className="shrink-0 w-7 h-7 rounded-full bg-[var(--accent-600)] text-white flex items-center justify-center text-[12px] font-semibold tabular-nums">{i + 1}</span>
-          <div className="min-w-0 flex-1">
-            <h3 className="text-[14px] font-semibold leading-snug">{step.title}</h3>
-            <p className="text-[12px] text-[var(--text-soft)] mt-1 leading-relaxed">{step.body}</p>
+      {/* Step card */}
+      {minimized ? (
+        <button
+          onClick={() => setMinimized(false)}
+          className="absolute bottom-4 right-4 flex items-center gap-2 px-3 py-2 rounded-full bg-[var(--accent-600)] text-white shadow-2xl text-[12px] font-medium"
+        >
+          <PlayCircle className="w-4 h-4" /> Resume tour · {i + 1}/{steps.length}
+        </button>
+      ) : (
+        <div
+          ref={cardRef}
+          className="absolute rounded-xl border border-[var(--border)] bg-[var(--surface)] text-[var(--text)] shadow-2xl p-4"
+          style={{ width: cardW, maxWidth: '94vw', ...cardStyle }}
+        >
+          <div className="flex items-start gap-2.5">
+            <span className="shrink-0 w-7 h-7 rounded-full bg-[var(--accent-600)] text-white flex items-center justify-center text-[12px] font-semibold tabular-nums">{i + 1}</span>
+            <div className="min-w-0 flex-1">
+              <div className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-faint)]">{title}</div>
+              <h3 className="text-[14.5px] font-semibold leading-snug mt-0.5">{step.title}</h3>
+            </div>
+            <button onClick={() => setMinimized(true)} className="p-0.5 rounded hover:bg-[var(--surface-3)] text-[var(--text-faint)]" title="Minimize (keep exploring)"><Eye className="w-4 h-4" /></button>
+            <button onClick={onClose} className="p-0.5 rounded hover:bg-[var(--surface-3)]" title="Exit tour (Esc)"><X className="w-4 h-4" /></button>
           </div>
-          <button onClick={onClose} className="p-0.5 rounded hover:bg-[var(--surface-3)]" title="Exit tour (Esc)"><X className="w-4 h-4" /></button>
-        </div>
 
-        <div className="mt-3 flex items-center gap-1">
-          {steps.map((_, idx) => (
-            <span key={idx} className={idx === i ? 'h-1.5 w-4 rounded-full bg-[var(--accent-600)]' : 'h-1.5 w-1.5 rounded-full bg-[var(--border-strong)]'} />
-          ))}
-          <span className="ml-auto text-[11px] text-[var(--text-faint)] tabular-nums">{i + 1} / {steps.length}</span>
-        </div>
+          <p className="text-[12.5px] text-[var(--text-soft)] mt-2 leading-relaxed">{step.body}</p>
 
-        <div className="mt-3 flex items-center gap-2">
-          <button
-            onClick={() => setI(s => Math.max(s - 1, 0))}
-            disabled={i === 0}
-            className="flex items-center gap-1 px-2.5 py-1.5 rounded-md text-[12px] border border-[var(--border)] hover:bg-[var(--surface-3)] disabled:opacity-40"
-          >
-            <ChevronLeft className="w-3.5 h-3.5" /> Back
-          </button>
-          {isLast ? (
-            <button onClick={onClose} className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[12px] font-medium bg-[var(--accent-600)] text-white hover:opacity-90">
-              <CheckCircle2 className="w-4 h-4" /> Finish
-            </button>
-          ) : (
-            <button onClick={() => setI(s => Math.min(s + 1, steps.length - 1))} className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[12px] font-medium bg-[var(--accent-600)] text-white hover:opacity-90">
-              Next <ChevronRight className="w-3.5 h-3.5" />
-            </button>
+          {step.look && (
+            <div className="mt-2.5 flex gap-2 rounded-md bg-[var(--surface-2)] border border-[var(--border)] px-2.5 py-1.5">
+              <Eye className="w-3.5 h-3.5 mt-0.5 shrink-0 text-[var(--accent-600)]" />
+              <p className="text-[11.5px] text-[var(--text-soft)] leading-snug"><span className="font-semibold text-[var(--text)]">What to look for: </span>{step.look}</p>
+            </div>
           )}
-          <button onClick={onClose} className="ml-auto text-[11.5px] text-[var(--text-soft)] hover:text-[var(--text)]">Exit tour</button>
+          {step.tryIt && (
+            <div className="mt-2 flex gap-2 rounded-md bg-[var(--accent-50)] border border-[var(--accent-200)] px-2.5 py-1.5">
+              <Hand className="w-3.5 h-3.5 mt-0.5 shrink-0 text-[var(--accent-700)]" />
+              <p className="text-[11.5px] text-[var(--accent-800)] leading-snug"><span className="font-semibold">Try it now: </span>{step.tryIt}</p>
+            </div>
+          )}
+
+          <div className="mt-3 flex items-center gap-1">
+            {steps.map((_, idx) => (
+              <button
+                key={idx}
+                onClick={() => setI(idx)}
+                title={`Step ${idx + 1}`}
+                className={idx === i ? 'h-1.5 w-5 rounded-full bg-[var(--accent-600)]' : 'h-1.5 w-1.5 rounded-full bg-[var(--border-strong)] hover:bg-[var(--accent-400)]'}
+              />
+            ))}
+            <span className="ml-auto text-[11px] text-[var(--text-faint)] tabular-nums">{i + 1} / {steps.length}</span>
+          </div>
+
+          <div className="mt-3 flex items-center gap-2">
+            <button
+              onClick={() => setI(s => Math.max(s - 1, 0))}
+              disabled={i === 0}
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded-md text-[12px] border border-[var(--border)] hover:bg-[var(--surface-3)] disabled:opacity-40"
+            >
+              <ChevronLeft className="w-3.5 h-3.5" /> Back
+            </button>
+            {isLast ? (
+              <button onClick={onClose} className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[12px] font-medium bg-[var(--accent-600)] text-white hover:opacity-90">
+                <CheckCircle2 className="w-4 h-4" /> Finish
+              </button>
+            ) : (
+              <button onClick={() => setI(s => Math.min(s + 1, steps.length - 1))} className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[12px] font-medium bg-[var(--accent-600)] text-white hover:opacity-90">
+                Next <ChevronRight className="w-3.5 h-3.5" />
+              </button>
+            )}
+            <button onClick={onClose} className="ml-auto flex items-center gap-1 text-[11.5px] text-[var(--text-soft)] hover:text-[var(--text)]" title="Exit the tutorial">
+              <X className="w-3.5 h-3.5" /> Exit tutorial
+            </button>
+          </div>
+
+          <p className="mt-2 text-[10.5px] text-[var(--text-faint)] flex items-center gap-1">
+            <MousePointerClick className="w-3 h-3" /> The highlighted area is live — click it to try it. Arrow keys move; the eye icon hides this card so you can explore freely.
+          </p>
         </div>
-        <p className="mt-2 text-[10.5px] text-[var(--text-faint)] flex items-center gap-1">
-          <PlayCircle className="w-3 h-3" /> Use the arrow keys to move. The highlight points at exactly what to click.
-        </p>
-      </div>
+      )}
     </div>
   );
+}
+
+function clamp(v: number, lo: number, hi: number): number {
+  return Math.max(lo, Math.min(hi, v));
 }
