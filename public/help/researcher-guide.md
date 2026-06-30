@@ -123,22 +123,32 @@ Workflow:
    whole subunit.
 5. In **Focus**, switch chart type: Rows (most readable), Bars, Lines (over
    time), or Heatmap (many candidates at once).
-6. **Compare**: add charts for a side-by-side view with a **common Y-axis** and a
-   **shared legend** that syncs selection/hover across every chart. When you
-   color by VerA or VerB, the shared legend groups by subunit so selecting a
-   VerA/VerB acts on all its combinations at once (consistent with the sidebar).
+6. **Compare**: add charts for a side-by-side view with a **common Y-axis**, a
+   **Reads/Fraction** toggle, a panel **Sort** (by dominant combination, final
+   richness, or reads), a per-panel **Final outcome** line (dominant A-B
+   combination and its percentage at the last transfer), and a **shared legend**
+   that syncs selection/hover across every chart. When you color by VerA or VerB,
+   the shared legend groups by subunit so selecting a VerA/VerB acts on all its
+   combinations at once (consistent with the sidebar).
 
 ---
 
 ## 5. Exporting figures and data
 
-Every visualization has an **Export figure** button with four options:
-- **PNG** — 2x bitmap for slides and email.
-- **SVG** — editable vector for manuscripts.
+Every visualization has an **Export figure** button. Each export is a real
+publication-quality figure rendered on a white background with a title and a
+snapshot caption baked in (not a screenshot): chart colors and fonts are resolved
+to fixed values so the figure looks identical wherever you open it. Four formats:
+- **PNG** — high-resolution 3x bitmap for slides and email.
+- **SVG** — fully self-contained, infinite-resolution vector, editable in
+  Illustrator/Inkscape. Recommended for manuscript figures.
 - **HTML** — self-contained page with fixed-size labels (best for barcode Rows).
 - **Print / Save PDF** — opens the print dialog scoped to the figure.
 
-Use the separate **CSV** button whenever you will make a quantitative claim.
+Whatever is on screen is what exports, so set your filters (and Reads vs Fraction)
+first. Scrollable views such as the Comparative heatmap export in full, not just
+the visible part. Use the separate **CSV** button whenever you will make a
+quantitative claim.
 
 Caption template:
 

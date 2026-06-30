@@ -265,15 +265,16 @@ export default function Dashboard({ initialTables }: DashboardProps) {
         {
           target: 'tab-barcodes',
           title: 'Compare conditions honestly',
-          body: 'Add charts to Compare for a side-by-side view with a shared Y-axis (so equal bar heights mean equal reads) and a shared legend that syncs selection and hover across every panel. When you color by VerA/VerB, the shared legend groups by subunit so selection stays consistent with the sidebar.',
-          look: 'A common-Y badge and a shared "Shared candidates / subunits" legend above the compared charts.',
+          body: 'Add charts to Compare for a side-by-side view with a shared Y-axis (so equal bar heights mean equal reads), a Reads/Fraction toggle, and a panel Sort (by dominant combination, final richness, or reads) so the layout reads like a result. Each panel shows a Final line with its dominant A-B combination and percentage. The shared legend syncs selection and hover across every panel, grouped by subunit when you color by VerA/VerB.',
+          look: 'A common-Y badge, Reads/Fraction + Sort controls, a per-panel "Final:" outcome line, and a shared legend above the panels.',
           before: () => go('mutations', 'barcodes'),
         } as TourStep,
       ] : []),
       {
         title: 'Exporting figures and data',
-        body: 'Every visualization has an Export figure button (top of its toolbar) with PNG (slides/email), SVG (editable vector for manuscripts), HTML (fixed-size labels), and Print/Save PDF. Use the separate CSV button whenever you will make a quantitative claim. Always record the snapshot date and your filters in the caption.',
+        body: 'Every visualization has an Export figure button (top of its toolbar). Each export is a real publication-quality figure rendered on a white background with a title and snapshot caption baked in (not a screenshot): PNG (high-res, for slides/email), SVG (editable vector for manuscripts, recommended), HTML, or Print/Save PDF. Use the separate CSV button whenever you will make a quantitative claim. Whatever is on screen is what exports, so set your filters first.',
         look: 'An "Export figure" button and a "CSV" button on each chart toolbar.',
+        tryIt: 'Open an Export figure menu and pick SVG to download a clean vector of the current chart.',
       },
       {
         target: 'help-guide',

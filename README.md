@@ -18,6 +18,7 @@ absent (see "Data-driven views" below).
 | Doc | Read it for |
 |---|---|
 | This README | Overview, quick start, feature + API reference |
+| [`docs/`](docs/README.md) | Documentation index |
 | `docs/ARCHITECTURE.md` | System design, dual run modes, the data-driven dual-deployment model |
 | `docs/RESEARCHER_GUIDE.md` | How a biologist uses the viewer to find results and build figures |
 | `docs/MANUSCRIPT_INTEGRATION.md` | Ready-to-adapt methods/results/legend language + honesty guardrails |
@@ -54,7 +55,8 @@ says so rather than guessing.
   static mode this runs SQLite in the browser (sql.js-httpvfs) so it stays fully
   queryable with no server.
 
-Every chart exports as PNG / SVG / HTML / Print-to-PDF, plus CSV for values.
+Every chart exports as a publication-quality figure (PNG / SVG / HTML / Print-to-PDF,
+self-contained with resolved colors, a title, and a snapshot caption), plus CSV for values.
 
 ## Data-driven views (one codebase, many audiences)
 
