@@ -20,8 +20,11 @@ absent (see "Data-driven views" below).
 | This README | Overview, quick start, feature + API reference |
 | [`docs/`](docs/README.md) | Documentation index |
 | `docs/ARCHITECTURE.md` | System design, dual run modes, the data-driven dual-deployment model |
+| `docs/DATA_MODEL.md` | The LIMS tables the views use and how they map; provenance rule |
 | `docs/RESEARCHER_GUIDE.md` | How a biologist uses the viewer to find results and build figures |
 | `docs/MANUSCRIPT_INTEGRATION.md` | Ready-to-adapt methods/results/legend language + honesty guardrails |
+| `CONTRIBUTING.md` | Dev setup, verification, conventions, build/deploy |
+| `CITATION.cff` | How to cite this software |
 | `CLAUDE.md` | Operating conventions for AI-assisted work in this repo |
 
 In-app help is built into the viewer itself: the left sidebar has a **Guide**
@@ -157,6 +160,7 @@ refreshes. Database files live under `data/` and are not committed.
 
 ## License / provenance
 
-Internal Argonne / ModelSEED project. The viewer is a presentation layer over the
-LIMS database (no scientific algorithms inside); the repository is cited for
-provenance in the robotic-experiment paper.
+Released under the [MIT License](LICENSE). Argonne / ModelSEED project. The viewer
+is a presentation layer over the LIMS database (no scientific algorithms inside);
+the repository is cited for provenance in the robotic-experiment paper. See
+[`CITATION.cff`](CITATION.cff) for how to cite it.

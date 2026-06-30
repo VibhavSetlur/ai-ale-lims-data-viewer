@@ -1,0 +1,26 @@
+cff-version: 1.2.0
+title: AI-ALE LIMS Data Viewer
+message: >-
+  If you use this software or figures exported from it, please cite it using
+  these metadata.
+type: software
+authors:
+  - given-names: Vibhav
+    family-names: Setlur
+    affiliation: Argonne National Laboratory
+repository-code: 'https://github.com/VibhavSetlur/ai-ale-lims-data-viewer'
+abstract: >-
+  A read-only web viewer over the AI-ALE (Adaptive Laboratory Evolution) LIMS
+  database for the robotic ALE study of Acinetobacter baylyi ADP1. It presents
+  breseq mutation calls, dgoA* copy-number amplification trajectories, robot-
+  measured OD600 growth curves, and VerA/VerB barcode-composition charts, and
+  exports publication-quality figures. The viewer is a presentation layer over a
+  database snapshot and contains no scientific algorithms; every value shown is
+  stored in the database or computed transparently from stored values.
+keywords:
+  - adaptive laboratory evolution
+  - Acinetobacter baylyi
+  - copy number variation
+  - data visualization
+  - LIMS
+license: MIT

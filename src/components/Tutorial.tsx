@@ -119,37 +119,44 @@ export default function Tutorial({
   const hole = rect ? { top: rect.top - pad, left: rect.left - pad, width: rect.width + pad * 2, height: rect.height + pad * 2 } : null;
 
   return (
-    <div className="fixed inset-0 z-[60]" role="dialog" aria-modal="false" aria-label={title}>
-      {/* Dim layer made of FOUR rectangles so the hole is a real gap the user can
-          click through to the live element underneath. */}
+    // Wrapper does NOT capture pointer events, so the spotlight hole is genuinely
+    // click-through to the live page. Only the dim panels and the card opt back in.
+    <div className="fixed inset-0 z-[60] pointer-events-none" role="dialog" aria-modal="false" aria-label={title}>
+      {/* Dim layer = FOUR panels around the target. They DO capture clicks (so a
+          stray click on the dimmed area does not leak to the page), but the gap
+          between them is a real hole the user can click straight through. */}
       {hole ? (
         <>
-          <div className="absolute bg-black/55 transition-all duration-150" style={{ top: 0, left: 0, right: 0, height: Math.max(0, hole.top) }} />
-          <div className="absolute bg-black/55 transition-all duration-150" style={{ top: hole.top + hole.height, left: 0, right: 0, bottom: 0 }} />
-          <div className="absolute bg-black/55 transition-all duration-150" style={{ top: hole.top, left: 0, width: Math.max(0, hole.left), height: hole.height }} />
-          <div className="absolute bg-black/55 transition-all duration-150" style={{ top: hole.top, left: hole.left + hole.width, right: 0, height: hole.height }} />
-          {/* Ring around the live, clickable target */}
+          <div className="absolute bg-black/55 transition-all duration-150 pointer-events-auto" style={{ top: 0, left: 0, right: 0, height: Math.max(0, hole.top) }} />
+          <div className="absolute bg-black/55 transition-all duration-150 pointer-events-auto" style={{ top: hole.top + hole.height, left: 0, right: 0, bottom: 0 }} />
+          <div className="absolute bg-black/55 transition-all duration-150 pointer-events-auto" style={{ top: hole.top, left: 0, width: Math.max(0, hole.left), height: hole.height }} />
+          <div className="absolute bg-black/55 transition-all duration-150 pointer-events-auto" style={{ top: hole.top, left: hole.left + hole.width, right: 0, height: hole.height }} />
+          {/* Ring around the live, clickable target (never blocks clicks) */}
           <div
-            className="absolute rounded-lg pointer-events-none transition-all duration-150"
-            style={{ top: hole.top, left: hole.left, width: hole.width, height: hole.height, outline: '2.5px solid var(--accent-400)', outlineOffset: 0, boxShadow: '0 0 0 2px rgba(255,255,255,0.35), 0 0 22px 4px rgba(56,189,172,0.35)' }}
+            className="absolute rounded-lg pointer-events-none transition-all duration-150 animate-pulse"
+            style={{ top: hole.top, left: hole.left, width: hole.width, height: hole.height, outline: '2.5px solid var(--accent-400)', outlineOffset: 0, boxShadow: '0 0 0 2px rgba(255,255,255,0.4), 0 0 24px 5px rgba(56,189,172,0.4)' }}
           />
         </>
       ) : (
-        <div className="absolute inset-0 bg-black/55" />
+        <div className="absolute inset-0 bg-black/55 pointer-events-auto" />
       )}
 
-      {/* Step card */}
+      {/* Step card / explore pill */}
       {minimized ? (
-        <button
-          onClick={() => setMinimized(false)}
-          className="absolute bottom-4 right-4 flex items-center gap-2 px-3 py-2 rounded-full bg-[var(--accent-600)] text-white shadow-2xl text-[12px] font-medium"
-        >
-          <PlayCircle className="w-4 h-4" /> Resume tour · {i + 1}/{steps.length}
-        </button>
+        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-2 pointer-events-auto">
+          <div className="flex items-center gap-2 px-3 py-2 rounded-full bg-[var(--surface)] border border-[var(--accent-300)] shadow-2xl text-[12px]">
+            <Hand className="w-4 h-4 text-[var(--accent-600)]" />
+            <span className="text-[var(--text-soft)]">Exploring step {i + 1}. Click around the highlighted area.</span>
+            <button onClick={() => setMinimized(false)} className="flex items-center gap-1 px-2.5 py-1 rounded-md bg-[var(--accent-600)] text-white font-medium hover:opacity-90">
+              <PlayCircle className="w-3.5 h-3.5" /> Resume tutorial
+            </button>
+            <button onClick={onClose} className="p-0.5 rounded hover:bg-[var(--surface-3)] text-[var(--text-faint)]" title="Exit tutorial"><X className="w-3.5 h-3.5" /></button>
+          </div>
+        </div>
       ) : (
         <div
           ref={cardRef}
-          className="absolute rounded-xl border border-[var(--border)] bg-[var(--surface)] text-[var(--text)] shadow-2xl p-4"
+          className="absolute rounded-xl border border-[var(--border)] bg-[var(--surface)] text-[var(--text)] shadow-2xl p-4 pointer-events-auto"
           style={{ width: cardW, maxWidth: '94vw', ...cardStyle }}
         >
           <div className="flex items-start gap-2.5">
@@ -158,7 +165,7 @@ export default function Tutorial({
               <div className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-faint)]">{title}</div>
               <h3 className="text-[14.5px] font-semibold leading-snug mt-0.5">{step.title}</h3>
             </div>
-            <button onClick={() => setMinimized(true)} className="p-0.5 rounded hover:bg-[var(--surface-3)] text-[var(--text-faint)]" title="Minimize (keep exploring)"><Eye className="w-4 h-4" /></button>
+            <button onClick={() => setMinimized(true)} className="p-0.5 rounded hover:bg-[var(--surface-3)] text-[var(--text-faint)]" title="Explore freely (hide this card)"><Eye className="w-4 h-4" /></button>
             <button onClick={onClose} className="p-0.5 rounded hover:bg-[var(--surface-3)]" title="Exit tour (Esc)"><X className="w-4 h-4" /></button>
           </div>
 
@@ -171,9 +178,17 @@ export default function Tutorial({
             </div>
           )}
           {step.tryIt && (
-            <div className="mt-2 flex gap-2 rounded-md bg-[var(--accent-50)] border border-[var(--accent-200)] px-2.5 py-1.5">
-              <Hand className="w-3.5 h-3.5 mt-0.5 shrink-0 text-[var(--accent-700)]" />
-              <p className="text-[11.5px] text-[var(--accent-800)] leading-snug"><span className="font-semibold">Try it now: </span>{step.tryIt}</p>
+            <div className="mt-2 rounded-md bg-[var(--accent-50)] border border-[var(--accent-200)] px-2.5 py-2">
+              <div className="flex gap-2">
+                <Hand className="w-3.5 h-3.5 mt-0.5 shrink-0 text-[var(--accent-700)]" />
+                <p className="text-[11.5px] text-[var(--accent-800)] leading-snug"><span className="font-semibold">Try it: </span>{step.tryIt}</p>
+              </div>
+              <button
+                onClick={() => setMinimized(true)}
+                className="mt-2 w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md text-[12px] font-semibold bg-[var(--accent-600)] text-white hover:opacity-90"
+              >
+                <MousePointerClick className="w-3.5 h-3.5" /> Try it now (explore)
+              </button>
             </div>
           )}
 
@@ -212,7 +227,7 @@ export default function Tutorial({
           </div>
 
           <p className="mt-2 text-[10.5px] text-[var(--text-faint)] flex items-center gap-1">
-            <MousePointerClick className="w-3 h-3" /> The highlighted area is live — click it to try it. Arrow keys move; the eye icon hides this card so you can explore freely.
+            <MousePointerClick className="w-3 h-3" /> The highlighted area is live, so click it any time. &quot;Try it now&quot; hides this card to explore, then Resume brings you right back here.
           </p>
         </div>
       )}

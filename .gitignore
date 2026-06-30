@@ -52,6 +52,14 @@ data/*
 !data/mutations.example.csv
 archive/
 
+# database artifacts anywhere in the tree (never commit DBs or dumps)
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+*.dump
+
 # local config overrides
 /local/
 
@@ -72,3 +80,7 @@ public/db/
 public/data/*.json
 public/data/*.json.gz
 public/data/manifest.json
+
+# agent-rules symlinks (point to CLAUDE.md; not for publication)
+AGENTS.md
+GEMINI.md
