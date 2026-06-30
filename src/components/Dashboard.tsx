@@ -3,14 +3,18 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import DataTable from './DataTable';
 import MutationExplorer from './MutationExplorer';
-import { fetchData, IS_STATIC } from '../lib/dataSource';
+import { fetchData, IS_STATIC, BASE_PATH } from '../lib/dataSource';
 import {
   Database, Search, Sun, Moon, Table2, Dna,
   Server, HardDrive, RefreshCw, AlertCircle,
   ChevronLeft, ChevronRight, X, Clock,
+  BookOpen, Compass, PlayCircle,
 } from 'lucide-react';
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
+import HelpCenter from './HelpCenter';
+import Tutorial, { type TourStep } from './Tutorial';
+import GuideAssistant, { type GuideAction } from './GuideAssistant';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -98,6 +102,88 @@ export default function Dashboard({ initialTables }: DashboardProps) {
   const [mirrorInfo, setMirrorInfo] = useState<MirrorInfo | null>(null);
   const [showMirror, setShowMirror] = useState(false);
   const mirrorRef = useRef<HTMLDivElement>(null);
+
+  // Help system: Guide (how-do-I + prompt builder), full Help center, and the
+  // interactive click-through Tutorial. All live at the Dashboard level so they
+  // can navigate across both workspaces.
+  const [showHelp, setShowHelp] = useState(false);
+  const [showGuide, setShowGuide] = useState(false);
+  const [tourFlow, setTourFlow] = useState<TourStep[] | null>(null);
+  const [hasBarcodes, setHasBarcodes] = useState(false);
+
+  // Detect whether the active snapshot exposes the Barcode tab, so the Guide can
+  // hide barcode help when there is no barcode data (e.g. the TFMN1 snapshot).
+  useEffect(() => {
+    let cancelled = false;
+    fetchData('/api/mutations')
+      .then(r => r.json())
+      .then(j => { if (!cancelled) setHasBarcodes(Boolean(j?.stats?.hasBarcodes)); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+
+  // Drive cross-component navigation: switch the workspace here, then broadcast
+  // a tab change that MutationExplorer listens for. A small delay lets the view
+  // mount before the tab event arrives.
+  const navigate = (a: GuideAction) => {
+    if (a.kind === 'navigate') {
+      if (a.view) setActiveView(a.view);
+      if (a.tab) {
+        setTimeout(() => window.dispatchEvent(new CustomEvent('aiale:navigate', { detail: { tab: a.tab } })), 80);
+      }
+    } else if (a.kind === 'tutorial') {
+      startTour(a.flow);
+    }
+  };
+
+  // Interactive tour flows. Each step spotlights a live element by its data-tour
+  // attribute and can run a setup (open a view/tab) before showing.
+  function startTour(flow: string) {
+    setShowHelp(false);
+    setShowGuide(false);
+    const go = (view: ActiveView, tab?: string) => {
+      setActiveView(view);
+      if (tab) setTimeout(() => window.dispatchEvent(new CustomEvent('aiale:navigate', { detail: { tab } })), 60);
+    };
+    const fullTour: TourStep[] = [
+      { target: 'nav-mutations', title: 'This is the Mutation Explorer', body: 'Everything scientific lives here: pick samples, then compare mutations, copy number, growth, and barcode composition. Click it to open.', before: () => setActiveView('mutations') },
+      { target: 'tab-samples', title: '1. Start at Sample Selection', body: 'Filter by experiment (genotype background), strain, condition, donor DNA, replicate, or transfer, and tick the samples you want to study.', before: () => go('mutations', 'samples') },
+      { target: 'tab-compare', title: '2. Comparative View = the mutation heatmap', body: 'Rows are mutations and copy-number regions, columns are your samples. Frequency colors are fixed 0-100%; copy-number rows use a row-local scale. Provided (donor DNA) mutations get an amber outline.', before: () => go('mutations', 'compare') },
+      { target: 'tab-copynumber', title: '3. Copy Number = the headline finding', body: 'dgoA* amplification is the convergent adaptive signal in this study. Each line is a lineage over transfers; click a legend entry to isolate one trajectory.', before: () => go('mutations', 'copynumber') },
+      { target: 'tab-samples', title: '4. Growth curves', body: 'Back in Sample Selection (or Comparative View), click any OD600 sparkline for the full growth-curve popup. Its metrics are descriptive point-to-point estimates, never model fits or invented values.', before: () => go('mutations', 'samples') },
+      ...(hasBarcodes ? [{ target: 'tab-barcodes', title: '5. Barcode Charts (VerA/VerB)', body: 'Track A#-B# VerA/VerB composition across transfers. Select a candidate or subunit group to filter and emphasize it; use Focus and Compare for readable, axis-shared views.', before: () => go('mutations', 'barcodes') } as TourStep] : []),
+      { target: 'help-guide', title: 'Stuck? Open the Guide', body: 'The Guide answers "how do I..." and walks you straight to the right view. The Help button opens the full searchable documentation. You are ready to explore.', before: () => setActiveView('mutations') },
+    ];
+    const flows: Record<string, TourStep[]> = {
+      full: fullTour,
+      samples: [
+        { target: 'tab-samples', title: 'Sample Selection', body: 'This is where you pick which lineages flow into every other view. Open it to begin.', before: () => go('mutations', 'samples') },
+        { target: 'tab-samples', title: 'Filter, then select', body: 'Use the experiment / strain / condition / donor DNA / replicate / transfer filters. They cross-narrow, so picking one factor hides impossible options. Tick the rows you want.', before: () => go('mutations', 'samples') },
+        { target: 'tab-compare', title: 'Carry the selection forward', body: 'Once samples are selected, every other tab (Comparative, Copy Number, Barcode) acts on exactly that selection. The count badge shows how many are selected.', before: () => go('mutations', 'samples') },
+      ],
+      comparative: [
+        { target: 'tab-compare', title: 'Comparative View', body: 'A heatmap of mutation frequency and copy-number rows across your selected samples. Open it.', before: () => go('mutations', 'compare') },
+        { target: 'tab-compare', title: 'Two color rules (important)', body: 'Frequency rows use a FIXED 0% to 100% color scale. Copy-number rows use a row-local min/max scale. That is the only place the scales differ, and it is intentional.', before: () => go('mutations', 'compare') },
+        { target: 'tab-compare', title: 'Provided vs spontaneous', body: 'A donor-DNA mutation has an amber outline; an outlined 0% cell was provided but never observed. No outline means it arose spontaneously (e.g. secondary fba alleles). Click a mutation name for genome context.', before: () => go('mutations', 'compare') },
+        { target: 'tab-compare', title: 'Export the figure', body: 'Use the Export figure button (PNG / SVG / HTML / Print) for the heatmap, and the CSV button for the underlying values.', before: () => go('mutations', 'compare') },
+      ],
+      copynumber: [
+        { target: 'tab-copynumber', title: 'Copy Number = the main result', body: 'dgoA* copy-number amplification is the convergent, genotype-independent signal that correlates with growth. Open this tab.', before: () => go('mutations', 'copynumber') },
+        { target: 'tab-copynumber', title: 'Read the trajectories', body: 'Each line is one lineage; Y = copy number, X = transfer. Look for lines rising above the CN = 1x baseline toward 2-3x (outliers go higher). Hover for a snapping tooltip.', before: () => go('mutations', 'copynumber') },
+        { target: 'tab-copynumber', title: 'Isolate one lineage', body: 'Click a legend entry to isolate a single trajectory (the rest are removed, not just dimmed). Use the legend search to jump to a background, and toggle Log/Linear Y.', before: () => go('mutations', 'copynumber') },
+      ],
+      growth: [
+        { target: 'tab-samples', title: 'Find a growth curve', body: 'Every sample row (and Comparative column) has an OD600 sparkline. Click one to open the full growth-curve popup.', before: () => go('mutations', 'samples') },
+        { target: 'tab-samples', title: 'Honest, derived metrics', body: 'The popup shows max OD/K, mu, doubling, lag, and AUC. These are descriptive point-to-point estimates from the observed OD600 points (click "How is each value computed?"), never model fits. If a sample has no numeric series, the popup says so.', before: () => go('mutations', 'samples') },
+      ],
+      barcodes: hasBarcodes ? [
+        { target: 'tab-barcodes', title: 'Barcode Charts (VerA/VerB)', body: 'Each A#-B# is one VerA subunit paired with one VerB subunit, with a stable color. VerB modulates VerA, so the pairing governs substrate specificity. Open this tab.', before: () => go('mutations', 'barcodes') },
+        { target: 'tab-barcodes', title: 'Color, split, select', body: 'Color by A-B / VerA / VerB (the info button explains the difference). Split A|B shows the same reads three ways. Click a candidate (or a VerA/VerB group header) to filter and emphasize it everywhere.', before: () => go('mutations', 'barcodes') },
+        { target: 'tab-barcodes', title: 'Focus and Compare', body: 'In Focus pick a chart type (Rows are most readable, plus Bars / Lines / Heatmap). Add charts to Compare for a shared-Y, shared-legend side-by-side that syncs selection across panels.', before: () => go('mutations', 'barcodes') },
+      ] : fullTour,
+    };
+    setTourFlow(flows[flow] || fullTour);
+  }
 
   // Restore persisted UI state
   useEffect(() => {
@@ -390,11 +476,11 @@ export default function Dashboard({ initialTables }: DashboardProps) {
                     <ChevronLeft className="w-3.5 h-3.5" />
                   </button>
                 </div>
-                <button onClick={() => setActiveView('tables')} data-active={activeView === 'tables'} className="lims-nav mb-0.5">
+                <button onClick={() => setActiveView('tables')} data-active={activeView === 'tables'} data-tour="nav-tables" className="lims-nav mb-0.5">
                   <Database className="w-4 h-4 shrink-0" />
                   <span className="flex-1">Database Tables</span>
                 </button>
-                <button onClick={() => setActiveView('mutations')} data-active={activeView === 'mutations'} className="lims-nav">
+                <button onClick={() => setActiveView('mutations')} data-active={activeView === 'mutations'} data-tour="nav-mutations" className="lims-nav">
                   <Dna className="w-4 h-4 shrink-0" />
                   <span className="flex-1">Mutation Explorer</span>
                 </button>
@@ -468,6 +554,23 @@ export default function Dashboard({ initialTables }: DashboardProps) {
                   </div>
                 </div>
               )}
+
+              {/* Help & Learning — always at the bottom of the expanded sidebar */}
+              <div className="mt-auto p-2 border-t border-[var(--border)]">
+                <div className="lims-label mb-1.5 px-1">Help &amp; Learning</div>
+                <button onClick={() => setShowGuide(true)} data-tour="help-guide" className="lims-nav mb-0.5" title="Guided how-do-I answers that walk you to the right view">
+                  <Compass className="w-4 h-4 shrink-0 text-[var(--accent-600)]" />
+                  <span className="flex-1 text-left">Guide</span>
+                </button>
+                <button onClick={() => startTour('full')} className="lims-nav mb-0.5" title="Interactive click-through tour of every view">
+                  <PlayCircle className="w-4 h-4 shrink-0 text-[var(--accent-600)]" />
+                  <span className="flex-1 text-left">Interactive tutorial</span>
+                </button>
+                <button onClick={() => setShowHelp(true)} className="lims-nav" title="Full searchable documentation">
+                  <BookOpen className="w-4 h-4 shrink-0 text-[var(--accent-600)]" />
+                  <span className="flex-1 text-left">Help &amp; guide</span>
+                </button>
+              </div>
             </>
           ) : (
             <div className="flex flex-col items-center pt-2 gap-1">
@@ -484,6 +587,11 @@ export default function Dashboard({ initialTables }: DashboardProps) {
                 title="Mutation Explorer">
                 <Dna className="w-4 h-4" />
               </button>
+              <div className="mt-auto flex flex-col items-center gap-1 pb-2">
+                <button onClick={() => setShowGuide(true)} className="p-1.5 rounded-md text-[var(--text-faint)] hover:bg-[var(--surface-3)]" title="Guide"><Compass className="w-4 h-4" /></button>
+                <button onClick={() => startTour('full')} className="p-1.5 rounded-md text-[var(--text-faint)] hover:bg-[var(--surface-3)]" title="Interactive tutorial"><PlayCircle className="w-4 h-4" /></button>
+                <button onClick={() => setShowHelp(true)} className="p-1.5 rounded-md text-[var(--text-faint)] hover:bg-[var(--surface-3)]" title="Help"><BookOpen className="w-4 h-4" /></button>
+              </div>
             </div>
           )}
         </aside>
@@ -513,6 +621,25 @@ export default function Dashboard({ initialTables }: DashboardProps) {
           </div>
         </div>
       </div>
+
+      {showHelp && (
+        <HelpCenter
+          onClose={() => setShowHelp(false)}
+          onStartTutorial={() => { setShowHelp(false); startTour('full'); }}
+          onGuide={() => { setShowHelp(false); setShowGuide(true); }}
+          guideUrl={`${BASE_PATH}/help/researcher-guide.md`}
+        />
+      )}
+      {showGuide && (
+        <GuideAssistant
+          ctx={{ view: activeView === 'mutations' ? 'Mutation Explorer' : 'Database Tables', hasBarcodes }}
+          onClose={() => setShowGuide(false)}
+          onAction={navigate}
+        />
+      )}
+      {tourFlow && tourFlow.length > 0 && (
+        <Tutorial steps={tourFlow} onClose={() => setTourFlow(null)} />
+      )}
     </div>
   );
 }
