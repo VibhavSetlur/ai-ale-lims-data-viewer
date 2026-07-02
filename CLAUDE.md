@@ -33,13 +33,12 @@ skill; this file is the short standing-orders list Vibhav set.
 
 5. DEPLOY GUARDRAIL (HARD). NEVER write/modify/touch fliu's workspace
    (/scratch1/fliu/... including the LIMS mirror and
-   /scratch1/fliu/html/modelseed_annotation/projects) or anyone else's space.
-   Edit ONLY Vibhav's own repos: this one and ModelSEED-UI. Anything that must
-   happen in fliu's space (create the project folder, grant perms, place the
-   built static files) or in ModelSEED prod (deploy) is HANDED OFF via Slack to
-   fliu / Seaver for THEM to do. We produce the artifact + instructions only.
-   ModelSEED deploy = PR to Seaver (see the modelseed-ui skill). The static path
-   for the public site = fliu.
+   /scratch1/fliu/html/modelseed_annotation/projects) or anyone else's space,
+   EXCEPT the three approved static viewer webroots listed below when Vibhav
+   explicitly asks for a static deploy or static test. Edit only the contents of
+   those approved webroots, never the fliu-owned top directory. Anything outside
+   those paths is handed off via Slack to fliu / Seaver. ModelSEED deploy = PR to
+   Seaver (see the modelseed-ui skill).
 
 ## Deployment (dual-mode: server + static)
 This app has TWO build modes from one codebase:
@@ -58,10 +57,42 @@ npm run build:static     # -> out/  (basePath=/annotation/projects/aiale)
 ```
 Override the URL base path: `BASE_PATH=/annotation/projects/<name> npm run build:static`.
 
+## Static Deployment Branches and URLs
+Static deployments are tracked by dedicated branch pointers so we always know
+which code revision is deployed where. `main` is the integration branch. Do not
+assume `main` equals production.
+
+- DEV / test: branch `deploy/aiale-dev`
+  URL: https://modelseed.org/annotation/projects/aiale-dev/
+  Webroot: /scratch1/fliu/html/modelseed_annotation/projects/aiale-dev/
+  DB baked in: full mirror (`data/lims_indexed.db`). Barcode tab SHOWN.
+- PUBLIC / production publication snapshot: branch `deploy/aiale-public`
+  URL: https://modelseed.org/annotation/projects/aiale/
+  Webroot: /scratch1/fliu/html/modelseed_annotation/projects/aiale/
+  DB baked in: TFMN1 trimmed (`data/lims_TFMN1_indexed.db`). Barcode tab HIDDEN.
+- PRIVATE / production internal full instance: branch `deploy/aiale-private`
+  URL: https://modelseed.org/annotation/projects/aiale-06-25-2026/
+  Webroot: /scratch1/fliu/html/modelseed_annotation/projects/aiale-06-25-2026/
+  DB baked in: full mirror (`data/lims_indexed.db`). Barcode tab SHOWN.
+
+Branch rules:
+- Feature/fix work lands on `main` first.
+- To test a release, fast-forward `deploy/aiale-dev` to the chosen `main` commit,
+  bake with `BASE_PATH=/annotation/projects/aiale-dev` and `data/lims_indexed.db`,
+  deploy to the dev webroot, then verify over HTTPS.
+- Only after the dev URL is accepted, fast-forward `deploy/aiale-public` and/or
+  `deploy/aiale-private` to the accepted commit and deploy each URL with its own
+  DB and `BASE_PATH`.
+- Never move a production deploy branch unless that exact URL has been rebuilt,
+  copied, permission-fixed, and HTTPS-verified.
+- If a hotfix applies only to one URL, branch from that deploy branch, merge or
+  cherry-pick intentionally, then update only the matching deploy branch after
+  verification. Do not silently let the static URL diverge from its deploy branch.
+
 ## TWO static deployments (same codebase, DIFFERENT databases) - updated 2026-06-25
 TWO live static deployments built from this ONE viewer codebase. They differ by
 build-time `BASE_PATH` AND by WHICH DATABASE is baked in. Full procedure:
-docs/DEPLOY_RUNBOOK_LIVE.md. Design rationale: docs/ARCHITECTURE.md section 3-4.
+static branch rules above plus docs/ARCHITECTURE.md section 3-4.
 
 1. PUBLIC (publication snapshot, launches with the robotic paper):
    https://modelseed.org/annotation/projects/aiale/
@@ -112,6 +143,6 @@ Hand-off docs (keep accurate when ports/paths/names change):
 - Live deploy: tmux `ai-ale-viewer`, port 3457. Restart: `./ops/stop.sh && ./ops/serve.sh`
 - Verify: `curl -s http://localhost:3457/api/health` then curl /api/mutations
 - DB: `data/lims_indexed.db` (indexed mirror). Inspect via Python sqlite3 (no CLI).
-- Git: feature work then fast-forward main + push. No dev branch, no PR gate.
+- Git: feature work lands on `main`; static URL state is tracked by `deploy/aiale-dev`, `deploy/aiale-public`, and `deploy/aiale-private`.
 - Audit probes: `scripts/audit-db.py` (integrity) and the scientific-validity
   pass in docs/DEEP_DIVE_AUDIT-*.md.
