@@ -148,7 +148,7 @@ refreshes. Database files live under `data/` and are not committed.
 | `STATIC_EXPORT` | - | `1` switches the build to static `output: export` |
 | `BASE_PATH` | - | URL base path for a static build (e.g. `/annotation/projects/aiale`) |
 | `VIEWER_VERSION` | `package.json` version | Static build viewer version override |
-| `DEPLOYMENT_CHANNEL` | inferred from `BASE_PATH` | Static channel: `dev`, `public`, or `private` |
+| `DEPLOYMENT_CHANNEL` | inferred from `BASE_PATH` | Static channel: `dev` (displayed as Staging), `public`, or `private` |
 | `DEPLOYMENT_BRANCH` | inferred from `BASE_PATH` | Static deploy branch pointer shown in the viewer |
 | `GIT_COMMIT` | current git commit | Static build commit override |
 

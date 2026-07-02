@@ -107,6 +107,7 @@ export default function Dashboard({ initialTables, buildInfo }: DashboardProps) 
   const [showVersionInfo, setShowVersionInfo] = useState(false);
   const versionRef = useRef<HTMLDivElement>(null);
   const channelInfo = DEPLOYMENT_CHANNELS[buildInfo.channel];
+  const displayChannel = buildInfo.channel === 'dev' ? 'staging' : buildInfo.channel;
 
   // Help system: Guide (how-do-I + prompt builder), full Help center, and the
   // interactive click-through Tutorial. All live at the Dashboard level so they
@@ -507,7 +508,7 @@ export default function Dashboard({ initialTables, buildInfo }: DashboardProps) 
               className="flex items-center gap-1.5 px-2 py-1 rounded-md border border-[var(--border)] bg-[var(--surface-2)] hover:bg-[var(--surface-3)] transition-colors"
               title={`${channelInfo.label} ${buildInfo.version}`}
             >
-              <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--accent-700)]">{buildInfo.channel}</span>
+              <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--accent-700)]">{displayChannel}</span>
               <span className="text-[11px] font-semibold text-[var(--text)] tabular-nums">v{buildInfo.version}</span>
             </button>
             {showVersionInfo && (

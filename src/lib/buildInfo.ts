@@ -17,7 +17,7 @@ export const DEPLOYMENT_CHANNELS: Record<DeploymentChannel, {
   barcodePolicy: string;
 }> = {
   dev: {
-    label: 'Dev / test',
+    label: 'Staging',
     branch: 'deploy/aiale-dev',
     url: 'https://modelseed.org/annotation/projects/aiale-dev/',
     database: 'Full LIMS mirror: data/lims_indexed.db',
