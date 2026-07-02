@@ -121,6 +121,11 @@ The raw Database Tables browser stays fully queryable in the static build becaus
 it runs real SQLite in the browser via sql.js-httpvfs over HTTP range requests;
 the host must serve the `.db` with `Accept-Ranges: bytes`.
 
+Static deployments are tracked by branch and displayed in the viewer version
+badge. Versioning starts at `1.0.0`; see
+[`docs/DEPLOYMENT_VERSIONING.md`](docs/DEPLOYMENT_VERSIONING.md) for the
+`deploy/aiale-dev`, `deploy/aiale-public`, and `deploy/aiale-private` workflow.
+
 ## Database performance
 
 The upstream LIMS mirror has no indexes, so cold joins were slow (19-60s). Keep a
@@ -142,6 +147,10 @@ refreshes. Database files live under `data/` and are not committed.
 | `MYSQL_URL` | - | MySQL connection string; if set, MySQL is used instead of SQLite |
 | `STATIC_EXPORT` | - | `1` switches the build to static `output: export` |
 | `BASE_PATH` | - | URL base path for a static build (e.g. `/annotation/projects/aiale`) |
+| `VIEWER_VERSION` | `package.json` version | Static build viewer version override |
+| `DEPLOYMENT_CHANNEL` | inferred from `BASE_PATH` | Static channel: `dev`, `public`, or `private` |
+| `DEPLOYMENT_BRANCH` | inferred from `BASE_PATH` | Static deploy branch pointer shown in the viewer |
+| `GIT_COMMIT` | current git commit | Static build commit override |
 
 ## API (server mode)
 

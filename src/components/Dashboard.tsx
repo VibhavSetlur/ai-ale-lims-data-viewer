@@ -4,10 +4,11 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import DataTable from './DataTable';
 import MutationExplorer from './MutationExplorer';
 import { fetchData, IS_STATIC, BASE_PATH } from '../lib/dataSource';
+import { DEPLOYMENT_CHANNELS, type BuildInfo } from '../lib/buildInfo';
 import {
   Database, Search, Sun, Moon, Table2, Dna,
   Server, HardDrive, RefreshCw, AlertCircle,
-  ChevronLeft, ChevronRight, X, Clock,
+  ChevronLeft, ChevronRight, X, Clock, GitBranch,
   BookOpen, Compass, PlayCircle,
 } from 'lucide-react';
 import { clsx, type ClassValue } from "clsx";
@@ -38,6 +39,7 @@ const isLegacyTable = (name: string) => LEGACY_TABLES.has(name);
 
 interface DashboardProps {
   initialTables: string[];
+  buildInfo: BuildInfo;
 }
 
 type DbType = 'sqlite' | 'mysql';
@@ -69,7 +71,7 @@ function formatCount(n: number): string {
   return n.toLocaleString();
 }
 
-export default function Dashboard({ initialTables }: DashboardProps) {
+export default function Dashboard({ initialTables, buildInfo }: DashboardProps) {
   const [activeTable, setActiveTable] = useState<string>('');
   const [searchQuery, setSearchQuery] = useState('');
   const [dark, setDark] = useState(false);
@@ -102,6 +104,9 @@ export default function Dashboard({ initialTables }: DashboardProps) {
   const [mirrorInfo, setMirrorInfo] = useState<MirrorInfo | null>(null);
   const [showMirror, setShowMirror] = useState(false);
   const mirrorRef = useRef<HTMLDivElement>(null);
+  const [showVersionInfo, setShowVersionInfo] = useState(false);
+  const versionRef = useRef<HTMLDivElement>(null);
+  const channelInfo = DEPLOYMENT_CHANNELS[buildInfo.channel];
 
   // Help system: Guide (how-do-I + prompt builder), full Help center, and the
   // interactive click-through Tutorial. All live at the Dashboard level so they
@@ -407,6 +412,15 @@ export default function Dashboard({ initialTables }: DashboardProps) {
     return () => document.removeEventListener('mousedown', handler);
   }, [showMirror]);
 
+  useEffect(() => {
+    if (!showVersionInfo) return;
+    const handler = (e: MouseEvent) => {
+      if (versionRef.current && !versionRef.current.contains(e.target as Node)) setShowVersionInfo(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showVersionInfo]);
+
   // Close db switcher on outside click
   useEffect(() => {
     if (!showDbSwitcher) return;
@@ -486,6 +500,46 @@ export default function Dashboard({ initialTables }: DashboardProps) {
               <h1 className="text-[13px] font-semibold text-[var(--text)] tracking-tight">AI-ALE LIMS</h1>
               <p className="text-[10px] text-[var(--text-faint)] font-medium mt-0.5">Adaptive Laboratory Evolution</p>
             </div>
+          </div>
+          <div className="relative" ref={versionRef}>
+            <button
+              onClick={() => setShowVersionInfo(s => !s)}
+              className="flex items-center gap-1.5 px-2 py-1 rounded-md border border-[var(--border)] bg-[var(--surface-2)] hover:bg-[var(--surface-3)] transition-colors"
+              title={`${channelInfo.label} ${buildInfo.version}`}
+            >
+              <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--accent-700)]">{buildInfo.channel}</span>
+              <span className="text-[11px] font-semibold text-[var(--text)] tabular-nums">v{buildInfo.version}</span>
+            </button>
+            {showVersionInfo && (
+              <div className="absolute left-0 top-full mt-1 w-[22rem] bg-[var(--surface)] rounded-lg border border-[var(--border)] z-50 p-3 text-[11.5px] text-[var(--text)]" style={{ boxShadow: 'var(--shadow-md)' }}>
+                <div className="flex items-start justify-between gap-3 mb-2">
+                  <div>
+                    <h3 className="text-xs font-semibold text-[var(--text)]">Viewer version</h3>
+                    <p className="text-[10.5px] text-[var(--text-soft)] mt-0.5">Deployment branch and data snapshot are tracked separately.</p>
+                  </div>
+                  <span className="lims-id text-[11px] tabular-nums">v{buildInfo.version}</span>
+                </div>
+                <div className="grid grid-cols-[5.5rem_1fr] gap-x-2 gap-y-1 lims-id">
+                  <span className="text-[var(--text-soft)]">Channel</span><span>{channelInfo.label}</span>
+                  <span className="text-[var(--text-soft)]">Branch</span><span>{buildInfo.branch}</span>
+                  <span className="text-[var(--text-soft)]">Commit</span><span>{buildInfo.commit.slice(0, 12)}</span>
+                  <span className="text-[var(--text-soft)]">Mode</span><span>{buildInfo.mode}</span>
+                  <span className="text-[var(--text-soft)]">Database</span><span>{channelInfo.database}</span>
+                  <span className="text-[var(--text-soft)]">Barcodes</span><span>{channelInfo.barcodePolicy}</span>
+                </div>
+                <div className="mt-3 pt-2 border-t border-[var(--border)] space-y-1">
+                  {(['dev', 'public', 'private'] as const).map(channel => (
+                    <div key={channel} className={cn('flex items-start gap-2 rounded px-1.5 py-1', channel === buildInfo.channel ? 'bg-[var(--accent-50)]' : '')}>
+                      <GitBranch className="w-3.5 h-3.5 mt-0.5 text-[var(--text-faint)] shrink-0" />
+                      <div className="min-w-0">
+                        <div className="font-semibold text-[var(--text)]">{DEPLOYMENT_CHANNELS[channel].label}</div>
+                        <div className="text-[10.5px] text-[var(--text-soft)] truncate">{DEPLOYMENT_CHANNELS[channel].branch} · {DEPLOYMENT_CHANNELS[channel].database}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </div>
 

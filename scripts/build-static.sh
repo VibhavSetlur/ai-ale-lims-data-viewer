@@ -16,6 +16,14 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 BASE_PATH="${BASE_PATH:-/annotation/projects/aiale}"
+VIEWER_VERSION="${VIEWER_VERSION:-$(node -p 'require("./package.json").version')}"
+GIT_COMMIT="${GIT_COMMIT:-$(git rev-parse --short=12 HEAD 2>/dev/null || printf 'unknown')}"
+case "$BASE_PATH" in
+  */aiale-dev) DEPLOYMENT_CHANNEL="${DEPLOYMENT_CHANNEL:-dev}"; DEPLOYMENT_BRANCH="${DEPLOYMENT_BRANCH:-deploy/aiale-dev}" ;;
+  */aiale-06-25-2026) DEPLOYMENT_CHANNEL="${DEPLOYMENT_CHANNEL:-private}"; DEPLOYMENT_BRANCH="${DEPLOYMENT_BRANCH:-deploy/aiale-private}" ;;
+  */aiale) DEPLOYMENT_CHANNEL="${DEPLOYMENT_CHANNEL:-public}"; DEPLOYMENT_BRANCH="${DEPLOYMENT_BRANCH:-deploy/aiale-public}" ;;
+  *) DEPLOYMENT_CHANNEL="${DEPLOYMENT_CHANNEL:-dev}"; DEPLOYMENT_BRANCH="${DEPLOYMENT_BRANCH:-main}" ;;
+esac
 API_DIR="src/app/api"
 API_STASH=".api_stash_$$"
 
@@ -43,10 +51,14 @@ trap restore EXIT
 echo "stashing $API_DIR (route handlers can't be static-exported) ..."
 mv "$API_DIR" "$API_STASH"
 
-echo "building static export  basePath=$BASE_PATH ..."
+echo "building static export  basePath=$BASE_PATH channel=$DEPLOYMENT_CHANNEL version=$VIEWER_VERSION commit=$GIT_COMMIT ..."
 STATIC_EXPORT=1 \
 NEXT_PUBLIC_STATIC=1 \
 NEXT_PUBLIC_BASE_PATH="$BASE_PATH" \
+NEXT_PUBLIC_VIEWER_VERSION="$VIEWER_VERSION" \
+NEXT_PUBLIC_DEPLOYMENT_CHANNEL="$DEPLOYMENT_CHANNEL" \
+NEXT_PUBLIC_DEPLOYMENT_BRANCH="$DEPLOYMENT_BRANCH" \
+NEXT_PUBLIC_GIT_COMMIT="$GIT_COMMIT" \
   npx next build
 
 echo

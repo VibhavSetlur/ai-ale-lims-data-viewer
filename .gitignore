@@ -81,6 +81,8 @@ public/data/*.json
 public/data/*.json.gz
 public/data/manifest.json
 
-# agent-rules symlinks (point to CLAUDE.md; not for publication)
+# local agent rules and private writing handoffs (not for publication)
+CLAUDE.md
 AGENTS.md
 GEMINI.md
+/docs/MANUSCRIPT_INTEGRATION.md

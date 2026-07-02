@@ -1,4 +1,5 @@
 import Dashboard from '@/components/Dashboard';
+import { getBuildInfo } from '@/lib/buildInfo';
 
 // In the STATIC build there is no server/DB at render time, so we skip the
 // server-side table fetch entirely and let the client hydrate from the pre-baked
@@ -23,9 +24,10 @@ export default async function Home() {
   const tables = await getInitialTables();
   // Counts are populated by the client after mount (via the data source) — keeps
   // initial render fast on large DBs.
+  const buildInfo = getBuildInfo();
   return (
     <main className="h-screen w-full flex flex-col overflow-hidden">
-      <Dashboard initialTables={tables} />
+      <Dashboard initialTables={tables} buildInfo={buildInfo} />
     </main>
   );
 }
