@@ -5,7 +5,7 @@ import {
   CheckSquare, Square, Search, X, AlertCircle, FlaskConical, GitCompare, RefreshCw,
   ArrowUpDown, ArrowUp, ArrowDown, ArrowRight, Filter, Download, Info,
   ChevronDown, ChevronRight, ChevronUp, Eye, EyeOff, FoldVertical, UnfoldVertical,
-  BarChart3, TrendingUp, Dna,
+  BarChart3, TrendingUp, Dna, ExternalLink, Layers,
 } from 'lucide-react';
 import BarcodeCharts from './BarcodeCharts';
 import { fetchData, IS_STATIC } from '../lib/dataSource';
@@ -482,12 +482,13 @@ export default function MutationExplorer() {
     const onNav = (e: Event) => {
       const detail = (e as CustomEvent).detail as { tab?: Tab } | undefined;
       if (detail?.tab && (detail.tab === 'samples' || detail.tab === 'compare' || detail.tab === 'copynumber' || detail.tab === 'barcodes')) {
+        if (detail.tab === 'barcodes' && data?.stats?.hasBarcodes !== true) return;
         setTab(detail.tab);
       }
     };
     window.addEventListener('aiale:navigate', onNav as EventListener);
     return () => window.removeEventListener('aiale:navigate', onNav as EventListener);
-  }, []);
+  }, [data?.stats?.hasBarcodes]);
 
   useEffect(() => {
     try {
@@ -709,6 +710,7 @@ export default function MutationExplorer() {
             search={search}
             setSearch={setSearch}
             loading={loading}
+            onCompareSelected={() => setTab('compare')}
           />
         </div>
         <div className={cn('flex-1 min-h-0 flex flex-col', tab === 'compare' ? '' : 'hidden')}>
@@ -814,11 +816,12 @@ function ChipRow({
 }
 
 function SampleSelectionPanel({
-  samples, mutations, selected, setSelected, search, setSearch, loading,
+  samples, mutations, selected, setSelected, search, setSearch, loading, onCompareSelected,
 }: {
   samples: MutationSample[]; mutations: MutationRow[];
   selected: Set<string>; setSelected: (s: Set<string>) => void;
   search: string; setSearch: (s: string) => void; loading: boolean;
+  onCompareSelected: () => void;
 }) {
   const [filters, setFilters] = useState<SampleFilters>(EMPTY_SAMPLE_FILTERS);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
@@ -828,6 +831,8 @@ function SampleSelectionPanel({
   const [growthCurveSample, setGrowthCurveSample] = useState<MutationSample | null>(null);
   // The sample whose NAME was clicked; drives the rich sample-detail modal.
   const [detailSample, setDetailSample] = useState<MutationSample | null>(null);
+  const [detailDonorDna, setDetailDonorDna] = useState<string | null>(null);
+  const [detailStrain, setDetailStrain] = useState<string | null>(null);
 
   // Rehydrate filter + collapse state from localStorage.
   useEffect(() => {
@@ -1029,6 +1034,15 @@ function SampleSelectionPanel({
       const next = arr.includes(v) ? arr.filter(x => x !== v) : [...arr, v];
       return { ...prev, chips: { ...prev.chips, [k]: next } };
     });
+  };
+  const filterToFacet = (k: ChipKey, v: string) => {
+    setFilters(prev => ({ ...prev, chips: { ...prev.chips, [k]: [v] }, selectedOnly: false }));
+    setSearch('');
+  };
+  const selectFacetSamples = (k: 'donor_dna' | 'strain', v: string, compare = false) => {
+    const ids = samples.filter(s => (k === 'donor_dna' ? s.donor_dna : s.strain) === v).map(s => s.id);
+    setSelected(new Set(ids));
+    if (compare && ids.length > 0) onCompareSelected();
   };
   const clearChip = (k: ChipKey) => {
     setFilters(prev => ({ ...prev, chips: { ...prev.chips, [k]: [] } }));
@@ -1257,8 +1271,32 @@ function SampleSelectionPanel({
                         </td>
                         <td className="px-2 py-1 text-[var(--text-soft)]">{s.experiment}</td>
                         <td className="px-2 py-1 text-[var(--text-soft)]">{s.replicate ?? ''}</td>
-                        <td className="px-2 py-1 text-[var(--text-soft)]">{s.donor_dna ?? ''}</td>
-                        <td className="px-2 py-1 text-[var(--text-soft)]">{s.strain ?? ''}</td>
+                        <td className="px-2 py-1 text-[var(--text-soft)]">
+                          {s.donor_dna ? (
+                            <button
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); setDetailDonorDna(s.donor_dna ?? null); }}
+                              className="inline-flex items-center gap-1 max-w-[220px] text-left font-mono hover:text-[var(--accent-600)] hover:underline decoration-dotted underline-offset-2"
+                              title="Open donor DNA detail"
+                            >
+                              <Dna className="w-3 h-3 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                              <span className="truncate">{s.donor_dna}</span>
+                            </button>
+                          ) : ''}
+                        </td>
+                        <td className="px-2 py-1 text-[var(--text-soft)]">
+                          {s.strain ? (
+                            <button
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); setDetailStrain(s.strain ?? null); }}
+                              className="inline-flex items-center gap-1 max-w-[180px] text-left font-mono hover:text-[var(--accent-600)] hover:underline decoration-dotted underline-offset-2"
+                              title="Open strain detail"
+                            >
+                              <FlaskConical className="w-3 h-3 shrink-0 text-violet-600 dark:text-violet-400" />
+                              <span className="truncate">{s.strain}</span>
+                            </button>
+                          ) : ''}
+                        </td>
                         <td className="px-2 py-1 text-[var(--text-soft)]">{s.condition ?? ''}</td>
                         <td className="px-2 py-1 text-right tabular-nums text-[var(--text)]">{s.transfer ?? ''}</td>
                         <td className="px-2 py-1 text-right tabular-nums">
@@ -1290,9 +1328,34 @@ function SampleSelectionPanel({
       {detailSample && (
         <SampleDetailModal
           sample={detailSample}
+          mutations={mutations}
           allMutationCount={mutationCountBySample.get(detailSample.id) ?? 0}
           onClose={() => setDetailSample(null)}
           onOpenGrowth={(s) => setGrowthCurveSample(s)}
+        />
+      )}
+      {detailDonorDna && (
+        <DonorDnaDetailModal
+          donorDna={detailDonorDna}
+          samples={samples}
+          mutations={mutations}
+          onClose={() => setDetailDonorDna(null)}
+          onFilter={() => filterToFacet('donor_dna', detailDonorDna)}
+          onSelect={() => selectFacetSamples('donor_dna', detailDonorDna)}
+          onCompare={() => selectFacetSamples('donor_dna', detailDonorDna, true)}
+          onOpenGrowth={(s) => { setDetailDonorDna(null); setGrowthCurveSample(s); }}
+        />
+      )}
+      {detailStrain && (
+        <StrainDetailModal
+          strain={detailStrain}
+          samples={samples}
+          mutations={mutations}
+          onClose={() => setDetailStrain(null)}
+          onFilter={() => filterToFacet('strain', detailStrain)}
+          onSelect={() => selectFacetSamples('strain', detailStrain)}
+          onCompare={() => selectFacetSamples('strain', detailStrain, true)}
+          onOpenGrowth={(s) => { setDetailStrain(null); setGrowthCurveSample(s); }}
         />
       )}
     </div>
@@ -1338,6 +1401,7 @@ function ComparativePanel({
   const [growthCurveSample, setGrowthCurveSample] = useState<MutationSample | null>(null);
   // The sample whose column-header name was clicked; drives the sample-detail modal.
   const [detailSample, setDetailSample] = useState<MutationSample | null>(null);
+  const [detailGroup, setDetailGroup] = useState<{ levelKey: GroupLevelKey; levelLabel: string; label: string; rows: MutationSample[] } | null>(null);
   const heatmapFigureRef = useRef<HTMLDivElement | null>(null);
   const [filtersHydrated, setFiltersHydrated] = useState(false);
 
@@ -1606,7 +1670,7 @@ function ComparativePanel({
   // Built from visibleSamples so hidden columns drop out and parent bands
   // collapse when every member is hidden.
   const columnBands = useMemo(() => {
-    interface BandCell { key: string; label: string; colCount: number }
+    interface BandCell { key: string; label: string; colCount: number; rows: MutationSample[]; fullRows: MutationSample[] }
     // For each band level, walk visibleSamples and start a new cell whenever the
     // composite key (this level + all outer levels) changes, so nesting is honored.
     return groupOrder.map((levelKey, levelIdx) => {
@@ -1620,16 +1684,18 @@ function ComparativePanel({
         const last = cells[cells.length - 1];
         if (last && composite === prevComposite) {
           last.colCount++;
+          last.rows.push(s);
         } else {
           const raw = groupValue(s, levelKey);
-          cells.push({ key: `${levelKey}:${colIdx}:${composite}`, label: raw, colCount: 1 });
+          const fullRows = selectedSamples.filter(full => groupOrder.slice(0, levelIdx + 1).map(k => groupValue(full, k)).join('||') === composite);
+          cells.push({ key: `${levelKey}:${composite}`, label: raw, colCount: 1, rows: [s], fullRows });
         }
         prevComposite = composite;
       });
       const level = GROUP_LEVEL_BY_KEY.get(levelKey);
       return { levelKey, levelLabel: level ? level.label : levelKey, cells };
     });
-  }, [visibleSamples, groupOrder]);
+  }, [visibleSamples, selectedSamples, groupOrder]);
 
   // Grouping-level controls: move a level up/down within the active order,
   // disable it (remove from order), or enable it (append to the order).
@@ -1961,14 +2027,25 @@ function ComparativePanel({
                   <th
                     key={cell.key}
                     colSpan={cell.colCount}
+                    onClick={() => setDetailGroup({ levelKey: band.levelKey, levelLabel: band.levelLabel, label: cell.label || '—', rows: cell.fullRows })}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        setDetailGroup({ levelKey: band.levelKey, levelLabel: band.levelLabel, label: cell.label || '—', rows: cell.fullRows });
+                      }
+                    }}
+                    tabIndex={0}
+                    role="button"
                     className={cn(
-                      'border-b border-l border-slate-200 dark:border-gray-700 px-2 py-1 text-[11px] whitespace-nowrap text-center',
+                      'border-b border-l border-slate-200 dark:border-gray-700 px-2 py-1 text-[11px] whitespace-nowrap text-center cursor-pointer hover:bg-blue-50 dark:hover:bg-blue-900/20',
                       bandIdx === 0
                         ? 'bg-slate-100 dark:bg-gray-800 font-semibold text-slate-700 dark:text-gray-200'
                         : 'bg-slate-50 dark:bg-gray-900 font-medium text-slate-600 dark:text-gray-300'
                     )}
-                  >
-                    {cell.label || '—'}
+                    title={`Open ${band.levelLabel} group details (${cell.rows.length} visible of ${cell.fullRows.length} selected sample${cell.fullRows.length === 1 ? '' : 's'})`}
+                    >
+                      {cell.label || '—'}
+
                   </th>
                 ))}
               </tr>
@@ -1988,9 +2065,11 @@ function ComparativePanel({
                       title={`${s.name}\nOpen sample detail`}
                     >{s.name}</button>
                     <button
+                      type="button"
                       onClick={() => { const next = new Set(selected); next.delete(s.id); setSelected(next); }}
                       className="text-slate-300 dark:text-gray-600 hover:text-red-500"
                       title="Remove from comparison"
+                      aria-label={`Remove ${s.name} from comparison`}
                     >
                       <X className="w-3 h-3" />
                     </button>
@@ -2087,15 +2166,15 @@ function ComparativePanel({
                 key={m.id}
                 className={cn(
                   'border-b border-slate-100 dark:border-gray-700/60',
-                  isChecked
-                    ? 'bg-amber-50/80 dark:bg-amber-900/20 outline outline-2 -outline-offset-2 outline-amber-400 dark:outline-amber-500'
-                    : 'hover:bg-slate-50/60 dark:hover:bg-gray-700/30'
+                  isChecked ? 'bg-amber-50/80 dark:bg-amber-900/20' : 'hover:bg-slate-50/60 dark:hover:bg-gray-700/30'
                 )}
               >
                 <th
                   className={cn(
                     'sticky left-0 z-20 border-r border-slate-200 dark:border-gray-700 px-2 py-1 text-left whitespace-nowrap min-w-[200px] max-w-[280px]',
-                    isChecked ? 'bg-amber-50 dark:bg-amber-950' : 'bg-white dark:bg-gray-800'
+                    isChecked
+                      ? 'bg-amber-50 dark:bg-amber-950 border-t-2 border-b-2 border-l-2 border-r-2 !border-t-amber-400 !border-b-amber-400 !border-l-amber-400 !border-r-amber-400 dark:!border-t-amber-500 dark:!border-b-amber-500 dark:!border-l-amber-500 dark:!border-r-amber-500'
+                      : 'bg-white dark:bg-gray-800'
                   )}
                 >
                   <div className="flex items-start gap-1.5">
@@ -2127,7 +2206,7 @@ function ComparativePanel({
                     </button>
                   </div>
                 </th>
-                {visibleSamples.map(s => {
+                {visibleSamples.map((s, sampleIdx) => {
                   const v = m.values[s.id];
                   const hasVal = typeof v === 'number' && !Number.isNaN(v);
                   // PROVIDED: this mutation was supplied as donor DNA in this sample's
@@ -2148,6 +2227,8 @@ function ComparativePanel({
                       style={providedStyle}
                       className={cn(
                         'border-l border-slate-100 dark:border-gray-700/60 px-1.5 py-1 text-center tabular-nums text-[11.5px] relative',
+                        isChecked && 'border-t-2 border-b-2 border-l-2 !border-t-amber-400 !border-b-amber-400 !border-l-amber-400 dark:!border-t-amber-500 dark:!border-b-amber-500 dark:!border-l-amber-500',
+                        isChecked && sampleIdx === visibleSamples.length - 1 && 'border-r-2 !border-r-amber-400 dark:!border-r-amber-500',
                         !hasVal && !provided && 'text-slate-300 dark:text-gray-600 bg-slate-50/50 dark:bg-gray-800/40'
                       )}
                       title={
@@ -2167,6 +2248,27 @@ function ComparativePanel({
           </tbody>
         </table>
       </div>
+      {detailGroup && (
+        <CompareGroupDetailModal
+          group={detailGroup}
+          mutations={mutations}
+          selected={selected}
+          onClose={() => setDetailGroup(null)}
+          onSelectGroup={() => {
+            const next = new Set(selected);
+            for (const s of detailGroup.rows) next.add(s.id);
+            setSelected(next);
+            setDetailGroup(null);
+          }}
+          onRemoveGroup={() => {
+            const next = new Set(selected);
+            for (const s of detailGroup.rows) next.delete(s.id);
+            setSelected(next);
+            setDetailGroup(null);
+          }}
+          onOpenGrowth={(s) => { setDetailGroup(null); setGrowthCurveSample(s); }}
+        />
+      )}
       {detailMutation && (
         <MutationDetailModal
           mutation={detailMutation}
@@ -2185,6 +2287,7 @@ function ComparativePanel({
       {detailSample && (
         <SampleDetailModal
           sample={detailSample}
+          mutations={mutations}
           allMutationCount={mutationCountBySample.get(detailSample.id) ?? 0}
           onClose={() => setDetailSample(null)}
           onOpenGrowth={(s) => setGrowthCurveSample(s)}
@@ -2827,6 +2930,387 @@ function GrowthCurveModal({
   );
 }
 
+type FacetSummary = {
+  rows: MutationSample[];
+  experiments: { value: string; count: number }[];
+  strains: { value: string; count: number }[];
+  donors: { value: string; count: number }[];
+  conditions: { value: string; count: number }[];
+  replicates: { value: string; count: number }[];
+  transfers: number[];
+  growthCount: number;
+  mutationRows: { mutation: MutationRow; present: number; provided: number; maxValue: number; sequence: string }[];
+  providedRows: { mutation: MutationRow; present: number; provided: number; maxValue: number; sequence: string }[];
+};
+
+function countValues(rows: MutationSample[], get: (s: MutationSample) => string | undefined): { value: string; count: number }[] {
+  const m = new Map<string, number>();
+  for (const s of rows) {
+    const v = get(s);
+    if (!v) continue;
+    m.set(v, (m.get(v) ?? 0) + 1);
+  }
+  return [...m.entries()].map(([value, count]) => ({ value, count })).sort((a, b) => b.count - a.count || a.value.localeCompare(b.value));
+}
+
+function mutationSequenceSummary(m: MutationRow): string {
+  const d = m.detail;
+  if (!d) return '';
+  const parts = [
+    d.ref_seq || d.new_seq ? `${d.ref_seq || '?'} -> ${d.new_seq || '?'}` : '',
+    d.codon_ref_seq || d.codon_new_seq ? `codon ${d.codon_ref_seq || '?'} -> ${d.codon_new_seq || '?'}` : '',
+    d.aa_ref_seq || d.aa_new_seq ? `aa ${d.aa_ref_seq || '?'}${d.aa_position ?? '?'}${d.aa_new_seq || '?'}` : '',
+    d.repeat_seq ? `repeat ${d.repeat_seq}` : '',
+  ].filter(Boolean);
+  return parts.join(' | ');
+}
+
+function buildFacetSummary(rows: MutationSample[], mutations: MutationRow[]): FacetSummary {
+  const ids = new Set(rows.map(s => s.id));
+  const mutationRows = mutations
+    .map(m => {
+      let present = 0;
+      let maxValue = 0;
+      for (const [sid, v] of Object.entries(m.values)) {
+        if (!ids.has(sid) || typeof v !== 'number' || v <= 0) continue;
+        present++;
+        if (v > maxValue) maxValue = v;
+      }
+      let provided = 0;
+      for (const sid of m.providedIn ?? []) if (ids.has(sid)) provided++;
+      return { mutation: m, present, provided, maxValue, sequence: mutationSequenceSummary(m) };
+    })
+    .filter(r => r.present > 0 || r.provided > 0)
+    .sort((a, b) => b.provided - a.provided || b.present - a.present || b.maxValue - a.maxValue || a.mutation.gene.localeCompare(b.mutation.gene));
+  return {
+    rows,
+    experiments: countValues(rows, s => s.experiment),
+    strains: countValues(rows, s => s.strain),
+    donors: countValues(rows, s => s.donor_dna),
+    conditions: countValues(rows, s => s.condition),
+    replicates: countValues(rows, s => s.replicate),
+    transfers: [...new Set(rows.map(s => s.transfer).filter((v): v is number => typeof v === 'number'))].sort((a, b) => a - b),
+    growthCount: rows.filter(s => (s.growth_curve?.length ?? 0) >= 2).length,
+    mutationRows,
+    providedRows: mutationRows.filter(r => r.provided > 0),
+  };
+}
+
+function SummaryChips({ label, rows, empty = 'none' }: { label: string; rows: { value: string; count: number }[]; empty?: string }) {
+  return (
+    <div className="rounded border border-[var(--border)] bg-[var(--surface-2)] p-2">
+      <div className="text-[9.5px] uppercase tracking-wide text-[var(--text-faint)] mb-1">{label}</div>
+      <div className="flex flex-wrap gap-1">
+        {rows.length ? rows.slice(0, 18).map(r => (
+          <span key={r.value} className="px-1.5 py-0.5 rounded bg-[var(--surface-3)] border border-[var(--border)] text-[10.5px]">
+            <span className="font-mono text-[var(--text)]">{r.value}</span> <span className="text-[var(--text-faint)] tabular-nums">{r.count}</span>
+          </span>
+        )) : <span className="text-[11px] text-[var(--text-faint)] italic">{empty}</span>}
+        {rows.length > 18 && <span className="text-[10.5px] text-[var(--text-faint)]">+{rows.length - 18} more</span>}
+      </div>
+    </div>
+  );
+}
+
+function FacetActionBar({ onFilter, onSelect, onCompare, count }: { onFilter: () => void; onSelect: () => void; onCompare: () => void; count: number }) {
+  return (
+    <div className="flex flex-wrap gap-2">
+      <button onClick={onFilter} className="lims-btn lims-btn-ghost !text-[11px]">Filter table</button>
+      <button onClick={onSelect} className="lims-btn lims-btn-ghost !text-[11px]">Select {count}</button>
+      <button onClick={onCompare} disabled={count === 0} className="lims-btn lims-btn-primary !text-[11px] disabled:opacity-50">Compare selected</button>
+    </div>
+  );
+}
+
+function SequenceAvailabilityPanel({ kind, rows, checked }: { kind: 'donor DNA' | 'strain'; rows: FacetSummary['mutationRows']; checked: string[] }) {
+  const withSeq = rows.filter(r => r.sequence).slice(0, 12);
+  return (
+    <ModalSection title="Sequence" hint="mutation-level snippets only">
+      <div className="space-y-2 text-[12px] text-[var(--text-soft)]">
+        <div className="rounded border border-amber-200 dark:border-amber-800 bg-amber-50/70 dark:bg-amber-900/20 px-3 py-2 text-amber-800 dark:text-amber-200">
+          Full {kind} construct/genome sequence is not exposed by the curated mutations API used by this view. This panel can only show mutation-level sequence fields already present on mutation rows: {checked.map(c => <span key={c} className="font-mono">{c}</span>).reduce<React.ReactNode[]>((acc, cur, i) => i === 0 ? [cur] : [...acc, ', ', cur], [])}.
+        </div>
+        {withSeq.length > 0 ? (
+          <div>
+            <div className="text-[11px] text-[var(--text-faint)] mb-1">Mutation-level sequence snippets available in this group:</div>
+            <div className="max-h-40 overflow-y-auto rounded border border-[var(--border)] divide-y divide-[var(--border)]">
+              {withSeq.map(r => (
+                <div key={r.mutation.id} className="px-2 py-1.5 flex items-start gap-2">
+                  <span className="font-mono text-[11px] text-[var(--text)] min-w-0 flex-1 truncate">{r.mutation.gene} / {r.mutation.variant}</span>
+                  <span className="font-mono text-[11px] text-[var(--text-soft)] text-right">{r.sequence}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : <div className="text-[var(--text-faint)] italic">No mutation-level sequence snippets are present for this group either.</div>}
+      </div>
+    </ModalSection>
+  );
+}
+
+function MutationMiniTable({ rows, sampleCount, empty }: { rows: FacetSummary['mutationRows']; sampleCount: number; empty: string }) {
+  const shown = rows.slice(0, 20);
+  if (shown.length === 0) return <div className="text-[12px] text-[var(--text-faint)] italic">{empty}</div>;
+  return (
+    <div className="max-h-64 overflow-y-auto rounded border border-[var(--border)]">
+      <table className="w-full text-[11.5px]">
+        <thead className="sticky top-0 bg-[var(--surface-2)] text-[var(--text-soft)]">
+          <tr>
+            <th className="px-2 py-1 text-left">Mutation</th>
+            <th className="px-2 py-1 text-right">Present</th>
+            <th className="px-2 py-1 text-right">Provided</th>
+            <th className="px-2 py-1 text-right">Max</th>
+          </tr>
+        </thead>
+        <tbody>
+          {shown.map(r => (
+            <tr key={r.mutation.id} className="border-t border-[var(--border)]">
+              <td className="px-2 py-1 min-w-0">
+                <div className="font-mono text-[var(--text)] truncate">{r.mutation.gene} / {r.mutation.variant}</div>
+                <div className="text-[10px] text-[var(--text-faint)] truncate">{r.mutation.type}{r.mutation.gene_product ? ` | ${r.mutation.gene_product}` : ''}</div>
+              </td>
+              <td className="px-2 py-1 text-right tabular-nums">{r.present}/{sampleCount}</td>
+              <td className="px-2 py-1 text-right tabular-nums">{r.provided}</td>
+              <td className="px-2 py-1 text-right tabular-nums">{r.maxValue.toFixed(r.maxValue <= 1 ? 3 : 2)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {rows.length > shown.length && <div className="px-2 py-1 text-[10.5px] text-[var(--text-faint)] border-t border-[var(--border)]">Showing first {shown.length} of {rows.length}. Use Comparative View for the full list.</div>}
+    </div>
+  );
+}
+
+function FacetSamplesTable({ rows, onOpenGrowth }: { rows: MutationSample[]; onOpenGrowth: (s: MutationSample) => void }) {
+  return (
+    <div className="max-h-56 overflow-y-auto rounded border border-[var(--border)]">
+      <table className="w-full text-[11.5px]">
+        <thead className="sticky top-0 bg-[var(--surface-2)] text-[var(--text-soft)]">
+          <tr>
+            <th className="px-2 py-1 text-left">Sample</th>
+            <th className="px-2 py-1 text-left">Experiment</th>
+            <th className="px-2 py-1 text-left">Rep</th>
+            <th className="px-2 py-1 text-right">T</th>
+            <th className="px-2 py-1 text-right">Growth</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.slice(0, 80).map(s => (
+            <tr key={s.id} className="border-t border-[var(--border)]">
+              <td className="px-2 py-1 font-mono text-[var(--text)]">{s.name}</td>
+              <td className="px-2 py-1 text-[var(--text-soft)]">{s.experiment}</td>
+              <td className="px-2 py-1 text-[var(--text-soft)]">{s.replicate ?? ''}</td>
+              <td className="px-2 py-1 text-right tabular-nums">{s.transfer ?? ''}</td>
+              <td className="px-2 py-1 text-right">
+                {(s.growth_curve?.length ?? 0) >= 2 ? <button onClick={() => onOpenGrowth(s)} className="text-emerald-600 dark:text-emerald-400 hover:underline">open</button> : <span className="text-[var(--text-faint)]">none</span>}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {rows.length > 80 && <div className="px-2 py-1 text-[10.5px] text-[var(--text-faint)] border-t border-[var(--border)]">Showing first 80 of {rows.length} samples.</div>}
+    </div>
+  );
+}
+
+function CompareGroupDetailModal({
+  group, mutations, selected, onClose, onSelectGroup, onRemoveGroup, onOpenGrowth,
+}: {
+  group: { levelKey: GroupLevelKey; levelLabel: string; label: string; rows: MutationSample[] };
+  mutations: MutationRow[];
+  selected: Set<string>;
+  onClose: () => void;
+  onSelectGroup: () => void;
+  onRemoveGroup: () => void;
+  onOpenGrowth: (s: MutationSample) => void;
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+  const summary = useMemo(() => buildFacetSummary(group.rows, mutations), [group.rows, mutations]);
+  const selectedCount = group.rows.reduce((acc, s) => acc + (selected.has(s.id) ? 1 : 0), 0);
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" onClick={onClose}>
+      <div className="bg-[var(--surface)] text-[var(--text)] border border-[var(--border)] rounded-lg shadow-2xl w-full max-w-5xl max-h-[88vh] overflow-y-auto" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="compare-group-title">
+        <div className="sticky top-0 z-10 bg-[var(--surface)] border-b border-[var(--border)] px-5 py-3 flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <Layers className="w-4 h-4 text-blue-600 shrink-0" />
+              <span id="compare-group-title" className="font-semibold">{group.levelLabel}</span>
+              <span className="font-mono text-[16px] break-all">{group.label}</span>
+            </div>
+            <div className="mt-1 text-[11px] text-[var(--text-soft)]">{group.rows.length} sample{group.rows.length === 1 ? '' : 's'} · {selectedCount} currently selected</div>
+          </div>
+          <button onClick={onClose} className="shrink-0 p-1 rounded hover:bg-[var(--surface-3)] text-[var(--text-soft)] hover:text-[var(--text)]" title="Close (Esc)"><X className="w-5 h-5" /></button>
+        </div>
+        <div className="px-5 py-4 space-y-4">
+          <div className="flex flex-wrap gap-2">
+            <button onClick={onSelectGroup} className="lims-btn lims-btn-primary !text-[11px]">Select group</button>
+            <button onClick={onRemoveGroup} className="lims-btn lims-btn-ghost !text-[11px]">Remove group</button>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+            <StatCard label="Samples" value={String(group.rows.length)} />
+            <StatCard label="Selected" value={`${selectedCount}/${group.rows.length}`} />
+            <StatCard label="Mutations" value={String(summary.mutationRows.length)} />
+            <StatCard label="Provided" value={String(summary.providedRows.length)} />
+            <StatCard label="Growth curves" value={`${summary.growthCount}/${group.rows.length}`} />
+          </div>
+          <div className="grid md:grid-cols-2 gap-2">
+            <SummaryChips label="Experiments" rows={summary.experiments} />
+            <SummaryChips label="Strains" rows={summary.strains} />
+            <SummaryChips label="Donor DNA" rows={summary.donors} />
+            <SummaryChips label="Conditions" rows={summary.conditions} />
+          </div>
+          <ModalSection title="Mutation summary" hint="observed or provided mutation rows across this group">
+            <MutationMiniTable rows={summary.mutationRows} sampleCount={group.rows.length} empty="No mutation rows are present for this group in the loaded dataset." />
+          </ModalSection>
+          <ModalSection title="Samples" hint="matching columns in the Comparative View">
+            <FacetSamplesTable rows={sortSamples(group.rows)} onOpenGrowth={onOpenGrowth} />
+          </ModalSection>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DonorDnaDetailModal({
+  donorDna, samples, mutations, onClose, onFilter, onSelect, onCompare, onOpenGrowth,
+}: {
+  donorDna: string;
+  samples: MutationSample[];
+  mutations: MutationRow[];
+  onClose: () => void;
+  onFilter: () => void;
+  onSelect: () => void;
+  onCompare: () => void;
+  onOpenGrowth: (s: MutationSample) => void;
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+  const rows = useMemo(() => sortSamples(samples.filter(s => s.donor_dna === donorDna)), [samples, donorDna]);
+  const summary = useMemo(() => buildFacetSummary(rows, mutations), [rows, mutations]);
+  const growthMetrics = useMemo(() => rows.map(s => computeGrowthMetrics(s.growth_curve)).filter(m => m.maxOD !== null), [rows]);
+  const avgMaxOD = growthMetrics.length ? growthMetrics.reduce((a, m) => a + (m.maxOD ?? 0), 0) / growthMetrics.length : null;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" onClick={onClose} role="dialog" aria-modal="true">
+      <div className="bg-[var(--surface)] text-[var(--text)] border border-[var(--border)] rounded-lg shadow-2xl w-full max-w-5xl max-h-[88vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="sticky top-0 z-10 bg-[var(--surface)] border-b border-[var(--border)] px-5 py-3 flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 flex-wrap"><Dna className="w-4 h-4 text-emerald-600" /><span className="font-mono text-[18px] font-semibold break-all">{donorDna}</span></div>
+            <div className="mt-1 text-[11px] text-[var(--text-soft)]">Donor DNA context across {rows.length} sample{rows.length === 1 ? '' : 's'}</div>
+          </div>
+          <button onClick={onClose} className="shrink-0 p-1 rounded hover:bg-[var(--surface-3)] text-[var(--text-soft)] hover:text-[var(--text)]" title="Close (Esc)"><X className="w-5 h-5" /></button>
+        </div>
+        <div className="px-5 py-4 space-y-4">
+          <FacetActionBar onFilter={onFilter} onSelect={onSelect} onCompare={onCompare} count={rows.length} />
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+            <StatCard label="Samples" value={String(rows.length)} />
+            <StatCard label="Experiments" value={String(summary.experiments.length)} />
+            <StatCard label="Strains" value={String(summary.strains.length)} />
+            <StatCard label="Provided muts" value={String(summary.providedRows.length)} />
+            <StatCard label="Growth curves" value={`${summary.growthCount}/${rows.length}`} />
+          </div>
+          <div className="grid md:grid-cols-2 gap-2">
+            <SummaryChips label="Experiments" rows={summary.experiments} />
+            <SummaryChips label="Strains" rows={summary.strains} />
+            <SummaryChips label="Conditions" rows={summary.conditions} />
+            <SummaryChips label="Replicates" rows={summary.replicates} />
+          </div>
+          <ModalSection title="Growth coverage" hint="descriptive only">
+            <div className="text-[12px] text-[var(--text-soft)]">{summary.growthCount} of {rows.length} samples have numeric OD curves. Average max OD: <span className="font-mono text-[var(--text)]">{fmtMetric(avgMaxOD, 3)}</span>.</div>
+          </ModalSection>
+          <ModalSection title="Provided mutation summary" hint="from donor DNA matching already present in the mutation dataset">
+            <MutationMiniTable rows={summary.providedRows} sampleCount={rows.length} empty="No mutations in this loaded dataset are marked as provided by this donor DNA." />
+          </ModalSection>
+          <SequenceAvailabilityPanel kind="donor DNA" rows={summary.providedRows.length ? summary.providedRows : summary.mutationRows} checked={['Mutation.detail.ref_seq/new_seq', 'Mutation.detail.codon_ref_seq/codon_new_seq', 'Mutation.detail.aa_ref_seq/aa_new_seq']} />
+          <ModalSection title="Samples" hint="matching samples in the current dataset">
+            <FacetSamplesTable rows={rows} onOpenGrowth={onOpenGrowth} />
+          </ModalSection>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StrainDetailModal({
+  strain, samples, mutations, onClose, onFilter, onSelect, onCompare, onOpenGrowth,
+}: {
+  strain: string;
+  samples: MutationSample[];
+  mutations: MutationRow[];
+  onClose: () => void;
+  onFilter: () => void;
+  onSelect: () => void;
+  onCompare: () => void;
+  onOpenGrowth: (s: MutationSample) => void;
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+  const rows = useMemo(() => sortSamples(samples.filter(s => s.strain === strain)), [samples, strain]);
+  const summary = useMemo(() => buildFacetSummary(rows, mutations), [rows, mutations]);
+  const growthMetrics = useMemo(() => rows.map(s => computeGrowthMetrics(s.growth_curve)).filter(m => m.maxOD !== null), [rows]);
+  const avgMaxOD = growthMetrics.length ? growthMetrics.reduce((a, m) => a + (m.maxOD ?? 0), 0) / growthMetrics.length : null;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" onClick={onClose} role="dialog" aria-modal="true">
+      <div className="bg-[var(--surface)] text-[var(--text)] border border-[var(--border)] rounded-lg shadow-2xl w-full max-w-5xl max-h-[88vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="sticky top-0 z-10 bg-[var(--surface)] border-b border-[var(--border)] px-5 py-3 flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 flex-wrap"><FlaskConical className="w-4 h-4 text-violet-600" /><span className="font-mono text-[18px] font-semibold break-all">{strain}</span></div>
+            <div className="mt-1 text-[11px] text-[var(--text-soft)]">Strain context across {rows.length} sample{rows.length === 1 ? '' : 's'}</div>
+          </div>
+          <button onClick={onClose} className="shrink-0 p-1 rounded hover:bg-[var(--surface-3)] text-[var(--text-soft)] hover:text-[var(--text)]" title="Close (Esc)"><X className="w-5 h-5" /></button>
+        </div>
+        <div className="px-5 py-4 space-y-4">
+          <FacetActionBar onFilter={onFilter} onSelect={onSelect} onCompare={onCompare} count={rows.length} />
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+            <StatCard label="Samples" value={String(rows.length)} />
+            <StatCard label="Experiments" value={String(summary.experiments.length)} />
+            <StatCard label="Donor DNAs" value={String(summary.donors.length)} />
+            <StatCard label="Mutations" value={String(summary.mutationRows.length)} />
+            <StatCard label="Growth curves" value={`${summary.growthCount}/${rows.length}`} />
+          </div>
+          <div className="grid md:grid-cols-2 gap-2">
+            <SummaryChips label="Experiments" rows={summary.experiments} />
+            <SummaryChips label="Donor DNA" rows={summary.donors} />
+            <SummaryChips label="Conditions" rows={summary.conditions} />
+            <SummaryChips label="Replicates" rows={summary.replicates} />
+          </div>
+          <ModalSection title="Transfer coverage" hint="sequenced transfer numbers in this loaded dataset">
+            <div className="flex flex-wrap gap-1">{summary.transfers.length ? summary.transfers.map(t => <span key={t} className="px-1.5 py-0.5 rounded bg-[var(--surface-3)] border border-[var(--border)] font-mono text-[11px]">T{t}</span>) : <span className="text-[12px] text-[var(--text-faint)] italic">no transfer values</span>}</div>
+          </ModalSection>
+          <ModalSection title="Growth coverage" hint="descriptive only">
+            <div className="text-[12px] text-[var(--text-soft)]">{summary.growthCount} of {rows.length} samples have numeric OD curves. Average max OD: <span className="font-mono text-[var(--text)]">{fmtMetric(avgMaxOD, 3)}</span>.</div>
+          </ModalSection>
+          <ModalSection title="Mutation summary" hint="observed or provided mutation rows in matching samples">
+            <MutationMiniTable rows={summary.mutationRows} sampleCount={rows.length} empty="No mutation rows are present for this strain in the loaded dataset." />
+          </ModalSection>
+          <SequenceAvailabilityPanel kind="strain" rows={summary.mutationRows} checked={['Mutation.detail.ref_seq/new_seq', 'Mutation.detail.codon_ref_seq/codon_new_seq', 'Mutation.detail.aa_ref_seq/aa_new_seq']} />
+          <ModalSection title="Samples" hint="matching samples in the current dataset">
+            <FacetSamplesTable rows={rows} onOpenGrowth={onOpenGrowth} />
+          </ModalSection>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StatCard({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded border border-[var(--border)] bg-[var(--surface-2)] px-2.5 py-1.5">
+      <div className="text-[9.5px] uppercase tracking-wide text-[var(--text-faint)]">{label}</div>
+      <div className="font-mono text-[15px] font-semibold text-[var(--text)] tabular-nums">{value}</div>
+    </div>
+  );
+}
+
 /* ---- Sample detail modal ---------------------------------------------------
    Rich, interactive popup opened by clicking a sample NAME (the row checkbox /
    rest of the row still toggles selection). Mirrors the MutationDetailModal /
@@ -2836,9 +3320,10 @@ function GrowthCurveModal({
    sample's mutation-call count. Clicking the sparkline chains to the full
    GrowthCurveModal via onOpenGrowth. Self-contained; metrics memoized. */
 function SampleDetailModal({
-  sample, allMutationCount, onClose, onOpenGrowth,
+  sample, mutations, allMutationCount, onClose, onOpenGrowth,
 }: {
   sample: MutationSample;
+  mutations: MutationRow[];
   allMutationCount: number;
   onClose: () => void;
   onOpenGrowth: (s: MutationSample) => void;
@@ -2888,6 +3373,10 @@ function SampleDetailModal({
     { label: 'Lag time', value: fmtMetric(metrics.lagTimeH, 2, ' h') },
     { label: 'AUC', value: fmtMetric(metrics.aucod, 2, ' OD*h') },
   ];
+  const sampleMutationRows = useMemo(() => mutations
+    .map(m => ({ mutation: m, value: m.values[sample.id], provided: !!m.providedIn?.includes(sample.id) }))
+    .filter(r => (typeof r.value === 'number' && r.value > 0) || r.provided)
+    .sort((a, b) => Number(b.provided) - Number(a.provided) || ((typeof b.value === 'number' ? b.value : 0) - (typeof a.value === 'number' ? a.value : 0)) || a.mutation.gene.localeCompare(b.mutation.gene)), [mutations, sample.id]);
 
   // Clicking the embedded sparkline chains to the full growth modal. Simplest:
   // close this modal, then open the growth one (the parent wires onOpenGrowth to
@@ -2900,6 +3389,7 @@ function SampleDetailModal({
       onClick={onClose}
       role="dialog"
       aria-modal="true"
+      aria-labelledby="sample-detail-title"
     >
       <div
         className="bg-[var(--surface)] text-[var(--text)] border border-[var(--border)] rounded-lg shadow-2xl w-full max-w-3xl max-h-[85vh] overflow-y-auto scroll-smooth"
@@ -2910,7 +3400,7 @@ function SampleDetailModal({
           <div className="min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
               <FlaskConical className="w-4 h-4 text-[var(--accent-600)] shrink-0" />
-              <span className="font-mono text-[18px] font-semibold text-[var(--text)] break-all">{sample.name}</span>
+              <span id="sample-detail-title" className="font-mono text-[18px] font-semibold text-[var(--text)] break-all">{sample.name}</span>
             </div>
             <div className="mt-1.5 flex flex-wrap gap-1.5">
               {chips.filter(c => c.value !== undefined && c.value !== null && c.value !== '').map(c => (
@@ -2995,6 +3485,39 @@ function SampleDetailModal({
                 {allMutationCount === 1 ? '1 mutation call in this sample' : `${allMutationCount} mutation calls in this sample`}
               </span>
             </div>
+          </ModalSection>
+
+          <ModalSection title="Sample mutations" hint="observed values plus provided donor-DNA rows for this sample">
+            {sampleMutationRows.length === 0 ? (
+              <div className="text-[12px] text-[var(--text-faint)] italic">No mutation rows are present for this sample in the loaded dataset.</div>
+            ) : (
+              <div className="max-h-64 overflow-y-auto rounded border border-[var(--border)]">
+                <table className="w-full text-[11.5px]">
+                  <thead className="sticky top-0 bg-[var(--surface-2)] text-[var(--text-soft)]">
+                    <tr>
+                      <th className="px-2 py-1 text-left">Mutation</th>
+                      <th className="px-2 py-1 text-left">Type</th>
+                      <th className="px-2 py-1 text-right">Value</th>
+                      <th className="px-2 py-1 text-right">Provided</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sampleMutationRows.slice(0, 80).map(r => (
+                      <tr key={r.mutation.id} className="border-t border-[var(--border)]">
+                        <td className="px-2 py-1 min-w-0">
+                          <div className="font-mono text-[var(--text)] truncate">{r.mutation.gene} / {r.mutation.variant}</div>
+                          {r.mutation.gene_product && <div className="text-[10px] text-[var(--text-faint)] truncate italic">{r.mutation.gene_product}</div>}
+                        </td>
+                        <td className="px-2 py-1 text-[var(--text-soft)]">{r.mutation.type}</td>
+                        <td className="px-2 py-1 text-right tabular-nums">{typeof r.value === 'number' ? formatMetric(r.value, r.mutation.metric) : '—'}</td>
+                        <td className="px-2 py-1 text-right">{r.provided ? <span className="text-amber-600 dark:text-amber-400 font-semibold">yes</span> : ''}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {sampleMutationRows.length > 80 && <div className="px-2 py-1 text-[10.5px] text-[var(--text-faint)] border-t border-[var(--border)]">Showing first 80 of {sampleMutationRows.length}. Use Comparative View for all rows.</div>}
+              </div>
+            )}
           </ModalSection>
         </div>
       </div>
@@ -3362,6 +3885,47 @@ function ProteinSchematic({ info, aaPosition }: { info: GenePosInfo; aaPosition?
   );
 }
 
+const PROJECT_ORGANISM_NCBI_QUERY = 'Acinetobacter baylyi';
+
+function ncbiSearchUrl(query: string): string {
+  return `https://www.ncbi.nlm.nih.gov/search/all/?term=${encodeURIComponent(query)}`;
+}
+
+function ncbiNucleotideUrl(seqId: string): string {
+  return `https://www.ncbi.nlm.nih.gov/nuccore/${encodeURIComponent(seqId)}`;
+}
+
+function looksLikeNcbiAccession(seqId?: string): boolean {
+  if (!seqId) return false;
+  return /^[A-Z]{1,2}_?\d{5,}(\.\d+)?$/.test(seqId.trim());
+}
+
+function mutationNcbiQuery(mutation: MutationRow, d: MutationDetail, posLabel: string): string {
+  return [
+    d.locus_tag,
+    mutation.gene,
+    mutation.gene_product,
+    d.seq_id,
+    posLabel !== 'n/a' ? posLabel : undefined,
+    PROJECT_ORGANISM_NCBI_QUERY,
+  ].filter(Boolean).join(' ');
+}
+
+function ExternalAction({ href, label, title }: { href: string; label: string; title: string }) {
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="inline-flex items-center gap-1.5 px-2 py-1 rounded border border-[var(--border)] bg-[var(--surface-2)] hover:bg-[var(--surface-3)] text-[11px] text-[var(--text)]"
+      title={title}
+    >
+      <ExternalLink className="w-3 h-3" />
+      {label}
+    </a>
+  );
+}
+
 function MutationDetailModal({
   mutation, samples, groupOrder, onClose,
 }: {
@@ -3408,6 +3972,11 @@ function MutationDetailModal({
   }, [d, mutation.position, mutation.gene, snpType]);
 
   const { posStart, posEnd, hasPos, isPoint, gp, isIntergenic, hasCodon, hasAA, isCoding, sizeStr, isIndel, hasRepeat, posLabel } = facts;
+  const ncbiQuery = useMemo(() => mutationNcbiQuery(mutation, d, posLabel), [mutation, d, posLabel]);
+  const seqIdForLink = d.seq_id;
+  const ncbiAccessionHref = looksLikeNcbiAccession(seqIdForLink) && seqIdForLink ? ncbiNucleotideUrl(seqIdForLink) : null;
+  const ncbiSearchHref = ncbiSearchUrl(ncbiQuery || `${mutation.gene} ${mutation.variant}`);
+  const breseqContextHref = 'https://github.com/barricklab/breseq';
 
   // ---- Memoized genome-browser geometry (the heaviest derived object). ----
   const geom = useMemo<GenomeGeom>(() => {
@@ -3561,6 +4130,27 @@ function MutationDetailModal({
         </div>
 
         <div className="px-5 py-4 space-y-4">
+          <ModalSection title="Reference context" hint="external links are generated from fields in this mutation row">
+            <div className="space-y-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1.5 text-[12px]">
+                <div><span className="text-[var(--text-soft)]">Reference seq_id</span> <span className="font-mono text-[var(--text)] break-all">{d.seq_id ?? 'n/a'}</span></div>
+                <div><span className="text-[var(--text-soft)]">Coordinate</span> <span className="font-mono text-[var(--text)]">{posLabel}</span></div>
+                <div><span className="text-[var(--text-soft)]">Gene</span> <span className="font-mono text-[var(--text)] break-all">{mutation.gene || 'n/a'}</span></div>
+                <div><span className="text-[var(--text-soft)]">Locus tag</span> <span className="font-mono text-[var(--text)] break-all">{d.locus_tag ?? 'n/a'}</span></div>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {ncbiAccessionHref && (
+                  <ExternalAction href={ncbiAccessionHref} label="NCBI nucleotide" title={`Open ${d.seq_id} in NCBI Nucleotide`} />
+                )}
+                <ExternalAction href={ncbiSearchHref} label="NCBI search" title={`Search NCBI for: ${ncbiQuery}`} />
+                <ExternalAction href={breseqContextHref} label="breseq docs" title="Open breseq documentation. This dataset does not expose per-run breseq report URLs in the mutation popup yet." />
+              </div>
+              <div className="text-[11px] text-[var(--text-faint)] leading-relaxed">
+                NCBI links are conservative: a direct nucleotide link is shown only when <span className="font-mono">seq_id</span> looks like an accession; otherwise use the search link with gene, locus, product, reference, and coordinate context. The breseq button is documentation/context, not a run-specific report link, because no report URL is exposed in this curated API payload.
+              </div>
+            </div>
+          </ModalSection>
+
           {/* Genome browser track (centerpiece) */}
           <ModalSection
             title="Genome browser"

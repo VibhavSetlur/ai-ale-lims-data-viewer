@@ -34,6 +34,13 @@ interface SeqsamplesJoinRow {
   Sample_Name: string | null;
 }
 
+interface SeqsampleMeta {
+  well: string;
+  sampleName: string;
+  sampleNameSource: 'Seq_samples.Sample_Name' | 'verAB_barcodes.Seqsample';
+  joined: boolean;
+}
+
 // Sample-name convention:
 //   TFMN4.exp2.ACN3788.concX_largeLib_EcorI.1.T3.P
 //   {experiment}.{sub}.{strain}.{library}.{replicate}.T{transfer}.{selection}
@@ -59,6 +66,23 @@ function parseSeqsampleName(name: string): {
   const experiment = parts.slice(0, tIdx - 3).join('.');
   if (Number.isNaN(transfer) || Number.isNaN(replicate)) return null;
   return { experiment, strain, library, replicate, transfer };
+}
+
+function parseSampleName(name: string): {
+  experiment: string;
+  strain: string;
+  library: string;
+  replicate: number;
+} | null {
+  const parts = name.split('.');
+  if (parts.length < 5) return null;
+  const replicate = parseInt(parts[parts.length - 1], 10);
+  if (Number.isNaN(replicate)) return null;
+  const library = parts[parts.length - 2];
+  const strain = parts[parts.length - 3];
+  const experiment = parts.slice(0, parts.length - 3).join('.');
+  if (!experiment || !strain || !library) return null;
+  return { experiment, strain, library, replicate };
 }
 
 async function tableExists(name: string): Promise<boolean> {
@@ -96,7 +120,9 @@ async function tryLimsBarcodes(): Promise<{ charts: BarcodeChart[]; warnings: st
   // newer amplicon orders, so it had 0 well coverage for verAB samples). If a
   // sample still has no well the chart card just omits the well chip.
   const seqsamples = Array.from(new Set(rows.map(r => r.Seqsample))).filter(Boolean);
-  const wellMap = new Map<string, string>();
+  const metaMap = new Map<string, SeqsampleMeta>();
+  let joinFailed = false;
+  let joinReturnedNoRows = false;
   if (seqsamples.length > 0) {
     const ph = seqsamples.map(() => '?').join(',');
     try {
@@ -106,29 +132,63 @@ async function tryLimsBarcodes(): Promise<{ charts: BarcodeChart[]; warnings: st
          WHERE ss.deleted = 0 AND ss."Sequencing_sample" IN (${ph})`,
         seqsamples,
       );
+      joinReturnedNoRows = joined.length === 0;
       for (const j of joined) {
-        if (j.well) wellMap.set(j.Sequencing_sample, j.well);
+        metaMap.set(j.Sequencing_sample, {
+          well: j.well ?? '',
+          sampleName: j.Sample_Name || j.Sequencing_sample,
+          sampleNameSource: j.Sample_Name ? 'Seq_samples.Sample_Name' : 'verAB_barcodes.Seqsample',
+          joined: true,
+        });
       }
-    } catch { /* table missing or other error — proceed without wells */ }
+    } catch { joinFailed = true; }
   }
 
-  // Bucket rows into charts keyed by (experiment, strain, library, replicate).
+  // Bucket rows into charts keyed by biological sample identity. Counts stay from
+  // verAB_barcodes; transfer still comes from Seqsample because Sample_Name is the
+  // base biological sample name and does not include T#/selection.
   const charts = new Map<string, BarcodeChart>();
   let skipped = 0;
+  const fallbackSampleNames = new Set<string>();
+  const missingSeqSampleLinks = new Set<string>();
+  const unparseableSampleNames = new Set<string>();
   for (const r of rows) {
-    const parsed = parseSeqsampleName(r.Seqsample);
-    if (!parsed) { skipped++; continue; }
-    const { experiment, strain, library, replicate, transfer } = parsed;
-    const key = `${experiment}|${strain}|${library}|${replicate}`;
+    const meta = metaMap.get(r.Seqsample) ?? {
+      well: '',
+      sampleName: r.Seqsample,
+      sampleNameSource: 'verAB_barcodes.Seqsample' as const,
+      joined: false,
+    };
+    if (!meta.joined) missingSeqSampleLinks.add(r.Seqsample);
+    if (meta.sampleNameSource !== 'Seq_samples.Sample_Name') fallbackSampleNames.add(r.Seqsample);
+
+    const parsedTransfer = parseSeqsampleName(r.Seqsample);
+    let parsedIdentity = meta.sampleNameSource === 'Seq_samples.Sample_Name'
+      ? parseSampleName(meta.sampleName)
+      : parsedTransfer;
+    if (!parsedIdentity && parsedTransfer) {
+      unparseableSampleNames.add(meta.sampleName);
+      parsedIdentity = parsedTransfer;
+    }
+    if (!parsedIdentity || !parsedTransfer) { skipped++; continue; }
+    const { experiment, strain, library, replicate } = parsedIdentity;
+    const transfer = parsedTransfer.transfer;
+    const key = `${experiment}|${strain}|${library}|${replicate}|${meta.sampleName}`;
     let chart = charts.get(key);
     if (!chart) {
       chart = {
-        well: wellMap.get(r.Seqsample) ?? '',
+        well: meta.well,
+        sampleName: meta.sampleName,
+        sampleNameSource: meta.sampleNameSource,
+        seqsamples: [],
+        transformationLibrary: r.Transformation_library ?? undefined,
+        barcodeSourceTable: 'verAB_barcodes',
         strain, library, replicate, experiment,
         transfers: [], candidates: {},
       };
       charts.set(key, chart);
     }
+    if (!chart.seqsamples?.includes(r.Seqsample)) chart.seqsamples = [...(chart.seqsamples ?? []), r.Seqsample];
     let ti = chart.transfers.indexOf(transfer);
     if (ti === -1) {
       chart.transfers.push(transfer);
@@ -158,13 +218,18 @@ async function tryLimsBarcodes(): Promise<{ charts: BarcodeChart[]; warnings: st
   finalCharts.sort((a, b) =>
     a.experiment.localeCompare(b.experiment) ||
     a.library.localeCompare(b.library) ||
-    a.well.localeCompare(b.well) ||
+    (a.well || '~').localeCompare(b.well || '~') ||
     a.replicate - b.replicate);
 
   const warnings: string[] = [];
+  if (joinFailed) warnings.push('Seq_samples join failed; barcode chart labels fell back to verAB_barcodes.Seqsample.');
+  if (joinReturnedNoRows) warnings.push('Seq_samples join returned zero rows for verAB_barcodes.Seqsample values; labels used Seqsample fallback.');
   if (skipped > 0) warnings.push(`Skipped ${skipped} verAB_barcodes row${skipped === 1 ? '' : 's'} with unparseable Seqsample names.`);
-  if (seqsamples.length > 0 && wellMap.size === 0) {
-    warnings.push('Wet-lab well positions (e.g. B3, C4) are not yet linked from Seq_samples for these amplicon samples — chart labels use library + replicate instead.');
+  if (missingSeqSampleLinks.size > 0) warnings.push(`${missingSeqSampleLinks.size} Seqsample${missingSeqSampleLinks.size === 1 ? '' : 's'} had no Seq_samples match; those labels used Seqsample fallback.`);
+  if (fallbackSampleNames.size > 0) warnings.push(`${fallbackSampleNames.size} Seqsample${fallbackSampleNames.size === 1 ? '' : 's'} used Seqsample fallback because Seq_samples.Sample_Name was missing.`);
+  if (unparseableSampleNames.size > 0) warnings.push(`${unparseableSampleNames.size} Seq_samples.Sample_Name value${unparseableSampleNames.size === 1 ? '' : 's'} could not be parsed; identity fell back to Seqsample.`);
+  if (seqsamples.length > 0 && !finalCharts.some(c => c.well)) {
+    warnings.push('Plate-well positions are null in Seq_samples for these barcode samples; chart labels use sample/library/replicate instead.');
   }
   return { charts: finalCharts, warnings };
 }

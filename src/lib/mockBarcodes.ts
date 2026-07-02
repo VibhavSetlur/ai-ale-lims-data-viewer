@@ -10,6 +10,11 @@
 
 export interface MockBarcodeChart {
   well: string;
+  sampleName?: string;
+  sampleNameSource?: 'Seq_samples.Sample_Name' | 'verAB_barcodes.Seqsample' | 'mock';
+  seqsamples?: string[];
+  transformationLibrary?: string;
+  barcodeSourceTable?: 'verAB_barcodes' | 'mock';
   strain: string;
   library: string;
   replicate: number;

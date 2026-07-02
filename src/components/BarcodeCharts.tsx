@@ -55,6 +55,11 @@ function InfoPopover({ title, children, align = 'left' }: { title: string; child
 
 interface BarcodeChart {
   well: string;
+  sampleName?: string;
+  sampleNameSource?: 'Seq_samples.Sample_Name' | 'verAB_barcodes.Seqsample' | 'mock';
+  seqsamples?: string[];
+  transformationLibrary?: string;
+  barcodeSourceTable?: 'verAB_barcodes' | 'mock';
   strain: string;
   library: string;
   replicate: number;
@@ -62,6 +67,13 @@ interface BarcodeChart {
   transfers: number[];
   candidates: Record<string, number[]>;
 }
+
+type OtherRollupRequest = {
+  chart: BarcodeChart;
+  transfer: number;
+  transferIndex: number;
+  otherCands: string[];
+};
 
 interface BarcodeDataset {
   source: 'mock' | 'lims';
@@ -75,12 +87,21 @@ interface BarcodeDataset {
   warnings: string[];
 }
 
-type ViewMode = 'grid' | 'focus' | 'compare';
+type ViewMode = 'grid' | 'focus' | 'compare' | 'perspectives';
 type ColorMode = 'candidate' | 'partner-a' | 'partner-b';
 type Normalize = 'count' | 'fraction';
 type SortKey = 'natural' | 'totalReads' | 'transfers' | 'candidates' | 'flipped';
-type CandSortKey = 'reads' | 'charts' | 'name' | 'varA' | 'varB';
+type CandSortKey = 'reads' | 'charts' | 'final' | 'dominance' | 'name' | 'varA' | 'varB';
+type CandidateMetric = {
+  charts: number;
+  total: number;
+  finalPresentCharts: number;
+  finalReads: number;
+  finalFraction: number;
+  dominantCharts: number;
+};
 type CandGroupKey = 'none' | 'varA' | 'varB';
+type BarcodePerspective = 'final' | 'presence' | 'richness' | 'depth' | 'vera' | 'verb';
 // Transient subunit highlight: hovering a VerA or VerB group header lights up
 // EVERY candidate that shares that subunit across the visible charts, without
 // committing a selection. kind 'A' = a VerA subunit id (e.g. A81); kind 'B' = a
@@ -149,7 +170,18 @@ function colorForCandidate(label: string): string {
 }
 
 function chartKey(c: BarcodeChart): string {
-  return `${c.experiment}/${c.library}/${c.well}/r${c.replicate}`;
+  return `${c.experiment}/${c.library}/${c.sampleName || c.strain}/${c.well || 'no-well'}/r${c.replicate}`;
+}
+
+function chartIdentityTitle(c: BarcodeChart): string {
+  const lines = [
+    c.sampleName ? `Sample_Name: ${c.sampleName}` : null,
+    c.seqsamples?.length ? `Seqsample${c.seqsamples.length === 1 ? '' : 's'}: ${c.seqsamples.join(', ')}` : null,
+    c.barcodeSourceTable ? `Counts: ${c.barcodeSourceTable}` : null,
+    c.transformationLibrary ? `Transformation library: ${c.transformationLibrary}` : null,
+    c.sampleNameSource ? `Parsed label source: ${c.sampleNameSource}` : null,
+  ].filter(Boolean);
+  return lines.join('\n');
 }
 
 // Per-candidate cross-chart detail popup. Shows how ONE A-B subunit combination
@@ -179,6 +211,103 @@ const TREND_META: Record<TrendKind, { label: string; chip: string }> = {
   transient: { label: 'transient', chip: 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 border-amber-300 dark:border-amber-700' },
 };
 
+function OtherRollupModal({
+  request, candColors, onTrackCandidate, onClose,
+}: {
+  request: OtherRollupRequest;
+  candColors: Record<string, string>;
+  onTrackCandidate: (cand: string) => void;
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', h);
+    return () => window.removeEventListener('keydown', h);
+  }, [onClose]);
+
+  const rows = useMemo(() => {
+    const total = Object.values(request.chart.candidates).reduce((acc, counts) => acc + (counts[request.transferIndex] || 0), 0);
+    return request.otherCands
+      .map(cand => {
+        const reads = request.chart.candidates[cand]?.[request.transferIndex] || 0;
+        const p = parseCandidate(cand);
+        return { cand, reads, pct: total ? reads / total : 0, a: p?.a ?? '', b: p?.b ?? '' };
+      })
+      .filter(r => r.reads > 0)
+      .sort((a, b) => b.reads - a.reads || a.cand.localeCompare(b.cand));
+  }, [request.chart, request.transferIndex, request.otherCands]);
+  const otherReads = rows.reduce((a, r) => a + r.reads, 0);
+  const barTotal = Object.values(request.chart.candidates).reduce((acc, counts) => acc + (counts[request.transferIndex] || 0), 0);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" onClick={onClose}>
+      <div className="bg-white dark:bg-gray-900 text-slate-900 dark:text-gray-100 border border-slate-200 dark:border-gray-700 rounded-xl shadow-2xl w-full max-w-3xl max-h-[86vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="other-rollup-title">
+        <div className="px-4 py-3 border-b border-slate-200 dark:border-gray-700 bg-slate-50 dark:bg-gray-800 flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="inline-block w-3 h-3 rounded-sm bg-slate-400" />
+              <span id="other-rollup-title" className="font-semibold">Other rollup</span>
+              <span className="font-mono text-[12px] px-1.5 py-0.5 rounded bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-700">T{request.transfer}</span>
+            </div>
+            <div className="mt-1 text-[11px] text-slate-500 dark:text-gray-400 truncate" title={chartIdentityTitle(request.chart)}>
+              {request.chart.sampleName || request.chart.well || request.chart.strain} · {request.chart.library} · rep {request.chart.replicate}
+            </div>
+          </div>
+          <button onClick={onClose} className="p-1 rounded hover:bg-slate-200 dark:hover:bg-gray-700 text-slate-500 dark:text-gray-400" title="Close (Esc)">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+        <div className="px-4 py-3 space-y-3 overflow-y-auto">
+          <div className="grid grid-cols-3 gap-2 text-[12px]">
+            <Stat label="rolled candidates" value={String(request.otherCands.length)} />
+            <Stat label="Other reads" value={otherReads.toLocaleString()} accent />
+            <Stat label="of transfer" value={barTotal ? `${(100 * otherReads / barTotal).toFixed(1)}%` : '0%'} />
+          </div>
+          <div className="text-[11.5px] text-slate-600 dark:text-gray-300 leading-relaxed">
+            These candidates were not shown individually because Top-N rollup is active. Counts are raw reads from this chart and transfer; percentages are relative to the full transfer total. Use Track to add a candidate to the shared selection so it is emphasized across views.
+          </div>
+          <div className="rounded-lg border border-slate-200 dark:border-gray-700 overflow-hidden">
+            <table className="w-full text-[12px]">
+              <thead className="bg-slate-50 dark:bg-gray-800 text-slate-500 dark:text-gray-400">
+                <tr>
+                  <th className="px-2 py-1.5 text-left">Candidate</th>
+                  <th className="px-2 py-1.5 text-left">VerA</th>
+                  <th className="px-2 py-1.5 text-left">VerB</th>
+                  <th className="px-2 py-1.5 text-right">Reads</th>
+                  <th className="px-2 py-1.5 text-right" title="Percent of the full transfer bar, not percent within Other">% of bar</th>
+                  <th className="px-2 py-1.5 text-right">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map(r => (
+                  <tr key={r.cand} className="border-t border-slate-100 dark:border-gray-700/70">
+                    <td className="px-2 py-1.5 font-mono text-slate-800 dark:text-gray-100">
+                      <span className="inline-block w-2.5 h-2.5 rounded-sm mr-1.5 align-middle" style={{ background: candColors[r.cand] || '#94a3b8' }} />
+                      {r.cand}
+                    </td>
+                    <td className="px-2 py-1.5 font-mono text-slate-500 dark:text-gray-400">{r.a || 'n/a'}</td>
+                    <td className="px-2 py-1.5 font-mono text-slate-500 dark:text-gray-400">{r.b || 'n/a'}</td>
+                    <td className="px-2 py-1.5 text-right tabular-nums">{r.reads.toLocaleString()}</td>
+                    <td className="px-2 py-1.5 text-right tabular-nums">{(r.pct * 100).toFixed(r.pct >= 0.1 ? 1 : 2)}%</td>
+                    <td className="px-2 py-1.5 text-right">
+                      <button onClick={() => onTrackCandidate(r.cand)} title={`Track ${r.cand} across charts`} className="px-1.5 py-0.5 rounded border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-200 hover:bg-blue-100 dark:hover:bg-blue-900/50 text-[10.5px] font-medium">
+                        Track
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+                {rows.length === 0 && (
+                  <tr><td colSpan={6} className="px-3 py-6 text-center text-slate-400 dark:text-gray-500">No nonzero rolled-up candidates at this transfer.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function CandidateDetailModal({
   cand, charts, candColors, aColors, bColors, candidateIndex, isSelected, onToggleSelect, onClose,
 }: {
@@ -187,7 +316,7 @@ function CandidateDetailModal({
   candColors: Record<string, string>;
   aColors: Record<string, string>;
   bColors: Record<string, string>;
-  candidateIndex: Map<string, { charts: number; total: number }>;
+  candidateIndex: Map<string, CandidateMetric>;
   isSelected: boolean;
   onToggleSelect: () => void;
   onClose: () => void;
@@ -250,11 +379,11 @@ function CandidateDetailModal({
         if (t > xMaxLocal) xMaxLocal = t;
         transferSet.add(t);
         if (frac > peakLocal.frac) {
-          peakLocal = { frac, transfer: t, label: `${c.well || c.strain || c.library} r${c.replicate}` };
+          peakLocal = { frac, transfer: t, label: `${c.sampleName || c.well || c.strain || c.library} r${c.replicate}` };
         }
       });
       if (pts.some(p => p.y > 0)) {
-        const label = `${c.well || c.strain} r${c.replicate} (${c.library})`;
+        const label = `${c.sampleName || c.well || c.strain} r${c.replicate} (${c.library})`;
         const trend = classifyTrend(firstFrac, peakFrac, lastFrac);
         out.push({ key: chartKey(c), label, pts });
         rows.push({ key: chartKey(c), label, peak: peakFrac, first: firstFrac, last: lastFrac, reads, dominant: dominantHere, trend });
@@ -619,11 +748,11 @@ function SubunitDetailModal({
         pts.push({ x: t, y: frac });
         if (t > xMaxLocal) xMaxLocal = t;
         if (frac > peakLocal.frac) {
-          peakLocal = { frac, transfer: t, label: `${c.well || c.strain || c.library} r${c.replicate}` };
+          peakLocal = { frac, transfer: t, label: `${c.sampleName || c.well || c.strain || c.library} r${c.replicate}` };
         }
       });
       if (pts.some(p => p.y > 0)) {
-        out.push({ key: chartKey(c), label: `${c.well || c.strain} r${c.replicate} (${c.library})`, pts });
+        out.push({ key: chartKey(c), label: `${c.sampleName || c.well || c.strain} r${c.replicate} (${c.library})`, pts });
       }
     }
     // Partner list: just the candidate ids that share this subunit (sorted).
@@ -776,7 +905,7 @@ function downloadBlob(name: string, content: string, mime = 'text/csv') {
 }
 
 function toCsv(charts: BarcodeChart[]): string {
-  const header = ['experiment','well','strain','library','replicate','transfer','candidate','varA','varB','count'];
+  const header = ['experiment','well','sample_name','seqsamples','barcode_source_table','strain','library','transformation_library','replicate','transfer','candidate','varA','varB','count'];
   const lines = [header.join(',')];
   for (const c of charts) {
     for (const [cand, counts] of Object.entries(c.candidates)) {
@@ -784,7 +913,8 @@ function toCsv(charts: BarcodeChart[]): string {
       c.transfers.forEach((t, i) => {
         if (!counts[i]) return;
         lines.push([
-          c.experiment, c.well, c.strain, c.library, String(c.replicate), String(t),
+          c.experiment, c.well, c.sampleName ?? '', (c.seqsamples ?? []).join(';'), c.barcodeSourceTable ?? '',
+          c.strain, c.library, c.transformationLibrary ?? '', String(c.replicate), String(t),
           cand, partner?.a ?? '', partner?.b ?? '', String(counts[i]),
         ].map(v => `"${String(v).replace(/"/g, '""')}"`).join(','));
       });
@@ -834,6 +964,91 @@ function statsFor(c: BarcodeChart): ChartStats {
   };
 }
 
+function csvEscape(v: unknown): string {
+  return `"${String(v ?? '').replace(/"/g, '""')}"`;
+}
+
+function groupCounts(charts: BarcodeChart[], get: (c: BarcodeChart) => string | undefined): { value: string; count: number }[] {
+  const m = new Map<string, number>();
+  for (const c of charts) {
+    const v = get(c) || '(none)';
+    m.set(v, (m.get(v) ?? 0) + 1);
+  }
+  return [...m.entries()].map(([value, count]) => ({ value, count })).sort((a, b) => b.count - a.count || a.value.localeCompare(b.value));
+}
+
+function finalOutcomeRows(charts: BarcodeChart[], statsByKey: Map<string, ChartStats>) {
+  return charts.map(c => {
+    const lastIdx = c.transfers.length - 1;
+    let total = 0, best = 0, dominant = '';
+    for (const [cand, counts] of Object.entries(c.candidates)) {
+      const v = counts[lastIdx] || 0;
+      total += v;
+      if (v > best) { best = v; dominant = cand; }
+    }
+    const s = statsByKey.get(chartKey(c));
+    return { chart: c, dominant: dominant || 'n/a', finalReads: best, finalTotal: total, finalFraction: total ? best / total : 0, richness: Object.values(c.candidates).filter(counts => (counts[lastIdx] || 0) > 0).length, flipped: !!s?.flipped };
+  });
+}
+
+function presenceRows(charts: BarcodeChart[]) {
+  const m = new Map<string, { cand: string; charts: number; total: number; finalCharts: number }>();
+  for (const c of charts) {
+    const lastIdx = c.transfers.length - 1;
+    for (const [cand, counts] of Object.entries(c.candidates)) {
+      const total = counts.reduce((a, v) => a + (v || 0), 0);
+      if (total <= 0) continue;
+      const row = m.get(cand) ?? { cand, charts: 0, total: 0, finalCharts: 0 };
+      row.charts += 1;
+      row.total += total;
+      if ((counts[lastIdx] || 0) > 0) row.finalCharts += 1;
+      m.set(cand, row);
+    }
+  }
+  return [...m.values()].sort((a, b) => b.total - a.total || b.charts - a.charts || a.cand.localeCompare(b.cand));
+}
+
+function subunitRows(charts: BarcodeChart[], kind: 'A' | 'B') {
+  const m = new Map<string, { id: string; total: number; charts: Set<string>; cands: Set<string>; finalReads: number }>();
+  for (const c of charts) {
+    const ck = chartKey(c);
+    const lastIdx = c.transfers.length - 1;
+    for (const [cand, counts] of Object.entries(c.candidates)) {
+      const p = parseCandidate(cand);
+      if (!p) continue;
+      const id = kind === 'A' ? p.a : p.b;
+      const total = counts.reduce((a, v) => a + (v || 0), 0);
+      if (total <= 0) continue;
+      const row = m.get(id) ?? { id, total: 0, charts: new Set<string>(), cands: new Set<string>(), finalReads: 0 };
+      row.total += total;
+      row.finalReads += counts[lastIdx] || 0;
+      row.charts.add(ck);
+      row.cands.add(cand);
+      m.set(id, row);
+    }
+  }
+  return [...m.values()].map(r => ({ id: r.id, total: r.total, charts: r.charts.size, candidates: r.cands.size, finalReads: r.finalReads })).sort((a, b) => b.total - a.total || a.id.localeCompare(b.id));
+}
+
+function perspectiveCsv(mode: BarcodePerspective, charts: BarcodeChart[], statsByKey: Map<string, ChartStats>): string {
+  if (mode === 'final') {
+    const rows = finalOutcomeRows(charts, statsByKey);
+    return [['chart','sample_name','library','replicate','final_transfer','dominant_candidate','dominant_reads','final_total','final_fraction','final_richness','flipped'].join(','), ...rows.map(r => [chartKey(r.chart), r.chart.sampleName ?? '', r.chart.library, r.chart.replicate, r.chart.transfers[r.chart.transfers.length - 1] ?? '', r.dominant, r.finalReads, r.finalTotal, r.finalFraction, r.richness, r.flipped].map(csvEscape).join(','))].join('\n');
+  }
+  if (mode === 'presence') {
+    return [['candidate','charts_present','final_charts','total_reads'].join(','), ...presenceRows(charts).map(r => [r.cand, r.charts, r.finalCharts, r.total].map(csvEscape).join(','))].join('\n');
+  }
+  if (mode === 'richness' || mode === 'depth') {
+    return [['chart','sample_name','library','replicate','transfer','richness','read_depth'].join(','), ...charts.flatMap(c => c.transfers.map((t, ti) => {
+      let richness = 0, depth = 0;
+      for (const counts of Object.values(c.candidates)) { const v = counts[ti] || 0; if (v > 0) richness++; depth += v; }
+      return [chartKey(c), c.sampleName ?? '', c.library, c.replicate, t, richness, depth].map(csvEscape).join(',');
+    }))].join('\n');
+  }
+  const rows = subunitRows(charts, mode === 'vera' ? 'A' : 'B');
+  return [[mode === 'vera' ? 'vera' : 'verb','charts_present','candidate_count','total_reads','aggregate_final_reads'].join(','), ...rows.map(r => [r.id, r.charts, r.candidates, r.total, r.finalReads].map(csvEscape).join(','))].join('\n');
+}
+
 // ---------------------------------------------------------------------------
 // HorizontalBarChart: an HTML (not SVG) horizontal stacked-bar chart for FOCUS
 // mode. Each transfer is a full-width row; candidate reads stack left-to-right.
@@ -858,10 +1073,11 @@ interface HBarProps {
   hoverSubunit?: SubunitRef | null;
   onPickCandidate?: (cand: string) => void;
   onHoverCandidate?: (cand: string | null) => void;
+  onOpenOther?: (request: OtherRollupRequest) => void;
 }
 function HorizontalBarChart({
   chart, stats, colorMode, splitAB, normalize, aColors, bColors, candColors,
-  selectedCands, isolateSelected, topN, hoverCand, hoverSubunit, onPickCandidate, onHoverCandidate,
+  selectedCands, isolateSelected, topN, hoverCand, hoverSubunit, onPickCandidate, onHoverCandidate, onOpenOther,
 }: HBarProps) {
   // Rich floating hover card state (replaces the native title= tooltips on
   // segments). We track the candidate / subunit, its reads, % of the bar and the
@@ -896,7 +1112,7 @@ function HorizontalBarChart({
   const otherByTransfer = useMemo(() => {
     if (!otherCands.length) return null;
     const arr = Array(chart.transfers.length).fill(0);
-    for (const c of otherCands) chart.candidates[c].forEach((v, i) => { arr[i] += v || 0; });
+    for (const c of otherCands) chart.candidates[c]?.forEach((v, i) => { arr[i] += v || 0; });
     return arr;
   }, [otherCands, chart.candidates, chart.transfers.length]);
 
@@ -945,7 +1161,7 @@ function HorizontalBarChart({
   };
 
   // One stacked horizontal bar (a flex row of segments). Fixed height -> crisp text.
-  const renderBar = (segs: { cand: string; label: string; v: number; color: string; selectable: boolean; kind?: 'A' | 'B' }[], total: number, barH: number, transfer: number, rowLabel?: string) => (
+  const renderBar = (segs: { cand: string; label: string; v: number; color: string; selectable: boolean; kind?: 'A' | 'B' }[], total: number, barH: number, transfer: number, transferIndex: number, rowLabel?: string) => (
     <div className="flex items-stretch w-full" style={{ height: barH }}>
       {rowLabel != null && (
         <span className="shrink-0 w-12 pr-1 flex items-center justify-end text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-gray-500">{rowLabel}</span>
@@ -967,7 +1183,7 @@ function HorizontalBarChart({
           return (
             <div
               key={seg.cand}
-              className={cn('group/seg relative flex items-center justify-center overflow-hidden transition-opacity', seg.selectable && onPickCandidate ? 'cursor-pointer' : 'cursor-default')}
+              className={cn('group/seg relative flex items-center justify-center overflow-hidden transition-opacity', (seg.selectable && onPickCandidate) || (seg.cand === '__OTHER__' && onOpenOther) ? 'cursor-pointer' : 'cursor-default')}
               style={{
                 width: `${wPct}%`, background: seg.color,
                 // Dimmed segments stay at 0.25 (not 0.16) so they remain visible.
@@ -978,7 +1194,10 @@ function HorizontalBarChart({
                   ? 'inset 0 0 0 2.5px #0f172a, inset 0 0 0 4px rgba(255,255,255,0.85)'
                   : 'inset 0 0 0 0.75px rgba(255,255,255,0.45)',
               }}
-              onClick={() => seg.selectable && onPickCandidate?.(seg.cand)}
+              onClick={() => {
+                if (seg.selectable) onPickCandidate?.(seg.cand);
+                else if (seg.cand === '__OTHER__') onOpenOther?.({ chart, transfer, transferIndex, otherCands });
+              }}
               onMouseEnter={(e) => { showCard(e, seg, total, transfer); if (seg.selectable) onHoverCandidate?.(seg.cand); }}
               onMouseMove={(e) => showCard(e, seg, total, transfer)}
               onMouseLeave={() => { setCard(null); if (seg.selectable) onHoverCandidate?.(null); }}
@@ -1019,12 +1238,12 @@ function HorizontalBarChart({
               <div className="flex-1 min-w-0 flex flex-col gap-1.5">
                 {splitAB ? (
                   <>
-                    {renderBar(buildSegs(ti), total, 30, t, 'A-B')}
-                    {renderBar(buildSubunitSegs(ti, 'A'), total, 26, t, 'VerA')}
-                    {renderBar(buildSubunitSegs(ti, 'B'), total, 26, t, 'VerB')}
+                    {renderBar(buildSegs(ti), total, 30, t, ti, 'A-B')}
+                    {renderBar(buildSubunitSegs(ti, 'A'), total, 26, t, ti, 'VerA')}
+                    {renderBar(buildSubunitSegs(ti, 'B'), total, 26, t, ti, 'VerB')}
                   </>
                 ) : (
-                  renderBar(buildSegs(ti), total, 32, t)
+                  renderBar(buildSegs(ti), total, 32, t, ti)
                 )}
               </div>
             </div>
@@ -1065,7 +1284,7 @@ function HorizontalBarChart({
             <span className="font-semibold">{card.pct.toFixed(1)}%</span> of bar
           </div>
           {card.kind && (
-            <div className="text-[10px] text-slate-400 mt-0.5">sum of all {card.label}-{card.kind === 'A' ? '*' : ''}{card.kind === 'B' ? '*' : ''} combinations</div>
+            <div className="text-[10px] text-slate-400 mt-0.5">sum of all {card.kind === 'A' ? `${card.label}-*` : `*-${card.label}`} combinations</div>
           )}
           <div className="text-[10px] text-slate-400 mt-0.5">Transfer T{card.transfer}</div>
         </div>
@@ -1519,6 +1738,7 @@ interface ChartProps {
   // Compare-only: cross-chart hover. When the user hovers a bar segment we can
   // push that candidate up to the parent so every compared chart lights it up.
   onHoverCandidate?: (cand: string | null) => void;
+  onOpenOther?: (request: OtherRollupRequest) => void;
   // Compare-only: the compare tile renders its own clean header (with a clear
   // remove button), so we suppress ChartCard's built-in header to avoid a
   // duplicate. Default keeps the header for grid / focus.
@@ -1528,7 +1748,7 @@ interface ChartProps {
 function ChartCard({
   chart, stats, colorMode, splitAB, normalize, aColors, bColors, candColors,
   selectedCands, isolateSelected, topN, hoverCand, hoverSubunit, height, onPickCandidate,
-  yMaxOverride, onHoverCandidate, hideHeader,
+  yMaxOverride, onHoverCandidate, onOpenOther, hideHeader,
 }: ChartProps) {
   // Hover tooltip state — managed in React so we get instant feedback
   // and rich content (multi-line, color swatch). SVG <title> stays as a
@@ -1629,7 +1849,13 @@ function ChartCard({
       <div className="px-3 py-1.5 border-b border-slate-200 dark:border-gray-700 bg-slate-50/60 dark:bg-gray-800/60 flex items-center gap-2 text-[12px] shrink-0">
         {chart.well && (
           <>
-            <span className="font-mono font-semibold text-slate-800 dark:text-gray-100">{chart.well}</span>
+            <span className="font-mono font-semibold text-slate-800 dark:text-gray-100" title={chartIdentityTitle(chart)}>{chart.well}</span>
+            <span className="text-slate-400">|</span>
+          </>
+        )}
+        {chart.sampleName && (
+          <>
+            <span className="font-mono text-slate-600 dark:text-gray-300 truncate max-w-[220px]" title={chartIdentityTitle(chart)}>{chart.sampleName}</span>
             <span className="text-slate-400">|</span>
           </>
         )}
@@ -1780,8 +2006,12 @@ function ChartCard({
                       stroke={selected ? '#0f172a' : 'rgba(255,255,255,0.4)'}
                       strokeWidth={selected ? 1.5 : 0.4}
                       opacity={dim ? 0.16 : 1}
-                      style={{ cursor: isCandSeg && onPickCandidate ? 'pointer' : 'default' }}
-                      onClick={() => isCandSeg && onPickCandidate?.(seg.cand!)}
+                       style={{ cursor: (isCandSeg && onPickCandidate) || (seg.key === '__OTHER__' && onOpenOther) ? 'pointer' : 'default' }}
+                       onClick={() => {
+                         if (isCandSeg) onPickCandidate?.(seg.cand!);
+                         else if (seg.key === '__OTHER__') onOpenOther?.({ chart, transfer: t, transferIndex: ti, otherCands });
+                       }}
+
                       onMouseEnter={(e) => {
                         const svg = (e.currentTarget as SVGRectElement).ownerSVGElement;
                         const rect = svg?.getBoundingClientRect();
@@ -1884,7 +2114,7 @@ function ChartCard({
                   // bar, the transfer, and the bar total. Built per-segment (cheap).
                   const pp = cand !== '__OTHER__' ? parseCandidate(cand) : null;
                   const tipText = cand === '__OTHER__'
-                    ? `Other (${otherCands.length} candidates)\nreads: ${v}${total ? `   (${pctStrFine} of bar)` : ''}\nT${t} · bar total ${total}`
+                    ? `Other (${otherCands.length} candidates)\nreads: ${v}${total ? `   (${pctStrFine} of bar)` : ''}\nT${t} · bar total ${total}\nclick to inspect rolled-up candidates`
                     : `A-B: ${cand}${pp ? `\nVerA ${pp.a}  ·  VerB ${pp.b}` : ''}\nreads: ${v}${total ? `   (${pctStrFine} of bar)` : ''}\nT${t} · bar total ${total}`;
                   return (
                     <g key={cand}>
@@ -1894,8 +2124,11 @@ function ChartCard({
                         stroke={selected ? '#0f172a' : 'rgba(255,255,255,0.4)'}
                         strokeWidth={selected ? 1.5 : 0.4}
                         opacity={dim ? 0.16 : 1}
-                        style={{ cursor: cand !== '__OTHER__' && onPickCandidate ? 'pointer' : 'default' }}
-                        onClick={() => cand !== '__OTHER__' && onPickCandidate?.(cand)}
+                        style={{ cursor: (cand !== '__OTHER__' && onPickCandidate) || (cand === '__OTHER__' && onOpenOther) ? 'pointer' : 'default' }}
+                        onClick={() => {
+                          if (cand !== '__OTHER__') onPickCandidate?.(cand);
+                          else onOpenOther?.({ chart, transfer: t, transferIndex: ti, otherCands });
+                        }}
                         onMouseEnter={(e) => {
                           const svg = (e.currentTarget as SVGRectElement).ownerSVGElement;
                           const rect = svg?.getBoundingClientRect();
@@ -2028,11 +2261,18 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
   const [isolateSelected, setIsolateSelected] = useState(false);
   // Candidate whose cross-chart detail popup is open (null = closed).
   const [detailCand, setDetailCand] = useState<string | null>(null);
+  const [otherRollup, setOtherRollup] = useState<OtherRollupRequest | null>(null);
+  const [summaryOpen, setSummaryOpen] = useState(false);
   // Subunit whose cross-chart detail popup is open (null = closed). Mirrors detailCand
   // but for a whole VerA or VerB subunit aggregated across its A-B partners.
   const [detailSubunit, setDetailSubunit] = useState<SubunitRef | null>(null);
   const figureRef = useRef<HTMLDivElement | null>(null);
   const [candidateQuery, setCandidateQuery] = useState('');
+  const [candidateMinReads, setCandidateMinReads] = useState(0);
+  const [candidateMinCharts, setCandidateMinCharts] = useState(0);
+  const [candidateFinalOnly, setCandidateFinalOnly] = useState(false);
+  const [candidateDominantOnly, setCandidateDominantOnly] = useState(false);
+  const [selectionFiltersCharts, setSelectionFiltersCharts] = useState(true);
   const [onlyFlipped, setOnlyFlipped] = useState(false);
 
   // Rendering controls
@@ -2058,6 +2298,7 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
   // 'lines' = TrajectoryChart (time-course tracker), 'heatmap' = HeatmapChart.
   const [focusChart, setFocusChart] = useState<'rows' | 'bars' | 'lines' | 'heatmap'>('rows');
   const [normalize, setNormalize] = useState<Normalize>('count');
+  const [perspective, setPerspective] = useState<BarcodePerspective>('final');
   const [topN, setTopN] = useState(10);
   const [sortKey, setSortKey] = useState<SortKey>('natural');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
@@ -2069,8 +2310,8 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
   const [hoveredSubunit, setHoveredSubunit] = useState<SubunitRef | null>(null);
   const [focusKey, setFocusKey] = useState<string | null>(null);
   const [showSidebar, setShowSidebar] = useState(true);
-  // Compare view defaults to no sidebar — the chart area needs the room.
-  useEffect(() => { setShowSidebar(view !== 'compare'); }, [view]);
+  // Compare view needs the room; leaving compare should preserve the user's own sidebar choice.
+  useEffect(() => { if (view === 'compare') setShowSidebar(false); }, [view]);
   // Close filter popover on outside click.
   useEffect(() => {
     if (!filtersOpen) return;
@@ -2144,16 +2385,34 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
   // Cross-chart candidate index: for each candidate, count how many charts it
   // appears in (with nonzero counts), and total reads across them.
   const candidateIndex = useMemo(() => {
-    const idx = new Map<string, { charts: number; total: number }>();
-    data?.charts.forEach(c => {
+    const idx = new Map<string, CandidateMetric>();
+    for (const c of data?.charts ?? []) {
+      const lastIdx = c.transfers.length - 1;
+      let finalTotal = 0;
+      let dominant: string | null = null;
+      let dominantReads = -1;
+      for (const [cand, counts] of Object.entries(c.candidates)) {
+        const lastReads = counts[lastIdx] || 0;
+        finalTotal += lastReads;
+        if (lastReads > dominantReads) { dominantReads = lastReads; dominant = cand; }
+      }
       for (const [cand, counts] of Object.entries(c.candidates)) {
         const sum = counts.reduce((a, v) => a + (v || 0), 0);
-        if (sum <= 0) return;
-        const cur = idx.get(cand) ?? { charts: 0, total: 0 };
-        cur.charts += 1; cur.total += sum;
+        if (sum <= 0) continue;
+        const lastReads = counts[lastIdx] || 0;
+        const cur = idx.get(cand) ?? { charts: 0, total: 0, finalPresentCharts: 0, finalReads: 0, finalFraction: 0, dominantCharts: 0 };
+        cur.charts += 1;
+        cur.total += sum;
+        if (lastReads > 0) {
+          cur.finalPresentCharts += 1;
+          cur.finalFraction += finalTotal ? lastReads / finalTotal : 0;
+        }
+        cur.finalReads += lastReads;
+        if (cand === dominant && lastReads > 0) cur.dominantCharts += 1;
         idx.set(cand, cur);
       }
-    });
+    }
+    for (const metric of idx.values()) metric.finalFraction = metric.finalPresentCharts ? metric.finalFraction / metric.finalPresentCharts : 0;
     return idx;
   }, [data]);
 
@@ -2169,7 +2428,7 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
     const filtered = data.charts
       .filter(c => !hasLibs || selectedLibs.has(c.library))
       .filter(c => !hasWells || !c.well || selectedWells.has(c.well))
-      .filter(c => !q || `${c.well} ${c.strain} ${c.library} ${c.experiment} rep${c.replicate}`.toLowerCase().includes(q))
+      .filter(c => !q || `${c.well} ${c.sampleName ?? ''} ${(c.seqsamples ?? []).join(' ')} ${c.strain} ${c.library} ${c.transformationLibrary ?? ''} ${c.experiment} rep${c.replicate}`.toLowerCase().includes(q))
       .map(c => {
         if (!transferRange) return c;
         const [lo, hi] = transferRange;
@@ -2192,7 +2451,7 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
         // CHART FILTERING: when a selection exists, only show charts that contain
         // at least one selected candidate with nonzero reads. This is the fix for
         // the bug where the left-sidebar selection did nothing to the chart set.
-        if (selectedCands.size === 0) return true;
+        if (!selectionFiltersCharts || selectedCands.size === 0) return true;
         return Object.entries(c.candidates).some(([cand, counts]) =>
           selectedCands.has(cand) && counts.some(v => v > 0));
       })
@@ -2214,7 +2473,7 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
     else if (sortKey === 'flipped') filtered.sort((a, b) => cmpStat(a, b, s => s.flipped ? 1 : 0));
 
     return filtered;
-  }, [data, selectedLibs, selectedWells, transferRange, minTotal, selectedCands, onlyFlipped, search, statsByKey, sortKey, sortDir]);
+  }, [data, selectedLibs, selectedWells, transferRange, minTotal, selectedCands, selectionFiltersCharts, onlyFlipped, search, statsByKey, sortKey, sortDir]);
 
   // Candidate filter list, filtered by sub-search.
   const filteredCandidates = useMemo(() => {
@@ -2266,6 +2525,11 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
       return next;
     });
   }, []);
+  const clearCandidateSelection = useCallback(() => {
+    setSelectedCands(new Set());
+    setIsolateSelected(false);
+    setSelectionFiltersCharts(true);
+  }, []);
 
   const resetFilters = () => {
     setSelectedLibs(new Set(data?.libraries ?? []));
@@ -2273,8 +2537,14 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
     setSelectedCands(new Set());
     setIsolateSelected(false);
     setMinTotal(0);
+    setCandidateMinReads(0);
+    setCandidateMinCharts(0);
+    setCandidateFinalOnly(false);
+    setCandidateDominantOnly(false);
+    setSelectionFiltersCharts(true);
     setOnlyFlipped(false);
     setSearch('');
+    setCandidateQuery('');
   };
 
   // For grid mode: simple windowing — render at most N at once, paginate by scroll.
@@ -2293,30 +2563,39 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
       if (transferRange[0] > lo0 || transferRange[1] < hi0) n++;
     }
     if (minTotal > 0) n++;
+    if (candidateMinReads > 0) n++;
+    if (candidateMinCharts > 0) n++;
+    if (candidateFinalOnly) n++;
+    if (candidateDominantOnly) n++;
+    if (!selectionFiltersCharts) n++;
     if (onlyFlipped) n++;
     if (search.trim()) n++;
+    if (candidateQuery.trim()) n++;
     return n;
-  }, [data, selectedLibs, selectedWells, transferRange, allTransferValues, minTotal, onlyFlipped, search]);
+  }, [data, selectedLibs, selectedWells, transferRange, allTransferValues, minTotal, candidateMinReads, candidateMinCharts, candidateFinalOnly, candidateDominantOnly, selectionFiltersCharts, onlyFlipped, search, candidateQuery]);
 
   // Sorted + (optionally) grouped candidate list for the sidebar browser.
   const candidateRows = useMemo(() => {
-    if (!data) return [] as { cand: string; charts: number; total: number }[];
+    if (!data) return [] as (CandidateMetric & { cand: string })[];
     const q = candidateQuery.trim().toLowerCase();
     const base = allCandidates
       .filter(c => !q || c.toLowerCase().includes(q))
-      .map(c => {
-        const idx = candidateIndex.get(c);
-        return { cand: c, charts: idx?.charts ?? 0, total: idx?.total ?? 0 };
-      });
+      .map(c => ({ cand: c, ...(candidateIndex.get(c) ?? { charts: 0, total: 0, finalPresentCharts: 0, finalReads: 0, finalFraction: 0, dominantCharts: 0 }) }))
+      .filter(r => r.total >= candidateMinReads)
+      .filter(r => candidateMinCharts <= 0 || r.charts >= candidateMinCharts)
+      .filter(r => !candidateFinalOnly || r.finalPresentCharts > 0)
+      .filter(r => !candidateDominantOnly || r.dominantCharts > 0);
     const numFromA = (c: string) => { const m = c.match(/^A(\d+)/); return m ? parseInt(m[1]) : 0; };
     const numFromB = (c: string) => { const m = c.match(/-B(\d+)/); return m ? parseInt(m[1]) : 0; };
     if (candSort === 'reads') base.sort((a, b) => b.total - a.total || a.cand.localeCompare(b.cand));
     else if (candSort === 'charts') base.sort((a, b) => b.charts - a.charts || b.total - a.total);
+    else if (candSort === 'final') base.sort((a, b) => b.finalFraction - a.finalFraction || b.finalReads - a.finalReads || b.total - a.total);
+    else if (candSort === 'dominance') base.sort((a, b) => b.dominantCharts - a.dominantCharts || b.finalFraction - a.finalFraction || b.total - a.total);
     else if (candSort === 'name') base.sort((a, b) => a.cand.localeCompare(b.cand));
     else if (candSort === 'varA') base.sort((a, b) => numFromA(a.cand) - numFromA(b.cand) || a.cand.localeCompare(b.cand));
     else if (candSort === 'varB') base.sort((a, b) => numFromB(a.cand) - numFromB(b.cand) || a.cand.localeCompare(b.cand));
     return base;
-  }, [data, allCandidates, candidateIndex, candidateQuery, candSort]);
+  }, [data, allCandidates, candidateIndex, candidateQuery, candidateMinReads, candidateMinCharts, candidateFinalOnly, candidateDominantOnly, candSort]);
 
   return (
     <div className="flex flex-col h-full w-full overflow-hidden">
@@ -2345,7 +2624,7 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
         ) : (
           <span
             className="inline-flex items-center gap-1 text-[10px] font-medium uppercase tracking-wide text-slate-400 dark:text-gray-500"
-            title="Live data from LIMS"
+            title="Counts from LIMS verAB_barcodes; biological labels use Seq_samples.Sample_Name when available"
           >
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
             LIMS
@@ -2390,6 +2669,9 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
             title={comparing.length === 0 ? "Pick charts in Grid first (click the +)" : `Compare ${comparing.length} chart${comparing.length === 1 ? '' : 's'} side-by-side`}>
             <Columns3 className="w-3.5 h-3.5" /> Compare
             {comparing.length > 0 && <span className="ml-0.5 px-1 rounded bg-emerald-700/30 tabular-nums">{comparing.length}</span>}
+          </button>
+          <button onClick={() => setView('perspectives')} disabled={visibleCharts.length === 0} className={cn('flex items-center gap-1 px-2 py-1 text-[11px] border-l border-slate-200 dark:border-gray-600 disabled:opacity-50 disabled:cursor-not-allowed', view === 'perspectives' ? 'bg-emerald-600 text-white' : 'bg-white dark:bg-gray-700 text-slate-600 dark:text-gray-300')} title={visibleCharts.length === 0 ? 'No visible barcode charts for perspectives' : 'Researcher tables: final outcomes, presence, richness, depth, VerA, and VerB'}>
+            <Rows3 className="w-3.5 h-3.5" /> Perspectives
           </button>
         </div>
 
@@ -2483,7 +2765,7 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
                 <div className="relative">
                   <Search className="w-3 h-3 absolute left-2 top-1/2 -translate-y-1/2 text-slate-400" />
                   <input value={search} onChange={e => setSearch(e.target.value)}
-                    placeholder="well / library / strain"
+                    placeholder="well / sample / Seqsample / library / strain"
                     className="w-full pl-7 pr-2 py-1 text-[11.5px] border border-slate-200 dark:border-gray-600 rounded bg-white dark:bg-gray-700 dark:text-gray-100 outline-none" />
                 </div>
               </div>
@@ -2601,9 +2883,18 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
               "Isolate" toggle (dim-for-context vs hard-hide-others) and a clear button. */}
           {selectedCands.size > 0 && (
             <span className="inline-flex items-center gap-1.5 px-1.5 py-0.5 rounded text-[11px] font-medium bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-200 border border-blue-200 dark:border-blue-800"
-              title={`${selectedCands.size} candidate${selectedCands.size === 1 ? '' : 's'} selected. Charts are filtered to those containing a selected candidate, and selected candidates are emphasized inside every chart.`}>
+              title={`${selectedCands.size} candidate${selectedCands.size === 1 ? '' : 's'} selected. ${selectionFiltersCharts ? 'Charts are filtered to those containing a selected candidate.' : 'Charts are not filtered; selected candidates are emphasized in-place.'}`}>
               <Target className="w-3 h-3" />
               {selectedCands.size} selected
+              <button
+                onClick={() => setSelectionFiltersCharts(v => !v)}
+                className={cn('ml-0.5 px-1 py-0.5 rounded text-[10px] font-semibold border',
+                  selectionFiltersCharts
+                    ? 'bg-blue-600 text-white border-blue-700'
+                    : 'bg-white/70 dark:bg-gray-800/60 border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-200')}
+                title={selectionFiltersCharts ? 'Filter charts ON: click to keep all currently visible charts and only emphasize selected candidates.' : 'Filter charts OFF: click to show only charts containing selected candidates.'}>
+                Filter charts
+              </button>
               <button
                 onClick={() => setIsolateSelected(v => !v)}
                 className={cn('ml-0.5 px-1 py-0.5 rounded text-[10px] font-semibold border',
@@ -2615,11 +2906,16 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
                   : 'Isolate OFF: unselected candidates are dimmed for context. Click to hide them entirely.'}>
                 Isolate
               </button>
-              <button onClick={() => setSelectedCands(new Set())} className="ml-0.5 hover:text-blue-900 dark:hover:text-white" title="Clear selection">
+              <button onClick={clearCandidateSelection} className="ml-0.5 hover:text-blue-900 dark:hover:text-white" title="Clear selection">
                 <X className="w-3 h-3" />
               </button>
             </span>
           )}
+          <button onClick={() => setSummaryOpen(true)} disabled={!data || visibleCharts.length === 0}
+            className="flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded border border-slate-200 dark:border-gray-600 text-slate-600 dark:text-gray-300 hover:bg-slate-100 dark:hover:bg-gray-700 disabled:opacity-50"
+            title="Open a summary popup for the currently visible barcode charts">
+            <Info className="w-3 h-3" /> Summary
+          </button>
           <button onClick={() => data && downloadBlob('barcode-counts.csv', toCsv(visibleCharts))}
             disabled={!data || visibleCharts.length === 0}
             className="flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded border border-slate-200 dark:border-gray-600 text-slate-600 dark:text-gray-300 hover:bg-slate-100 dark:hover:bg-gray-700 disabled:opacity-50"
@@ -2655,6 +2951,7 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
             candColors={candColors}
             selectedCands={selectedCands}
             setSelectedCands={setSelectedCands}
+            clearCandidateSelection={clearCandidateSelection}
             isolateSelected={isolateSelected}
             setIsolateSelected={setIsolateSelected}
             setHoveredCand={setHoveredCand}
@@ -2670,6 +2967,16 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
             setCandSort={setCandSort}
             candGroup={candGroup}
             setCandGroup={setCandGroup}
+            candidateMinReads={candidateMinReads}
+            setCandidateMinReads={setCandidateMinReads}
+            candidateMinCharts={candidateMinCharts}
+            setCandidateMinCharts={setCandidateMinCharts}
+            candidateFinalOnly={candidateFinalOnly}
+            setCandidateFinalOnly={setCandidateFinalOnly}
+            candidateDominantOnly={candidateDominantOnly}
+            setCandidateDominantOnly={setCandidateDominantOnly}
+            selectionFiltersCharts={selectionFiltersCharts}
+            setSelectionFiltersCharts={setSelectionFiltersCharts}
           />
         )}
 
@@ -2740,12 +3047,15 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
                       >
                         {inCompare ? '✓' : '+'}
                       </button>
-                      <div className="px-1.5 py-1 border-b border-slate-200/50 dark:border-gray-700/50 flex items-center gap-1 text-[10px] pr-7">
-                        {c.well
-                          ? <span className="font-mono font-bold text-slate-700 dark:text-gray-200">{c.well}</span>
-                          : <span className="font-mono font-bold text-slate-700 dark:text-gray-200">r{c.replicate}</span>}
-                        <span className="font-mono text-slate-500 dark:text-gray-400 truncate" title={c.library}>{c.library}</span>
-                        {stats.flipped && <span className="ml-auto text-[8.5px] font-bold uppercase text-amber-600" title="Flip: dominant candidate changed from first to last transfer">flip</span>}
+                      <div className="px-1.5 py-1 border-b border-slate-200/50 dark:border-gray-700/50 pr-7">
+                        <div className="flex items-center gap-1 text-[10px]">
+                          {c.well
+                            ? <span className="font-mono font-bold text-slate-700 dark:text-gray-200" title={chartIdentityTitle(c)}>{c.well}</span>
+                            : <span className="font-mono font-bold text-slate-700 dark:text-gray-200">r{c.replicate}</span>}
+                          <span className="font-mono text-slate-500 dark:text-gray-400 truncate" title={c.library}>{c.library}</span>
+                          {stats.flipped && <span className="ml-auto text-[8.5px] font-bold uppercase text-amber-600" title="Flip: dominant candidate changed from first to last transfer">flip</span>}
+                        </div>
+                        {c.sampleName && <div className="mt-0.5 font-mono text-[8.5px] text-slate-400 dark:text-gray-500 truncate" title={chartIdentityTitle(c)}>{c.sampleName}</div>}
                       </div>
                       <ThumbChart chart={c} stats={stats} candColors={candColors} selectedCands={selectedCands} isolateSelected={isolateSelected} hoverCand={hoveredCand} />
                       <div className="px-1.5 py-0.5 text-[9.5px] text-slate-500 dark:text-gray-400 tabular-nums flex justify-between border-t border-slate-200/50 dark:border-gray-700/50">
@@ -2775,7 +3085,9 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
               orientation={focusChart}
               aColors={aColors} bColors={bColors} candColors={candColors}
               selectedCands={selectedCands} isolateSelected={isolateSelected} topN={topN}
-              onToggleCand={toggleCand} onOpenDetail={setDetailCand}
+              onToggleCand={toggleCand}
+              onOpenDetail={setDetailCand}
+              onOpenOther={setOtherRollup}
               onBack={() => setView('grid')}
               hoveredCand={hoveredCand}
               hoveredSubunit={hoveredSubunit}
@@ -2788,6 +3100,16 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
             />
           )}
 
+          {!loading && !error && view === 'perspectives' && data && visibleCharts.length > 0 && (
+            <BarcodePerspectivesPanel
+              charts={visibleCharts}
+              statsByKey={statsByKey}
+              mode={perspective}
+              setMode={setPerspective}
+              onExport={() => downloadBlob(`barcode-perspective-${perspective}.csv`, perspectiveCsv(perspective, visibleCharts, statsByKey))}
+            />
+          )}
+
           {!loading && !error && view === 'compare' && (
             <CompareView
               keys={comparing}
@@ -2797,6 +3119,8 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
               aColors={aColors} bColors={bColors} candColors={candColors}
               selectedCands={selectedCands} isolateSelected={isolateSelected} topN={topN}
               onToggleCand={toggleCand}
+              onClearCandidates={clearCandidateSelection}
+              onOpenOther={setOtherRollup}
               onBack={() => setView('grid')}
               hoveredCand={hoveredCand}
               hoveredSubunit={hoveredSubunit}
@@ -2809,11 +3133,34 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
         </div>
       </div>
 
+      {summaryOpen && data && (
+        <BarcodeSummaryModal
+          data={data}
+          visibleCharts={visibleCharts}
+          statsByKey={statsByKey}
+          onClose={() => setSummaryOpen(false)}
+        />
+      )}
+
+      {/* Inspect candidates rolled into a grey Other segment. */}
+      {otherRollup && (
+        <OtherRollupModal
+          request={otherRollup}
+          candColors={candColors}
+          onTrackCandidate={(cand) => {
+            setSelectedCands(prev => new Set(prev).add(cand));
+            setOtherRollup(null);
+            setDetailCand(cand);
+          }}
+          onClose={() => setOtherRollup(null)}
+        />
+      )}
+
       {/* Per-candidate cross-chart detail popup. */}
       {detailCand && data && (
         <CandidateDetailModal
           cand={detailCand}
-          charts={data.charts}
+          charts={visibleCharts}
           candColors={candColors}
           aColors={aColors}
           bColors={bColors}
@@ -2829,7 +3176,7 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
       {detailSubunit && data && (
         <SubunitDetailModal
           sub={detailSubunit}
-          charts={data.charts}
+          charts={visibleCharts}
           aColors={aColors}
           bColors={bColors}
           onClose={() => setDetailSubunit(null)}
@@ -2844,11 +3191,12 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
 // Filters popover, so this panel gets the full vertical space for its
 // scrollable list and its rows are tall enough to click comfortably.
 interface CandidatesSidebarProps {
-  rows: { cand: string; charts: number; total: number }[];
+  rows: (CandidateMetric & { cand: string })[];
   allCount: number;
   candColors: Record<string, string>;
   selectedCands: Set<string>;
   setSelectedCands: React.Dispatch<React.SetStateAction<Set<string>>>;
+  clearCandidateSelection: () => void;
   isolateSelected: boolean;
   setIsolateSelected: React.Dispatch<React.SetStateAction<boolean>>;
   setHoveredCand: React.Dispatch<React.SetStateAction<string | null>>;
@@ -2857,13 +3205,23 @@ interface CandidatesSidebarProps {
   onOpenDetail: (cand: string) => void;
   onOpenSubunitDetail: (sub: SubunitRef) => void;
   visibleCandSet: Set<string>;
-  candidateIndex: Map<string, { charts: number; total: number }>;
+  candidateIndex: Map<string, CandidateMetric>;
   candidateQuery: string;
   setCandidateQuery: (s: string) => void;
   candSort: CandSortKey;
   setCandSort: (s: CandSortKey) => void;
   candGroup: CandGroupKey;
   setCandGroup: (g: CandGroupKey) => void;
+  candidateMinReads: number;
+  setCandidateMinReads: (n: number) => void;
+  candidateMinCharts: number;
+  setCandidateMinCharts: (n: number) => void;
+  candidateFinalOnly: boolean;
+  setCandidateFinalOnly: (v: boolean) => void;
+  candidateDominantOnly: boolean;
+  setCandidateDominantOnly: (v: boolean) => void;
+  selectionFiltersCharts: boolean;
+  setSelectionFiltersCharts: (v: boolean) => void;
 }
 function CandidatesSidebar(p: CandidatesSidebarProps) {
   const grouped = useMemo(() => {
@@ -2898,7 +3256,7 @@ function CandidatesSidebar(p: CandidatesSidebarProps) {
           </div>
           {p.selectedCands.size > 0 && (
             <button
-              onClick={() => p.setSelectedCands(new Set())}
+              onClick={p.clearCandidateSelection}
               className="text-[10.5px] text-emerald-600 dark:text-emerald-400 hover:underline font-medium"
               title="Clear the candidate selection"
             >
@@ -2924,6 +3282,8 @@ function CandidatesSidebar(p: CandidatesSidebarProps) {
           className="text-[11px] border border-slate-200 dark:border-gray-600 rounded px-1.5 py-0.5 bg-white dark:bg-gray-700 dark:text-gray-100 outline-none">
           <option value="reads">reads ↓</option>
           <option value="charts">in N charts ↓</option>
+          <option value="final">final fraction ↓</option>
+          <option value="dominance">dominant charts ↓</option>
           <option value="name">name A→Z</option>
           <option value="varA">VerA #</option>
           <option value="varB">VerB #</option>
@@ -2937,8 +3297,34 @@ function CandidatesSidebar(p: CandidatesSidebarProps) {
         </select>
       </div>
 
-      {/* Selection controls: bulk select/clear + the Isolate toggle. */}
-      <div className="px-2.5 py-1.5 border-b border-slate-200 dark:border-gray-700 flex items-center gap-1.5 text-[10.5px]">
+      {/* Candidate scope filters. These filter the candidate browser, not the raw reads. */}
+      <div className="px-2.5 py-1.5 border-b border-slate-200 dark:border-gray-700 space-y-1.5 text-[10.5px] text-slate-600 dark:text-gray-300">
+        <div className="grid grid-cols-2 gap-1.5">
+          <label className="flex items-center gap-1" title="Only show candidates with at least this many total reads across all charts.">
+            <span className="text-[9.5px] uppercase tracking-wider text-slate-500 dark:text-gray-400">Reads</span>
+            <input type="number" min={0} value={p.candidateMinReads}
+              onChange={e => p.setCandidateMinReads(Math.max(0, parseInt(e.target.value || '0', 10)))}
+              className="w-full px-1 py-0.5 rounded border border-slate-200 dark:border-gray-600 bg-white dark:bg-gray-700 dark:text-gray-100 tabular-nums" />
+          </label>
+          <label className="flex items-center gap-1" title="Only show candidates present in at least this many charts.">
+            <span className="text-[9.5px] uppercase tracking-wider text-slate-500 dark:text-gray-400">Charts</span>
+            <input type="number" min={0} value={p.candidateMinCharts}
+              onChange={e => p.setCandidateMinCharts(Math.max(0, parseInt(e.target.value || '0', 10)))}
+              className="w-full px-1 py-0.5 rounded border border-slate-200 dark:border-gray-600 bg-white dark:bg-gray-700 dark:text-gray-100 tabular-nums" />
+          </label>
+        </div>
+        <div className="flex flex-wrap gap-x-3 gap-y-1">
+          <label className="inline-flex items-center gap-1 cursor-pointer" title="Only show candidates still present at the final sampled transfer in at least one chart.">
+            <input type="checkbox" checked={p.candidateFinalOnly} onChange={e => p.setCandidateFinalOnly(e.target.checked)} /> final-present
+          </label>
+          <label className="inline-flex items-center gap-1 cursor-pointer" title="Only show candidates that are final dominant in at least one chart.">
+            <input type="checkbox" checked={p.candidateDominantOnly} onChange={e => p.setCandidateDominantOnly(e.target.checked)} /> dominant
+          </label>
+        </div>
+      </div>
+
+      {/* Selection controls: bulk select/clear + selection mode + the Isolate toggle. */}
+      <div className="px-2.5 py-1.5 border-b border-slate-200 dark:border-gray-700 flex items-center gap-1.5 text-[10.5px] flex-wrap">
         <button
           onClick={() => p.setSelectedCands(prev => {
             const next = new Set(prev);
@@ -2953,13 +3339,20 @@ function CandidatesSidebar(p: CandidatesSidebarProps) {
           Select visible
         </button>
         <button
-          onClick={() => p.setSelectedCands(new Set())}
+          onClick={p.clearCandidateSelection}
           disabled={p.selectedCands.size === 0}
           className="px-1.5 py-0.5 rounded border border-slate-200 dark:border-gray-600 text-slate-600 dark:text-gray-300 hover:bg-slate-100 dark:hover:bg-gray-700 disabled:opacity-40"
           title="Clear the candidate selection"
         >
           Clear
         </button>
+        <label className="flex items-center gap-1 cursor-pointer select-none" title="When on, selected candidates filter the chart set to charts containing them. When off, selected candidates only emphasize/dim within the currently visible charts.">
+          <input type="checkbox" checked={p.selectionFiltersCharts}
+            onChange={e => p.setSelectionFiltersCharts(e.target.checked)}
+            disabled={p.selectedCands.size === 0}
+            className="w-3.5 h-3.5 cursor-pointer disabled:opacity-40" />
+          <span className={cn(p.selectedCands.size === 0 && 'opacity-40')}>Filter charts</span>
+        </label>
         <label className="ml-auto flex items-center gap-1 cursor-pointer select-none"
           title="Isolate ON hides unselected candidates inside every chart. Isolate OFF dims them for context.">
           <input type="checkbox" checked={p.isolateSelected}
@@ -2975,9 +3368,9 @@ function CandidatesSidebar(p: CandidatesSidebarProps) {
         <div className="px-2.5 py-1.5 border-b border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/30 text-[11px] flex items-center gap-1.5">
           <Target className="w-3 h-3 text-blue-600 dark:text-blue-300 shrink-0" />
           <span className="text-blue-700 dark:text-blue-200">
-            {p.selectedCands.size} selected · charts filtered + emphasized
+            {p.selectedCands.size} selected · {p.selectionFiltersCharts ? 'charts filtered' : 'emphasize only'} · {p.isolateSelected ? 'isolated' : 'dim context'}
           </span>
-          <button onClick={() => p.setSelectedCands(new Set())}
+          <button onClick={p.clearCandidateSelection}
             className="ml-auto p-0.5 rounded hover:bg-blue-100 dark:hover:bg-blue-900/60 text-blue-700 dark:text-blue-200"
             title="Clear selection">
             <X className="w-3 h-3" />
@@ -3027,7 +3420,7 @@ function CandidatesSidebar(p: CandidatesSidebarProps) {
                 {grp.label} <span className="text-slate-400 font-normal normal-case">({grp.rows.length})</span>
               </div>
             )}
-            {grp.rows.map(({ cand, charts, total }) => {
+            {grp.rows.map(({ cand, charts, total, finalPresentCharts, finalFraction, dominantCharts }) => {
               if (rendered >= RENDER_CAP) return null;
               rendered++;
               const isSel = p.selectedCands.has(cand);
@@ -3041,7 +3434,7 @@ function CandidatesSidebar(p: CandidatesSidebarProps) {
                   )}
                   onMouseEnter={() => p.setHoveredCand(cand)}
                   onMouseLeave={() => p.setHoveredCand(null)}
-                  title={`${cand}: appears in ${charts} chart${charts === 1 ? '' : 's'}, ${total.toLocaleString()} total reads. Hover highlights it across all charts; tick or click the name to select it (filters charts + emphasizes); click the info icon for a cross-chart detail view.`}
+                  title={`${cand}: appears in ${charts} chart${charts === 1 ? '' : 's'}, ${total.toLocaleString()} total reads. Final-present in ${finalPresentCharts}; dominant in ${dominantCharts}; average final fraction ${(finalFraction * 100).toFixed(1)}%. Hover highlights it across all charts; tick or click the name to select it; click the info icon for detail.`}
                 >
                   <input
                     type="checkbox"
@@ -3068,8 +3461,12 @@ function CandidatesSidebar(p: CandidatesSidebarProps) {
                       {cand}
                     </span>
                     <span className="text-[10.5px] tabular-nums text-slate-400 dark:text-gray-500 shrink-0">
-                      {charts}× · {total >= 1000 ? `${(total / 1000).toFixed(1)}k` : total}
+                      {charts}x · {total >= 1000 ? `${(total / 1000).toFixed(1)}k` : total}
                     </span>
+                    <span className="text-[9.5px] tabular-nums text-emerald-600 dark:text-emerald-400 shrink-0" title="Average final-transfer fraction across charts containing this candidate">
+                      F{(finalFraction * 100).toFixed(finalFraction >= 0.1 ? 0 : 1)}%
+                    </span>
+                    {dominantCharts > 0 && <span className="text-[9.5px] tabular-nums text-amber-600 dark:text-amber-400 shrink-0" title="Charts where this candidate is final dominant">D{dominantCharts}</span>}
                   </button>
                   <button
                     onClick={(e) => { e.stopPropagation(); p.onOpenDetail(cand); }}
@@ -3100,6 +3497,110 @@ function CandidatesSidebar(p: CandidatesSidebarProps) {
       <div className="px-2.5 py-1.5 border-t border-slate-200 dark:border-gray-700 bg-slate-50/60 dark:bg-gray-800/60 text-[10.5px] text-slate-500 dark:text-gray-400 leading-snug">
         <div className="flex items-center gap-1.5"><input type="checkbox" disabled checked readOnly className="w-3 h-3" /> select (filters charts + emphasizes)</div>
         <div className="flex items-center gap-1.5 mt-0.5"><Info className="w-3 h-3" /> open cross-chart detail · hover a row to highlight</div>
+      </div>
+    </div>
+  );
+}
+
+function BarcodeSummaryModal({ data, visibleCharts, statsByKey, onClose }: { data: BarcodeDataset; visibleCharts: BarcodeChart[]; statsByKey: Map<string, ChartStats>; onClose: () => void }) {
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', h);
+    return () => window.removeEventListener('keydown', h);
+  }, [onClose]);
+  const summary = useMemo(() => {
+    const totalReads = visibleCharts.reduce((a, c) => a + (statsByKey.get(chartKey(c))?.totalReads ?? 0), 0);
+    const candidates = new Set<string>();
+    const transfers = new Set<number>();
+    for (const c of visibleCharts) {
+      c.transfers.forEach(t => transfers.add(t));
+      for (const [cand, counts] of Object.entries(c.candidates)) if (counts.some(v => v > 0)) candidates.add(cand);
+    }
+    const final = finalOutcomeRows(visibleCharts, statsByKey);
+    return { totalReads, candidates: candidates.size, transfers: transfers.size, final, flipped: final.filter(r => r.flipped).length };
+  }, [visibleCharts, statsByKey]);
+  const libraries = groupCounts(visibleCharts, c => c.library).slice(0, 10);
+  const strains = groupCounts(visibleCharts, c => c.strain).slice(0, 10);
+  const experiments = groupCounts(visibleCharts, c => c.experiment).slice(0, 10);
+  const topFinal = [...summary.final].sort((a, b) => b.finalFraction - a.finalFraction || b.finalReads - a.finalReads).slice(0, 12);
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" onClick={onClose}>
+      <div className="bg-white dark:bg-gray-900 text-slate-900 dark:text-gray-100 border border-slate-200 dark:border-gray-700 rounded-xl shadow-2xl w-full max-w-5xl max-h-[88vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="barcode-summary-title">
+        <div className="px-4 py-3 border-b border-slate-200 dark:border-gray-700 bg-slate-50 dark:bg-gray-800 flex items-center gap-2">
+          <Info className="w-4 h-4 text-emerald-600" />
+          <h3 id="barcode-summary-title" className="font-semibold">Barcode data summary</h3>
+          <span className="text-[11px] text-slate-500 dark:text-gray-400">counts source: {data.source === 'lims' ? 'verAB_barcodes' : 'mock data'}; totals and tables are derived from loaded per-transfer reads</span>
+          <button onClick={onClose} className="ml-auto p-1 rounded hover:bg-slate-200 dark:hover:bg-gray-700 text-slate-500 dark:text-gray-400" title="Close (Esc)"><X className="w-5 h-5" /></button>
+        </div>
+        <div className="p-4 overflow-y-auto space-y-4">
+          <div className="grid grid-cols-2 md:grid-cols-6 gap-2 text-[12px]">
+            <Stat label="visible charts" value={`${visibleCharts.length}/${data.charts.length}`} accent />
+            <Stat label="total reads" value={summary.totalReads.toLocaleString()} />
+            <Stat label="candidates" value={String(summary.candidates)} />
+            <Stat label="VerA subunits" value={String(data.uniqueA.length)} />
+            <Stat label="VerB subunits" value={String(data.uniqueB.length)} />
+            <Stat label="flipped" value={String(summary.flipped)} />
+          </div>
+          <div className="grid md:grid-cols-3 gap-3 text-[12px]">
+            {[['Experiments', experiments], ['Libraries', libraries], ['Strains', strains]].map(([label, rows]) => (
+              <div key={label as string} className="rounded-lg border border-slate-200 dark:border-gray-700 bg-slate-50 dark:bg-gray-800 p-3">
+                <div className="text-[10px] uppercase tracking-wider text-slate-500 dark:text-gray-400 mb-2">{label as string}</div>
+                <div className="space-y-1 max-h-48 overflow-y-auto">
+                  {(rows as { value: string; count: number }[]).map(r => <div key={r.value} className="flex justify-between gap-2"><span className="font-mono truncate">{r.value}</span><span className="tabular-nums text-slate-500">{r.count}</span></div>)}
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="rounded-lg border border-slate-200 dark:border-gray-700 overflow-hidden">
+            <div className="px-3 py-2 bg-slate-50 dark:bg-gray-800 border-b border-slate-200 dark:border-gray-700 text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-gray-400">Top final outcomes</div>
+            <table className="w-full text-[12px]">
+              <thead className="text-slate-500 dark:text-gray-400"><tr><th className="px-2 py-1.5 text-left">Chart</th><th className="px-2 py-1.5 text-left">Final dominant</th><th className="px-2 py-1.5 text-right">Fraction</th><th className="px-2 py-1.5 text-right">Richness</th></tr></thead>
+              <tbody>{topFinal.map(r => <tr key={chartKey(r.chart)} className="border-t border-slate-100 dark:border-gray-700"><td className="px-2 py-1.5 font-mono truncate max-w-[280px]" title={chartIdentityTitle(r.chart)}>{r.chart.sampleName || chartKey(r.chart)}</td><td className="px-2 py-1.5 font-mono">{r.dominant}</td><td className="px-2 py-1.5 text-right tabular-nums">{(r.finalFraction * 100).toFixed(1)}%</td><td className="px-2 py-1.5 text-right tabular-nums">{r.richness}</td></tr>)}</tbody>
+            </table>
+          </div>
+          {data.warnings.length > 0 && <div className="rounded border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 p-3 text-[12px] text-amber-800 dark:text-amber-200">{data.warnings.join(' ')}</div>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function BarcodePerspectivesPanel({ charts, statsByKey, mode, setMode, onExport }: { charts: BarcodeChart[]; statsByKey: Map<string, ChartStats>; mode: BarcodePerspective; setMode: (m: BarcodePerspective) => void; onExport: () => void }) {
+  const finalRows = useMemo(() => finalOutcomeRows(charts, statsByKey).sort((a, b) => b.finalFraction - a.finalFraction || b.finalReads - a.finalReads), [charts, statsByKey]);
+  const presRows = useMemo(() => presenceRows(charts), [charts]);
+  const aRows = useMemo(() => subunitRows(charts, 'A'), [charts]);
+  const bRows = useMemo(() => subunitRows(charts, 'B'), [charts]);
+  const richnessRows = useMemo(() => charts.flatMap(c => c.transfers.map((t, ti) => {
+    let richness = 0, depth = 0;
+    for (const counts of Object.values(c.candidates)) { const v = counts[ti] || 0; if (v > 0) richness++; depth += v; }
+    return { chart: c, transfer: t, richness, depth };
+  })).sort((a, b) => chartKey(a.chart).localeCompare(chartKey(b.chart)) || a.transfer - b.transfer), [charts]);
+  const modeButton = (id: BarcodePerspective, label: string) => (
+    <button onClick={() => setMode(id)} className={cn('px-2 py-1 rounded border text-[11px] font-medium', mode === id ? 'bg-emerald-600 text-white border-emerald-700' : 'border-slate-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-slate-600 dark:text-gray-300 hover:bg-slate-100 dark:hover:bg-gray-600')}>{label}</button>
+  );
+  const rows = mode === 'final' ? finalRows : mode === 'presence' ? presRows : mode === 'vera' ? aRows : mode === 'verb' ? bRows : richnessRows;
+  return (
+    <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+      <div className="px-3 py-2 border-b border-slate-200 dark:border-gray-700 bg-white dark:bg-gray-800 flex items-center gap-2 flex-wrap">
+        <span className="text-[12px] font-semibold text-slate-700 dark:text-gray-200">Perspectives</span>
+        {modeButton('final', 'Final outcomes')}
+        {modeButton('presence', 'Presence')}
+        {modeButton('richness', 'Richness')}
+        {modeButton('depth', 'Read depth')}
+        {modeButton('vera', 'VerA')}
+        {modeButton('verb', 'VerB')}
+        <button onClick={onExport} className="ml-auto flex items-center gap-1 px-2 py-1 rounded border border-slate-200 dark:border-gray-600 text-[11px] text-slate-600 dark:text-gray-300 hover:bg-slate-100 dark:hover:bg-gray-700"><Download className="w-3 h-3" /> CSV</button>
+      </div>
+      <div className="flex-1 overflow-auto p-3">
+        <div className="rounded-lg border border-slate-200 dark:border-gray-700 bg-white dark:bg-gray-800 overflow-hidden">
+          <table className="w-full text-[12px]">
+            {mode === 'final' && <><thead className="bg-slate-50 dark:bg-gray-800 text-slate-500"><tr><th className="px-2 py-1.5 text-left">Chart</th><th className="px-2 py-1.5 text-left">Dominant final</th><th className="px-2 py-1.5 text-right">Reads</th><th className="px-2 py-1.5 text-right">%</th><th className="px-2 py-1.5 text-right">Richness</th><th className="px-2 py-1.5 text-right">Flip</th></tr></thead><tbody>{finalRows.map(r => <tr key={chartKey(r.chart)} className="border-t border-slate-100 dark:border-gray-700"><td className="px-2 py-1.5 font-mono truncate max-w-[360px]" title={chartIdentityTitle(r.chart)}>{r.chart.sampleName || chartKey(r.chart)}</td><td className="px-2 py-1.5 font-mono">{r.dominant}</td><td className="px-2 py-1.5 text-right tabular-nums">{r.finalReads.toLocaleString()}</td><td className="px-2 py-1.5 text-right tabular-nums">{(r.finalFraction * 100).toFixed(1)}%</td><td className="px-2 py-1.5 text-right tabular-nums">{r.richness}</td><td className="px-2 py-1.5 text-right">{r.flipped ? 'yes' : ''}</td></tr>)}</tbody></>}
+            {mode === 'presence' && <><thead className="bg-slate-50 dark:bg-gray-800 text-slate-500"><tr><th className="px-2 py-1.5 text-left">Candidate</th><th className="px-2 py-1.5 text-right">Charts</th><th className="px-2 py-1.5 text-right">Final charts</th><th className="px-2 py-1.5 text-right">Reads</th></tr></thead><tbody>{presRows.map(r => <tr key={r.cand} className="border-t border-slate-100 dark:border-gray-700"><td className="px-2 py-1.5 font-mono">{r.cand}</td><td className="px-2 py-1.5 text-right tabular-nums">{r.charts}</td><td className="px-2 py-1.5 text-right tabular-nums">{r.finalCharts}</td><td className="px-2 py-1.5 text-right tabular-nums">{r.total.toLocaleString()}</td></tr>)}</tbody></>}
+            {(mode === 'richness' || mode === 'depth') && <><thead className="bg-slate-50 dark:bg-gray-800 text-slate-500"><tr><th className="px-2 py-1.5 text-left">Chart</th><th className="px-2 py-1.5 text-right">Transfer</th><th className="px-2 py-1.5 text-right">Richness</th><th className="px-2 py-1.5 text-right">Read depth</th></tr></thead><tbody>{[...richnessRows].sort((a, b) => mode === 'depth' ? b.depth - a.depth : b.richness - a.richness).map(r => <tr key={`${chartKey(r.chart)}-${r.transfer}`} className="border-t border-slate-100 dark:border-gray-700"><td className="px-2 py-1.5 font-mono truncate max-w-[360px]" title={chartIdentityTitle(r.chart)}>{r.chart.sampleName || chartKey(r.chart)}</td><td className="px-2 py-1.5 text-right tabular-nums">T{r.transfer}</td><td className="px-2 py-1.5 text-right tabular-nums">{r.richness}</td><td className="px-2 py-1.5 text-right tabular-nums">{r.depth.toLocaleString()}</td></tr>)}</tbody></>}
+            {(mode === 'vera' || mode === 'verb') && <><thead className="bg-slate-50 dark:bg-gray-800 text-slate-500"><tr><th className="px-2 py-1.5 text-left">{mode === 'vera' ? 'VerA' : 'VerB'}</th><th className="px-2 py-1.5 text-right">Charts</th><th className="px-2 py-1.5 text-right">Candidates</th><th className="px-2 py-1.5 text-right">Reads</th><th className="px-2 py-1.5 text-right">Final reads</th></tr></thead><tbody>{(mode === 'vera' ? aRows : bRows).map(r => <tr key={r.id} className="border-t border-slate-100 dark:border-gray-700"><td className="px-2 py-1.5 font-mono">{r.id}</td><td className="px-2 py-1.5 text-right tabular-nums">{r.charts}</td><td className="px-2 py-1.5 text-right tabular-nums">{r.candidates}</td><td className="px-2 py-1.5 text-right tabular-nums">{r.total.toLocaleString()}</td><td className="px-2 py-1.5 text-right tabular-nums">{r.finalReads.toLocaleString()}</td></tr>)}</tbody></>}
+          </table>
+          {rows.length === 0 && <div className="p-8 text-center text-slate-400 dark:text-gray-500 text-sm">No rows for this perspective.</div>}
+        </div>
       </div>
     </div>
   );
@@ -3239,6 +3740,7 @@ interface FocusViewProps {
   topN: number;
   onToggleCand: (c: string) => void;
   onOpenDetail: (c: string) => void;
+  onOpenOther: (request: OtherRollupRequest) => void;
   onBack: () => void;
   orientation: 'rows' | 'bars' | 'lines' | 'heatmap';
   hoveredCand?: string | null;
@@ -3252,7 +3754,7 @@ interface FocusViewProps {
 }
 function FocusView(props: FocusViewProps) {
   const { charts, focusKey, setFocusKey, chart, stats, colorMode, splitAB, normalize, orientation,
-    aColors, bColors, candColors, selectedCands, isolateSelected, topN, onToggleCand, onOpenDetail,
+    aColors, bColors, candColors, selectedCands, isolateSelected, topN, onToggleCand, onOpenDetail, onOpenOther,
     onBack, hoveredCand, onHoverCandidate, hoveredSubunit, onAddToCompare, isInCompare } = props;
   const idx = charts.findIndex(c => chartKey(c) === focusKey);
   const prev = idx > 0 ? charts[idx - 1] : null;
@@ -3316,7 +3818,7 @@ function FocusView(props: FocusViewProps) {
           className="text-[11.5px] border border-slate-300 dark:border-gray-600 rounded px-2 py-1 bg-white dark:bg-gray-700 dark:text-gray-100 outline-none font-mono min-w-[260px] max-w-[560px]">
           {charts.map(c => (
             <option key={chartKey(c)} value={chartKey(c)}>
-              {c.well ? `${c.well} · ` : ''}{c.library} · rep {c.replicate}
+              {c.well ? `${c.well} · ` : ''}{c.sampleName ? `${c.sampleName} · ` : ''}{c.library} · rep {c.replicate}
             </option>
           ))}
         </select>
@@ -3332,7 +3834,8 @@ function FocusView(props: FocusViewProps) {
       {/* Full, untruncated identity for the focused chart (the dropdown above can
           clip long library names; this line always shows them in full). */}
       <div className="px-3 py-1 border-b border-slate-200 dark:border-gray-700 bg-slate-50/60 dark:bg-gray-800/60 text-[11.5px] flex flex-wrap items-center gap-x-2 gap-y-0.5 shrink-0">
-        {chart.well && <span className="font-mono font-semibold text-slate-800 dark:text-gray-100">{chart.well}</span>}
+        {chart.well && <span className="font-mono font-semibold text-slate-800 dark:text-gray-100" title={chartIdentityTitle(chart)}>{chart.well}</span>}
+        {chart.sampleName && <span className="font-mono text-slate-600 dark:text-gray-300" title={chartIdentityTitle(chart)}>{chart.sampleName}</span>}
         <span className="font-mono text-slate-700 dark:text-gray-200">{chart.strain}</span>
         <span className="text-slate-400">|</span>
         <span className="font-mono text-slate-700 dark:text-gray-200">{chart.library}</span>
@@ -3356,7 +3859,7 @@ function FocusView(props: FocusViewProps) {
                 aColors={aColors} bColors={bColors} candColors={candColors}
                 selectedCands={selectedCands} isolateSelected={isolateSelected} topN={topN}
                 hoverCand={hoveredCand} hoverSubunit={hoveredSubunit}
-                onPickCandidate={onToggleCand} onHoverCandidate={onHoverCandidate}
+                onPickCandidate={onToggleCand} onHoverCandidate={onHoverCandidate} onOpenOther={onOpenOther}
               />
             ) : orientation === 'lines' ? (
               <TrajectoryChart
@@ -3385,9 +3888,9 @@ function FocusView(props: FocusViewProps) {
                 height={chartHeight}
                 hoverCand={hoveredCand}
                 hoverSubunit={hoveredSubunit}
-                onPickCandidate={onToggleCand}
-                onHoverCandidate={onHoverCandidate}
+                onPickCandidate={onToggleCand} onHoverCandidate={onHoverCandidate} onOpenOther={onOpenOther}
               />
+
             )}
           </div>
         </div>
@@ -3417,6 +3920,8 @@ interface CompareViewProps {
   isolateSelected: boolean;
   topN: number;
   onToggleCand: (c: string) => void;
+  onClearCandidates: () => void;
+  onOpenOther: (request: OtherRollupRequest) => void;
   onBack: () => void;
   hoveredCand?: string | null;
   hoveredSubunit?: SubunitRef | null;
@@ -3431,7 +3936,7 @@ interface CompareViewProps {
 }
 function CompareView(props: CompareViewProps) {
   const { keys, charts, statsByKey, colorMode, splitAB, normalize, onNormalize, aColors, bColors,
-    candColors, selectedCands, isolateSelected, topN, onToggleCand, onBack, hoveredCand, hoveredSubunit, onRemove, onHoverCandidate, onHoverSubunit, onToggleSubunitCands } = props;
+    candColors, selectedCands, isolateSelected, topN, onToggleCand, onClearCandidates, onOpenOther, onBack, hoveredCand, hoveredSubunit, onRemove, onHoverCandidate, onHoverSubunit, onToggleSubunitCands } = props;
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onBack(); };
@@ -3549,14 +4054,19 @@ function CompareView(props: CompareViewProps) {
   // divergence (variance of final-transfer fraction across charts) so the
   // candidates whose fate differs most between samples bubble up first.
   const [legendSort, setLegendSort] = useState<'reads' | 'divergence'>('reads');
+  const [legendQuery, setLegendQuery] = useState('');
   const legendSorted = useMemo(() => {
     const rows = [...legend];
     if (legendSort === 'divergence') rows.sort((x, y) => y.variance - x.variance || y.total - x.total);
     else rows.sort((x, y) => y.total - x.total);
     return rows;
   }, [legend, legendSort]);
-  const legendShown = legendSorted.slice(0, LEGEND_CAP);
-  const legendMore = legendSorted.length - legendShown.length;
+  const legendFiltered = useMemo(() => {
+    const q = legendQuery.trim().toLowerCase();
+    return q ? legendSorted.filter(r => r.cand.toLowerCase().includes(q) || r.a.toLowerCase().includes(q) || r.b.toLowerCase().includes(q)) : legendSorted;
+  }, [legendSorted, legendQuery]);
+  const legendShown = legendFiltered.slice(0, LEGEND_CAP);
+  const legendMore = legendFiltered.length - legendShown.length;
 
   // Swatch color MUST match what the bars actually draw: the chart segments respect
   // colorMode (A-B uses candColors, VerA uses aColors, VerB uses bColors), so the
@@ -3604,16 +4114,19 @@ function CompareView(props: CompareViewProps) {
         map.get(id)!.lastFractions.push(lastBarTotal ? lastReads / lastBarTotal : 0);
       }
     }
-    const rows = [...map.values()].map(a => {
-      const n = a.lastFractions.length;
-      const mean = n ? a.lastFractions.reduce((s, v) => s + v, 0) / n : 0;
-      const variance = n ? a.lastFractions.reduce((s, v) => s + (v - mean) * (v - mean), 0) / n : 0;
-      return { id: a.id, total: a.total, charts: a.charts.size, cands: [...a.cands], variance };
-    });
+    const q = legendQuery.trim().toLowerCase();
+    const rows = [...map.values()]
+      .filter(a => !q || a.id.toLowerCase().includes(q) || [...a.cands].some(c => c.toLowerCase().includes(q)))
+      .map(a => {
+        const n = a.lastFractions.length;
+        const mean = n ? a.lastFractions.reduce((s, v) => s + v, 0) / n : 0;
+        const variance = n ? a.lastFractions.reduce((s, v) => s + (v - mean) * (v - mean), 0) / n : 0;
+        return { id: a.id, total: a.total, charts: a.charts.size, cands: [...a.cands], variance };
+      });
     if (legendSort === 'divergence') rows.sort((x, y) => y.variance - x.variance || y.total - x.total);
     else rows.sort((x, y) => y.total - x.total);
     return rows.slice(0, LEGEND_CAP);
-  }, [subunitMode, resolved, legendSort]);
+  }, [subunitMode, resolved, legendSort, legendQuery]);
 
   const subunitColor = (id: string): string => (subunitMode === 'A' ? aColors[id] : bColors[id]) || '#888';
   const subunitSelState = (cands: string[]): 'all' | 'some' | 'none' => {
@@ -3718,7 +4231,7 @@ function CompareView(props: CompareViewProps) {
       </div>
 
       {/* SHARED CANDIDATE / SUBUNIT LEGEND / TRACKER */}
-      {resolved.length > 0 && ((subunitMode ? subunitLegend.length : legendShown.length) > 0) && (
+      {resolved.length > 0 && ((subunitMode ? subunitLegend.length : legendShown.length) > 0 || legendQuery.trim()) && (
         <div className="shrink-0 border-b border-slate-200 dark:border-gray-700 bg-slate-50/70 dark:bg-gray-800/50 px-3 py-2">
           <div className="flex items-center gap-2 mb-1.5">
             <span className="text-[10.5px] font-semibold uppercase tracking-wider text-slate-500 dark:text-gray-400">
@@ -3728,14 +4241,35 @@ function CompareView(props: CompareViewProps) {
               {subunitMode ? `click a Ver${subunitMode} to track all its combinations in every chart · hover to highlight` : 'click to track in every chart · hover to highlight'}
             </span>
             <div className="ml-auto flex items-center gap-1">
+              <div className="relative">
+                <Search className="w-3 h-3 absolute left-1.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  value={legendQuery}
+                  onChange={e => setLegendQuery(e.target.value)}
+                  placeholder="candidate / subunit"
+                  className="w-36 pl-6 pr-1.5 py-0.5 rounded border border-slate-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-[10.5px] text-slate-700 dark:text-gray-100 outline-none"
+                />
+              </div>
               <span className="text-[10px] text-slate-400 dark:text-gray-500">Sort</span>
               <button className={colBtnCls(legendSort === 'reads')} onClick={() => setLegendSort('reads')} title="Sort by total reads across compared charts">Reads</button>
               <button className={colBtnCls(legendSort === 'divergence')} onClick={() => setLegendSort('divergence')} title="Sort by how differently this ends up across the compared charts (variance of final-transfer fraction)">Divergent</button>
+              <button
+                className={colBtnCls(false)}
+                onClick={() => {
+                  const cands = subunitMode ? subunitLegend.flatMap(r => r.cands) : legendShown.map(r => r.cand);
+                  props.onToggleSubunitCands?.(cands);
+                }}
+                disabled={(subunitMode ? subunitLegend.length : legendShown.length) === 0}
+                title="Select or deselect every candidate currently shown in this shared legend"
+              >Shown</button>
+              <button className={colBtnCls(props.selectedCands.size > 0)} onClick={onClearCandidates} disabled={props.selectedCands.size === 0} title="Clear all selected candidates">Clear</button>
             </div>
           </div>
           <div className="flex flex-wrap gap-1.5">
             {subunitMode ? (
-              subunitLegend.map(row => {
+              subunitLegend.length === 0 ? (
+                <span className="text-[10.5px] text-slate-400 dark:text-gray-500 px-2 py-1">No shared subunits match “{legendQuery}”.</span>
+              ) : subunitLegend.map(row => {
                 const sel = subunitSelState(row.cands);
                 const label = `Ver${subunitMode}${row.id}`;
                 return (
@@ -3796,6 +4330,9 @@ function CompareView(props: CompareViewProps) {
                     </button>
                   );
                 })}
+                {legendShown.length === 0 && (
+                  <span className="text-[10.5px] text-slate-400 dark:text-gray-500 px-2 py-1">No shared candidates match “{legendQuery}”.</span>
+                )}
                 {legendMore > 0 && (
                   <span className="flex items-center px-2 py-1 text-[10.5px] text-slate-400 dark:text-gray-500">+{legendMore} more</span>
                 )}
@@ -3823,7 +4360,13 @@ function CompareView(props: CompareViewProps) {
                   <div className="flex items-center gap-2 px-3 py-1.5 border-b border-slate-200 dark:border-gray-700 bg-slate-50/60 dark:bg-gray-800/60 text-[11.5px] shrink-0">
                     {c.well && (
                       <>
-                        <span className="font-mono font-semibold text-slate-800 dark:text-gray-100">{c.well}</span>
+                        <span className="font-mono font-semibold text-slate-800 dark:text-gray-100" title={chartIdentityTitle(c)}>{c.well}</span>
+                        <span className="text-slate-400">|</span>
+                      </>
+                    )}
+                    {c.sampleName && (
+                      <>
+                        <span className="font-mono text-slate-600 dark:text-gray-300 truncate" title={chartIdentityTitle(c)}>{c.sampleName}</span>
                         <span className="text-slate-400">|</span>
                       </>
                     )}
@@ -3874,6 +4417,7 @@ function CompareView(props: CompareViewProps) {
                       hoverSubunit={hoveredSubunit}
                       onPickCandidate={onToggleCand}
                       onHoverCandidate={onHoverCandidate}
+                      onOpenOther={onOpenOther}
                       yMaxOverride={useCommonY ? commonMaxY : undefined}
                     />
                   </div>
