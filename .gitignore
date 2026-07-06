@@ -81,6 +81,11 @@ public/data/*.json
 public/data/*.json.gz
 public/data/manifest.json
 
+# local live-refresh state
+/ops/auto-refresh-live.log
+/ops/auto-refresh-live.lock
+/ops/live-db-source.mtime
+
 # local agent rules and private writing handoffs (not for publication)
 CLAUDE.md
 AGENTS.md
