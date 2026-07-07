@@ -158,16 +158,18 @@ interface MutationRawRow {
 //   TFMN1.fba.2.T25.L1  isolate L1
 // Generalize: capture the integer transfer, then anything alphanumeric after the dot.
 function parseSeqSampleSuffix(seqSample: string): { transfer?: number; selection?: string } {
-  const m = seqSample.match(/\.T(\d+)\.([A-Za-z]\w*)$/);
+  const m = seqSample.match(/\.T(\d+)(?:\.([A-Za-z]\w*))?$/);
   if (!m) return {};
-  return { transfer: parseInt(m[1], 10), selection: m[2] };
+  const out: { transfer?: number; selection?: string } = { transfer: parseInt(m[1], 10) };
+  if (m[2]) out.selection = m[2];
+  return out;
 }
 
 // Split an explorer seq_sample ID into its ALE lineage and transfer number so
 // it can be joined to a Robotic_OD curve (which is keyed by sample_name +
 // transfer). "TFMN1.fba.1.T5.P" -> { lineage: "TFMN1.fba.1", transfer: 5 }.
 function parseLineageTransfer(seqSample: string): { lineage: string; transfer: number } | null {
-  const m = seqSample.match(/\.T(\d+)\.[A-Za-z]\w*$/);
+  const m = seqSample.match(/\.T(\d+)(?=\.|$)/);
   if (!m) return null;
   return { lineage: seqSample.slice(0, m.index), transfer: parseInt(m[1], 10) };
 }

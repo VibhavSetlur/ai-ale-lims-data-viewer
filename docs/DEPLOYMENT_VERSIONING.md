@@ -9,24 +9,25 @@ branch pointer, base path, database, and visible capabilities.
 | Branch | URL | Database | Barcode tab | Purpose |
 |---|---|---|---|---|
 | `main` | server/local | runtime DB | follows active DB | Integration branch for feature and fix work |
-| `deploy/aiale-dev` | `https://modelseed.org/annotation/projects/aiale-dev/` | `data/lims_indexed.db` | shown when `verAB_barcodes` exists | Staging deployment before promotion |
+| `deploy/aiale-dev` | `https://modelseed.org/annotation/projects/aiale-dev/` | `data/lims_indexed.db` | shown when `verAB_barcodes` exists | Dev deployment before promotion |
 | `deploy/aiale-public` | `https://modelseed.org/annotation/projects/aiale/` | `data/lims_TFMN1_indexed.db` | hidden | Public publication snapshot |
-| `deploy/aiale-private` | `https://modelseed.org/annotation/projects/aiale-06-25-2026/` | `data/lims_indexed.db` | shown when `verAB_barcodes` exists | Internal full-data snapshot |
+| `deploy/aiale-private` | `https://modelseed.org/annotation/projects/aiale-06-25-2026/` | `data/lims_indexed.db` | shown when `verAB_barcodes` exists | Private internal full-data snapshot |
 
 `main` is not the deployment record. The `deploy/*` branches are the branch
 pointers that say which code revision belongs to each static URL.
 
 ## Viewer Display
 
-The viewer header shows a version badge. Opening it shows:
+The viewer header shows a version badge plus a release/data log button. Opening either surface shows:
 
 - viewer semantic version, starting at `1.0.0`;
-- deployment channel: Staging (`dev` key), `public`, `private`, or `server`;
+- deployment channel labels `dev`, `public`, `private`, or `server` with truthful display names `Dev`, `Public`, `Private`, and `Server`;
 - deployment branch;
 - build commit;
 - server/static mode;
 - expected database for that channel;
-- barcode capability policy for that channel.
+- barcode capability policy for that channel;
+- viewer release notes and the current data snapshot manifest when static.
 
 This makes screenshots and live URLs self-describing.
 
@@ -37,14 +38,14 @@ Static builds set these environment variables at build time:
 | Variable | Meaning |
 |---|---|
 | `NEXT_PUBLIC_VIEWER_VERSION` | Viewer semantic version, normally from `package.json` |
-| `NEXT_PUBLIC_DEPLOYMENT_CHANNEL` | `dev` for Staging, `public`, `private`, or `server` |
+| `NEXT_PUBLIC_DEPLOYMENT_CHANNEL` | `dev`, `public`, `private`, or `server` |
 | `NEXT_PUBLIC_DEPLOYMENT_BRANCH` | Branch pointer that should match the deployed URL |
 | `NEXT_PUBLIC_GIT_COMMIT` | Commit baked into the static bundle |
 | `NEXT_PUBLIC_BASE_PATH` | Static URL base path |
 
 `scripts/build-static.sh` infers the channel and branch from `BASE_PATH`:
 
-- `/annotation/projects/aiale-dev` -> `dev` channel displayed as Staging, `deploy/aiale-dev`
+- `/annotation/projects/aiale-dev` -> `dev` channel displayed as Dev, `deploy/aiale-dev`
 - `/annotation/projects/aiale` -> `public`, `deploy/aiale-public`
 - `/annotation/projects/aiale-06-25-2026` -> `private`, `deploy/aiale-private`
 

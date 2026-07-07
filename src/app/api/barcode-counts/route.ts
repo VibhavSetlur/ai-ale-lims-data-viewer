@@ -53,8 +53,8 @@ function parseSeqsampleName(name: string): {
 } | null {
   const parts = name.split('.');
   if (parts.length < 6) return null;
-  // Find the .T<digits>. token — that's our transfer marker. Everything before
-  // its position has fixed semantics; anything after is the selection tag.
+  // Find the .T<digits> token — that's our transfer marker. Accept the legacy
+  // trailing selection tag as either a separate segment or absent entirely.
   const tIdx = parts.findIndex(p => /^T\d+$/.test(p));
   if (tIdx < 5) return null;
   const transfer = parseInt(parts[tIdx].slice(1), 10);

@@ -5,11 +5,12 @@ import DataTable from './DataTable';
 import MutationExplorer from './MutationExplorer';
 import { fetchData, IS_STATIC, BASE_PATH } from '../lib/dataSource';
 import { DEPLOYMENT_CHANNELS, type BuildInfo } from '../lib/buildInfo';
+import { releaseNotes } from '../lib/releaseNotes';
 import {
   Database, Search, Sun, Moon, Table2, Dna,
   Server, HardDrive, RefreshCw, AlertCircle,
   ChevronLeft, ChevronRight, X, Clock, GitBranch,
-  BookOpen, Compass, PlayCircle,
+  BookOpen, Compass, PlayCircle, PanelRightOpen,
 } from 'lucide-react';
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
@@ -56,6 +57,12 @@ interface MirrorInfo {
   snapshot_at?: string;
   mtime?: string;
   table_counts: Record<string, number>;
+}
+
+interface ManifestInfo {
+  generatedAt?: string;
+  source?: string;
+  artifacts?: Record<string, unknown>;
 }
 
 function formatSnapshot(iso?: string): string {
@@ -106,8 +113,13 @@ export default function Dashboard({ initialTables, buildInfo }: DashboardProps) 
   const mirrorRef = useRef<HTMLDivElement>(null);
   const [showVersionInfo, setShowVersionInfo] = useState(false);
   const versionRef = useRef<HTMLDivElement>(null);
+  const [showChangesPanel, setShowChangesPanel] = useState(false);
+  const changesRef = useRef<HTMLDivElement>(null);
+  const [manifestInfo, setManifestInfo] = useState<ManifestInfo | null>(null);
+  const [manifestError, setManifestError] = useState(false);
   const channelInfo = DEPLOYMENT_CHANNELS[buildInfo.channel];
-  const displayChannel = buildInfo.channel === 'dev' ? 'staging' : buildInfo.channel;
+  const displayChannel = channelInfo.label;
+  const manifestUrl = useMemo(() => `${BASE_PATH}/data/manifest.json`, []);
 
   // Help system: Guide (how-do-I + prompt builder), full Help center, and the
   // interactive click-through Tutorial. All live at the Dashboard level so they
@@ -422,6 +434,38 @@ export default function Dashboard({ initialTables, buildInfo }: DashboardProps) 
     return () => document.removeEventListener('mousedown', handler);
   }, [showVersionInfo]);
 
+  useEffect(() => {
+    if (!showChangesPanel) return;
+    const handler = (e: MouseEvent) => {
+      if (changesRef.current && !changesRef.current.contains(e.target as Node)) setShowChangesPanel(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showChangesPanel]);
+
+  useEffect(() => {
+    if (!showChangesPanel || !IS_STATIC) return;
+    let cancelled = false;
+    fetch(manifestUrl)
+      .then(async (res) => {
+        if (!res.ok) throw new Error(`Manifest request failed: ${res.status}`);
+        return res.json();
+      })
+      .then((json: ManifestInfo) => {
+        if (!cancelled) {
+          setManifestInfo(json);
+          setManifestError(false);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setManifestError(true);
+          setManifestInfo(null);
+        }
+      });
+    return () => { cancelled = true; };
+  }, [manifestUrl, showChangesPanel]);
+
   // Close db switcher on outside click
   useEffect(() => {
     if (!showDbSwitcher) return;
@@ -502,46 +546,118 @@ export default function Dashboard({ initialTables, buildInfo }: DashboardProps) 
               <p className="text-[10px] text-[var(--text-faint)] font-medium mt-0.5">Adaptive Laboratory Evolution</p>
             </div>
           </div>
-          <div className="relative" ref={versionRef}>
-            <button
-              onClick={() => setShowVersionInfo(s => !s)}
-              className="flex items-center gap-1.5 px-2 py-1 rounded-md border border-[var(--border)] bg-[var(--surface-2)] hover:bg-[var(--surface-3)] transition-colors"
-              title={`${channelInfo.label} ${buildInfo.version}`}
-            >
-              <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--accent-700)]">{displayChannel}</span>
-              <span className="text-[11px] font-semibold text-[var(--text)] tabular-nums">v{buildInfo.version}</span>
-            </button>
-            {showVersionInfo && (
-              <div className="absolute left-0 top-full mt-1 w-[22rem] bg-[var(--surface)] rounded-lg border border-[var(--border)] z-50 p-3 text-[11.5px] text-[var(--text)]" style={{ boxShadow: 'var(--shadow-md)' }}>
-                <div className="flex items-start justify-between gap-3 mb-2">
-                  <div>
-                    <h3 className="text-xs font-semibold text-[var(--text)]">Viewer version</h3>
-                    <p className="text-[10.5px] text-[var(--text-soft)] mt-0.5">Deployment branch and data snapshot are tracked separately.</p>
-                  </div>
-                  <span className="lims-id text-[11px] tabular-nums">v{buildInfo.version}</span>
-                </div>
-                <div className="grid grid-cols-[5.5rem_1fr] gap-x-2 gap-y-1 lims-id">
-                  <span className="text-[var(--text-soft)]">Channel</span><span>{channelInfo.label}</span>
-                  <span className="text-[var(--text-soft)]">Branch</span><span>{buildInfo.branch}</span>
-                  <span className="text-[var(--text-soft)]">Commit</span><span>{buildInfo.commit.slice(0, 12)}</span>
-                  <span className="text-[var(--text-soft)]">Mode</span><span>{buildInfo.mode}</span>
-                  <span className="text-[var(--text-soft)]">Database</span><span>{channelInfo.database}</span>
-                  <span className="text-[var(--text-soft)]">Barcodes</span><span>{channelInfo.barcodePolicy}</span>
-                </div>
-                <div className="mt-3 pt-2 border-t border-[var(--border)] space-y-1">
-                  {(['dev', 'public', 'private'] as const).map(channel => (
-                    <div key={channel} className={cn('flex items-start gap-2 rounded px-1.5 py-1', channel === buildInfo.channel ? 'bg-[var(--accent-50)]' : '')}>
-                      <GitBranch className="w-3.5 h-3.5 mt-0.5 text-[var(--text-faint)] shrink-0" />
-                      <div className="min-w-0">
-                        <div className="font-semibold text-[var(--text)]">{DEPLOYMENT_CHANNELS[channel].label}</div>
-                        <div className="text-[10.5px] text-[var(--text-soft)] truncate">{DEPLOYMENT_CHANNELS[channel].branch} · {DEPLOYMENT_CHANNELS[channel].database}</div>
+              <div className="relative" ref={versionRef}>
+                <button
+                  onClick={() => setShowVersionInfo(s => !s)}
+                  className="flex items-center gap-1.5 px-2 py-1 rounded-md border border-[var(--border)] bg-[var(--surface-2)] hover:bg-[var(--surface-3)] transition-colors"
+                  title={`${channelInfo.label} ${buildInfo.version}`}
+                >
+                  <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--accent-700)]">{displayChannel}</span>
+                  <span className="text-[11px] font-semibold text-[var(--text)] tabular-nums">v{buildInfo.version}</span>
+                </button>
+                {showVersionInfo && (
+                  <div className="absolute left-0 top-full mt-1 w-[22rem] bg-[var(--surface)] rounded-lg border border-[var(--border)] z-50 p-3 text-[11.5px] text-[var(--text)]" style={{ boxShadow: 'var(--shadow-md)' }}>
+                    <div className="flex items-start justify-between gap-3 mb-2">
+                      <div>
+                        <h3 className="text-xs font-semibold text-[var(--text)]">Viewer version</h3>
+                        <p className="text-[10.5px] text-[var(--text-soft)] mt-0.5">Deployment branch and data snapshot are tracked separately.</p>
                       </div>
+                      <span className="lims-id text-[11px] tabular-nums">v{buildInfo.version}</span>
                     </div>
-                  ))}
-                </div>
+                    <div className="grid grid-cols-[5.5rem_1fr] gap-x-2 gap-y-1 lims-id">
+                      <span className="text-[var(--text-soft)]">Channel</span><span>{channelInfo.label}</span>
+                      <span className="text-[var(--text-soft)]">Branch</span><span>{buildInfo.branch}</span>
+                      <span className="text-[var(--text-soft)]">Commit</span><span>{buildInfo.commit.slice(0, 12)}</span>
+                      <span className="text-[var(--text-soft)]">Mode</span><span>{buildInfo.mode}</span>
+                      {buildInfo.basePath && <><span className="text-[var(--text-soft)]">Base path</span><span>{buildInfo.basePath}</span></>}
+                      <span className="text-[var(--text-soft)]">Database</span><span>{channelInfo.database}</span>
+                      <span className="text-[var(--text-soft)]">Barcodes</span><span>{channelInfo.barcodePolicy}</span>
+                    </div>
+                    <div className="mt-3 pt-2 border-t border-[var(--border)] space-y-1">
+                      {(['dev', 'public', 'private', 'server'] as const).map(channel => (
+                        <div key={channel} className={cn('flex items-start gap-2 rounded px-1.5 py-1', channel === buildInfo.channel ? 'bg-[var(--accent-50)]' : '')}>
+                          <GitBranch className="w-3.5 h-3.5 mt-0.5 text-[var(--text-faint)] shrink-0" />
+                          <div className="min-w-0">
+                            <div className="font-semibold text-[var(--text)]">{DEPLOYMENT_CHANNELS[channel].label}</div>
+                            <div className="text-[10.5px] text-[var(--text-soft)] truncate">{DEPLOYMENT_CHANNELS[channel].branch} · {DEPLOYMENT_CHANNELS[channel].database}</div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
-            )}
-          </div>
+              <div className="relative" ref={changesRef}>
+                <button
+                  onClick={() => setShowChangesPanel(s => !s)}
+                  className="flex items-center gap-1.5 px-2 py-1 rounded-md border border-[var(--border)] bg-[var(--surface-2)] hover:bg-[var(--surface-3)] transition-colors"
+                  title="Release and data log"
+                >
+                  <PanelRightOpen className="w-3.5 h-3.5 text-[var(--text-faint)]" />
+                  <span className="text-[11px] font-semibold text-[var(--text)]">Changes</span>
+                </button>
+                {showChangesPanel && (
+                  <div className="absolute right-0 top-full mt-1 w-[26rem] max-w-[calc(100vw-1.5rem)] bg-[var(--surface)] rounded-lg border border-[var(--border)] z-50 p-3 text-[11.5px] text-[var(--text)]" style={{ boxShadow: 'var(--shadow-md)' }}>
+                    <div className="flex items-start justify-between gap-3 mb-3">
+                      <div>
+                        <h3 className="text-xs font-semibold text-[var(--text)]">Release and data log</h3>
+                        <p className="text-[10.5px] text-[var(--text-soft)] mt-0.5">Viewer changes and baked data snapshot for this build.</p>
+                      </div>
+                      <span className="lims-id text-[11px] tabular-nums">v{buildInfo.version}</span>
+                    </div>
+                    <div className="space-y-3 max-h-[32rem] overflow-y-auto pr-1">
+                      <section>
+                        <div className="lims-label mb-1">Current deployment</div>
+                        <div className="grid grid-cols-[5.5rem_1fr] gap-x-2 gap-y-1 lims-id">
+                          <span className="text-[var(--text-soft)]">Channel</span><span>{channelInfo.label} <span className="text-[var(--text-faint)]">({buildInfo.channel})</span></span>
+                          <span className="text-[var(--text-soft)]">Branch</span><span>{buildInfo.branch}</span>
+                          <span className="text-[var(--text-soft)]">Commit</span><span>{buildInfo.commit.slice(0, 12)}</span>
+                          <span className="text-[var(--text-soft)]">Mode</span><span>{buildInfo.mode}</span>
+                          {buildInfo.basePath && <><span className="text-[var(--text-soft)]">Base path</span><span>{buildInfo.basePath}</span></>}
+                          <span className="text-[var(--text-soft)]">Expected DB</span><span>{channelInfo.database}</span>
+                          <span className="text-[var(--text-soft)]">Barcodes</span><span>{channelInfo.barcodePolicy}</span>
+                        </div>
+                      </section>
+                      <section>
+                        <div className="lims-label mb-1">Viewer changes</div>
+                        <div className="space-y-2">
+                          {releaseNotes.map((note: { version: string; date: string; summary: string }) => (
+                            <div key={`${note.version}-${note.date}`} className="rounded-md border border-[var(--border)] bg-[var(--surface-2)] px-2.5 py-2">
+                              <div className="flex items-center justify-between gap-2 mb-1">
+                                <div className="font-semibold text-[var(--text)]">v{note.version}</div>
+                                <div className="text-[10.5px] text-[var(--text-faint)] tabular-nums">{note.date}</div>
+                              </div>
+                              <p className="text-[11px] leading-snug text-[var(--text-soft)]">{note.summary}</p>
+                            </div>
+                          ))}
+                        </div>
+                      </section>
+                      <section>
+                        <div className="lims-label mb-1">Data snapshot</div>
+                        {IS_STATIC ? (
+                          <div className="space-y-2">
+                            {manifestError && <div className="rounded-md border border-amber-200 bg-amber-50 px-2.5 py-2 text-[11px] text-amber-800">Data manifest unavailable</div>}
+                            {manifestInfo ? (
+                              <div className="grid grid-cols-[5.5rem_1fr] gap-x-2 gap-y-1 lims-id">
+                                <span className="text-[var(--text-soft)]">Generated</span><span>{manifestInfo.generatedAt || '—'}</span>
+                                <span className="text-[var(--text-soft)]">Source</span><span className="break-all">{manifestInfo.source || '—'}</span>
+                                <span className="text-[var(--text-soft)]">Artifacts</span><span>{manifestInfo.artifacts ? Object.keys(manifestInfo.artifacts).length : 0}</span>
+                                <span className="text-[var(--text-soft)]">mutations__all</span><span>{typeof manifestInfo.artifacts?.mutations__all === 'string' ? String(manifestInfo.artifacts.mutations__all) : '—'}</span>
+                                <span className="text-[var(--text-soft)]">barcode-counts</span><span>{typeof manifestInfo.artifacts?.['barcode-counts'] === 'string' ? String(manifestInfo.artifacts['barcode-counts']) : '—'}</span>
+                              </div>
+                            ) : !manifestError ? (
+                              <div className="text-[11px] text-[var(--text-soft)]">Loading static manifest…</div>
+                            ) : null}
+                          </div>
+                        ) : (
+                          <div className="text-[11px] text-[var(--text-soft)]">Live runtime data is served from the API and active database, so a baked static manifest does not apply here.</div>
+                        )}
+                      </section>
+                    </div>
+                  </div>
+                )}
+              </div>
+
         </div>
 
         <div className="flex items-center gap-2">
