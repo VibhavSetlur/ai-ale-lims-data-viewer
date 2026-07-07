@@ -101,7 +101,7 @@ type CandidateMetric = {
   dominantCharts: number;
 };
 type CandGroupKey = 'none' | 'varA' | 'varB';
-type BarcodePerspective = 'final' | 'presence' | 'richness' | 'depth' | 'vera' | 'verb';
+type BarcodePerspective = 'final' | 'presence' | 'richness' | 'depth' | 'vera' | 'verb' | 'veraLast';
 // Transient subunit highlight: hovering a VerA or VerB group header lights up
 // EVERY candidate that shares that subunit across the visible charts, without
 // committing a selection. kind 'A' = a VerA subunit id (e.g. A81); kind 'B' = a
@@ -1030,7 +1030,56 @@ function subunitRows(charts: BarcodeChart[], kind: 'A' | 'B') {
   return [...m.values()].map(r => ({ id: r.id, total: r.total, charts: r.charts.size, candidates: r.cands.size, finalReads: r.finalReads })).sort((a, b) => b.total - a.total || a.id.localeCompare(b.id));
 }
 
-function perspectiveCsv(mode: BarcodePerspective, charts: BarcodeChart[], statsByKey: Map<string, ChartStats>): string {
+function normalizeVerAId(value: string): string | null {
+  const match = value.trim().toUpperCase().match(/^(?:VERA)?A?(\d+)$/);
+  return match ? `A${match[1]}` : null;
+}
+
+function parseAiVerAList(value: string): Set<string> {
+  const ids = new Set<string>();
+  for (const token of value.split(/[\s,;]+/)) {
+    const id = normalizeVerAId(token);
+    if (id) ids.add(id);
+  }
+  return ids;
+}
+
+function veraLastRows(charts: BarcodeChart[], aiVerAs: Set<string>) {
+  const rows = new Map<string, { id: string; dominantCharts: number; conditions: Set<string>; finalReads: number; partners: Map<string, number>; aiGenerated: boolean }>();
+  for (const c of charts) {
+    const lastIdx = c.transfers.length - 1;
+    if (lastIdx < 0) continue;
+    let bestReads = 0;
+    let bestCand = '';
+    for (const [cand, counts] of Object.entries(c.candidates)) {
+      const reads = counts[lastIdx] || 0;
+      if (reads > bestReads) {
+        bestReads = reads;
+        bestCand = cand;
+      }
+    }
+    if (!bestCand || bestReads <= 0) continue;
+    const parsed = parseCandidate(bestCand);
+    if (!parsed) continue;
+    const conditionKey = [c.experiment, c.strain, c.library].filter(Boolean).join(' / ') || chartKey(c);
+    const row = rows.get(parsed.a) ?? { id: parsed.a, dominantCharts: 0, conditions: new Set<string>(), finalReads: 0, partners: new Map<string, number>(), aiGenerated: aiVerAs.has(parsed.a) };
+    row.dominantCharts += 1;
+    row.conditions.add(conditionKey);
+    row.finalReads += bestReads;
+    row.partners.set(parsed.b, (row.partners.get(parsed.b) ?? 0) + bestReads);
+    rows.set(parsed.a, row);
+  }
+  return [...rows.values()].map(r => ({
+    id: r.id,
+    dominantCharts: r.dominantCharts,
+    conditions: r.conditions.size,
+    finalReads: r.finalReads,
+    aiGenerated: r.aiGenerated,
+    partners: [...r.partners.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])),
+  })).sort((a, b) => b.dominantCharts - a.dominantCharts || b.finalReads - a.finalReads || a.id.localeCompare(b.id));
+}
+
+function perspectiveCsv(mode: BarcodePerspective, charts: BarcodeChart[], statsByKey: Map<string, ChartStats>, aiVerAs: Set<string> = new Set()): string {
   if (mode === 'final') {
     const rows = finalOutcomeRows(charts, statsByKey);
     return [['chart','sample_name','library','replicate','final_transfer','dominant_candidate','dominant_reads','final_total','final_fraction','final_richness','flipped'].join(','), ...rows.map(r => [chartKey(r.chart), r.chart.sampleName ?? '', r.chart.library, r.chart.replicate, r.chart.transfers[r.chart.transfers.length - 1] ?? '', r.dominant, r.finalReads, r.finalTotal, r.finalFraction, r.richness, r.flipped].map(csvEscape).join(','))].join('\n');
@@ -1044,6 +1093,10 @@ function perspectiveCsv(mode: BarcodePerspective, charts: BarcodeChart[], statsB
       for (const counts of Object.values(c.candidates)) { const v = counts[ti] || 0; if (v > 0) richness++; depth += v; }
       return [chartKey(c), c.sampleName ?? '', c.library, c.replicate, t, richness, depth].map(csvEscape).join(',');
     }))].join('\n');
+  }
+  if (mode === 'veraLast') {
+    const rows = veraLastRows(charts, aiVerAs);
+    return [['vera','ai_generated','dominant_charts','conditions','final_reads','verb_partner_distribution'].join(','), ...rows.map(r => [r.id, r.aiGenerated ? 'yes' : '', r.dominantCharts, r.conditions, r.finalReads, r.partners.map(([b, reads]) => `${b}:${reads}`).join('; ')].map(csvEscape).join(','))].join('\n');
   }
   const rows = subunitRows(charts, mode === 'vera' ? 'A' : 'B');
   return [[mode === 'vera' ? 'vera' : 'verb','charts_present','candidate_count','total_reads','aggregate_final_reads'].join(','), ...rows.map(r => [r.id, r.charts, r.candidates, r.total, r.finalReads].map(csvEscape).join(','))].join('\n');
@@ -3106,7 +3159,7 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
               statsByKey={statsByKey}
               mode={perspective}
               setMode={setPerspective}
-              onExport={() => downloadBlob(`barcode-perspective-${perspective}.csv`, perspectiveCsv(perspective, visibleCharts, statsByKey))}
+              onExport={(aiVerAs) => downloadBlob(`barcode-perspective-${perspective}.csv`, perspectiveCsv(perspective, visibleCharts, statsByKey, aiVerAs))}
             />
           )}
 
@@ -3565,11 +3618,15 @@ function BarcodeSummaryModal({ data, visibleCharts, statsByKey, onClose }: { dat
   );
 }
 
-function BarcodePerspectivesPanel({ charts, statsByKey, mode, setMode, onExport }: { charts: BarcodeChart[]; statsByKey: Map<string, ChartStats>; mode: BarcodePerspective; setMode: (m: BarcodePerspective) => void; onExport: () => void }) {
+function BarcodePerspectivesPanel({ charts, statsByKey, mode, setMode, onExport }: { charts: BarcodeChart[]; statsByKey: Map<string, ChartStats>; mode: BarcodePerspective; setMode: (m: BarcodePerspective) => void; onExport: (aiVerAs?: Set<string>) => void }) {
+  const [aiVerAInput, setAiVerAInput] = useState('');
+  const aiVerAs = useMemo(() => parseAiVerAList(aiVerAInput), [aiVerAInput]);
   const finalRows = useMemo(() => finalOutcomeRows(charts, statsByKey).sort((a, b) => b.finalFraction - a.finalFraction || b.finalReads - a.finalReads), [charts, statsByKey]);
   const presRows = useMemo(() => presenceRows(charts), [charts]);
   const aRows = useMemo(() => subunitRows(charts, 'A'), [charts]);
   const bRows = useMemo(() => subunitRows(charts, 'B'), [charts]);
+  const veraLast = useMemo(() => veraLastRows(charts, aiVerAs), [charts, aiVerAs]);
+  const aiVerAMatches = useMemo(() => veraLast.filter(r => r.aiGenerated).length, [veraLast]);
   const richnessRows = useMemo(() => charts.flatMap(c => c.transfers.map((t, ti) => {
     let richness = 0, depth = 0;
     for (const counts of Object.values(c.candidates)) { const v = counts[ti] || 0; if (v > 0) richness++; depth += v; }
@@ -3578,7 +3635,7 @@ function BarcodePerspectivesPanel({ charts, statsByKey, mode, setMode, onExport 
   const modeButton = (id: BarcodePerspective, label: string) => (
     <button onClick={() => setMode(id)} className={cn('px-2 py-1 rounded border text-[11px] font-medium', mode === id ? 'bg-emerald-600 text-white border-emerald-700' : 'border-slate-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-slate-600 dark:text-gray-300 hover:bg-slate-100 dark:hover:bg-gray-600')}>{label}</button>
   );
-  const rows = mode === 'final' ? finalRows : mode === 'presence' ? presRows : mode === 'vera' ? aRows : mode === 'verb' ? bRows : richnessRows;
+  const rows = mode === 'final' ? finalRows : mode === 'presence' ? presRows : mode === 'veraLast' ? veraLast : mode === 'vera' ? aRows : mode === 'verb' ? bRows : richnessRows;
   return (
     <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
       <div className="px-3 py-2 border-b border-slate-200 dark:border-gray-700 bg-white dark:bg-gray-800 flex items-center gap-2 flex-wrap">
@@ -3589,11 +3646,18 @@ function BarcodePerspectivesPanel({ charts, statsByKey, mode, setMode, onExport 
         {modeButton('depth', 'Read depth')}
         {modeButton('vera', 'VerA')}
         {modeButton('verb', 'VerB')}
-        <button onClick={onExport} className="ml-auto flex items-center gap-1 px-2 py-1 rounded border border-slate-200 dark:border-gray-600 text-[11px] text-slate-600 dark:text-gray-300 hover:bg-slate-100 dark:hover:bg-gray-700"><Download className="w-3 h-3" /> CSV</button>
+        {modeButton('veraLast', 'VerA last transfer')}
+        <button onClick={() => onExport(mode === 'veraLast' ? aiVerAs : undefined)} className="ml-auto flex items-center gap-1 px-2 py-1 rounded border border-slate-200 dark:border-gray-600 text-[11px] text-slate-600 dark:text-gray-300 hover:bg-slate-100 dark:hover:bg-gray-700"><Download className="w-3 h-3" /> CSV</button>
       </div>
-      <div className="flex-1 overflow-auto p-3">
+      <div className="flex-1 overflow-auto p-3 space-y-3">
+        {mode === 'veraLast' && <div className="rounded-lg border border-emerald-200 dark:border-emerald-900 bg-emerald-50/70 dark:bg-emerald-950/20 p-3">
+          <label className="block text-[11px] font-semibold uppercase tracking-wider text-emerald-800 dark:text-emerald-200 mb-1">AI-generated VerA list</label>
+          <textarea value={aiVerAInput} onChange={e => setAiVerAInput(e.target.value)} placeholder="Paste A81, VerA82, or 83 separated by commas, spaces, or new lines" className="w-full min-h-[56px] rounded border border-emerald-200 dark:border-emerald-800 bg-white dark:bg-gray-900 px-2 py-1.5 text-[12px] text-slate-700 dark:text-gray-200 placeholder:text-slate-400 dark:placeholder:text-gray-500" />
+          <div className="mt-1 text-[11px] text-emerald-700 dark:text-emerald-300">Matching winner VerA rows are highlighted. {aiVerAs.size > 0 ? `${aiVerAs.size} VerA IDs loaded, ${aiVerAMatches} matched in dominant results.` : 'No AI list loaded.'}</div>
+        </div>}
         <div className="rounded-lg border border-slate-200 dark:border-gray-700 bg-white dark:bg-gray-800 overflow-hidden">
           <table className="w-full text-[12px]">
+            {mode === 'veraLast' && <><thead className="bg-slate-50 dark:bg-gray-800 text-slate-500"><tr><th className="px-2 py-1.5 text-left">VerA winner</th><th className="px-2 py-1.5 text-left">AI</th><th className="px-2 py-1.5 text-right">Dominant charts</th><th className="px-2 py-1.5 text-right">Conditions</th><th className="px-2 py-1.5 text-right">Final reads</th><th className="px-2 py-1.5 text-left">VerB partners</th></tr></thead><tbody>{veraLast.map(r => <tr key={r.id} className={cn('border-t border-slate-100 dark:border-gray-700', r.aiGenerated && 'bg-amber-50 dark:bg-amber-900/20')}><td className="px-2 py-1.5 font-mono font-semibold">{r.id}</td><td className="px-2 py-1.5">{r.aiGenerated ? <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 dark:bg-amber-900/40 px-2 py-0.5 text-[10px] font-semibold text-amber-800 dark:text-amber-200"><Sparkles className="w-3 h-3" /> AI-generated</span> : ''}</td><td className="px-2 py-1.5 text-right tabular-nums">{r.dominantCharts}</td><td className="px-2 py-1.5 text-right tabular-nums">{r.conditions}</td><td className="px-2 py-1.5 text-right tabular-nums">{r.finalReads.toLocaleString()}</td><td className="px-2 py-1.5 font-mono text-[11px]">{r.partners.map(([b, reads]) => `${b} ${reads.toLocaleString()}`).join(' · ')}</td></tr>)}</tbody></>}
             {mode === 'final' && <><thead className="bg-slate-50 dark:bg-gray-800 text-slate-500"><tr><th className="px-2 py-1.5 text-left">Chart</th><th className="px-2 py-1.5 text-left">Dominant final</th><th className="px-2 py-1.5 text-right">Reads</th><th className="px-2 py-1.5 text-right">%</th><th className="px-2 py-1.5 text-right">Richness</th><th className="px-2 py-1.5 text-right">Flip</th></tr></thead><tbody>{finalRows.map(r => <tr key={chartKey(r.chart)} className="border-t border-slate-100 dark:border-gray-700"><td className="px-2 py-1.5 font-mono truncate max-w-[360px]" title={chartIdentityTitle(r.chart)}>{r.chart.sampleName || chartKey(r.chart)}</td><td className="px-2 py-1.5 font-mono">{r.dominant}</td><td className="px-2 py-1.5 text-right tabular-nums">{r.finalReads.toLocaleString()}</td><td className="px-2 py-1.5 text-right tabular-nums">{(r.finalFraction * 100).toFixed(1)}%</td><td className="px-2 py-1.5 text-right tabular-nums">{r.richness}</td><td className="px-2 py-1.5 text-right">{r.flipped ? 'yes' : ''}</td></tr>)}</tbody></>}
             {mode === 'presence' && <><thead className="bg-slate-50 dark:bg-gray-800 text-slate-500"><tr><th className="px-2 py-1.5 text-left">Candidate</th><th className="px-2 py-1.5 text-right">Charts</th><th className="px-2 py-1.5 text-right">Final charts</th><th className="px-2 py-1.5 text-right">Reads</th></tr></thead><tbody>{presRows.map(r => <tr key={r.cand} className="border-t border-slate-100 dark:border-gray-700"><td className="px-2 py-1.5 font-mono">{r.cand}</td><td className="px-2 py-1.5 text-right tabular-nums">{r.charts}</td><td className="px-2 py-1.5 text-right tabular-nums">{r.finalCharts}</td><td className="px-2 py-1.5 text-right tabular-nums">{r.total.toLocaleString()}</td></tr>)}</tbody></>}
             {(mode === 'richness' || mode === 'depth') && <><thead className="bg-slate-50 dark:bg-gray-800 text-slate-500"><tr><th className="px-2 py-1.5 text-left">Chart</th><th className="px-2 py-1.5 text-right">Transfer</th><th className="px-2 py-1.5 text-right">Richness</th><th className="px-2 py-1.5 text-right">Read depth</th></tr></thead><tbody>{[...richnessRows].sort((a, b) => mode === 'depth' ? b.depth - a.depth : b.richness - a.richness).map(r => <tr key={`${chartKey(r.chart)}-${r.transfer}`} className="border-t border-slate-100 dark:border-gray-700"><td className="px-2 py-1.5 font-mono truncate max-w-[360px]" title={chartIdentityTitle(r.chart)}>{r.chart.sampleName || chartKey(r.chart)}</td><td className="px-2 py-1.5 text-right tabular-nums">T{r.transfer}</td><td className="px-2 py-1.5 text-right tabular-nums">{r.richness}</td><td className="px-2 py-1.5 text-right tabular-nums">{r.depth.toLocaleString()}</td></tr>)}</tbody></>}
