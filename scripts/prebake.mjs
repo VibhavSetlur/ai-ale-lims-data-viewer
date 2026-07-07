@@ -36,6 +36,7 @@ const curatedTargets = [
     key: `mutations__experiment_${e}`,
     url: `/api/mutations?experiment=${encodeURIComponent(e)}`,
   })),
+  { key: 'mutations-stats', url: '/api/mutations-stats' },
   { key: 'barcode-counts', url: '/api/barcode-counts' },
   { key: 'tables', url: '/api/tables?withCounts=1' },
   { key: 'mirror-info', url: '/api/mirror-info' },

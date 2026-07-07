@@ -53,6 +53,7 @@ function apiUrlToKey(apiUrl: string): string | null {
     // mode uses the auto-registry default, which is the correct per-experiment run.
     return exp ? `mutations__experiment_${exp}` : 'mutations__all';
   }
+  if (pathPart === 'mutations-stats') return 'mutations-stats';
   if (pathPart === 'barcode-counts') return 'barcode-counts';
   if (pathPart === 'tables') return 'tables';
   if (pathPart === 'mirror-info') return 'mirror-info';

@@ -2378,10 +2378,12 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
     return () => document.removeEventListener('mousedown', handler);
   }, [filtersOpen]);
 
-  const load = useCallback(async () => {
-    setLoading(true); setError(null);
+  const loadBarcodeData = useCallback(async (signal?: AbortSignal) => {
+    setLoading(true);
+    setError(null);
+    setData(null);
     try {
-      const r = await fetchData('/api/barcode-counts');
+      const r = await fetchData('/api/barcode-counts', { signal });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const j: BarcodeDataset = await r.json();
       setData(j);
@@ -2392,11 +2394,27 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
       const sorted = [...all].sort((a, b) => a - b);
       if (sorted.length) setTransferRange([sorted[0], sorted[sorted.length - 1]]);
     } catch (e: unknown) {
+      if (e instanceof DOMException && e.name === 'AbortError') return;
       setError(e instanceof Error ? e.message : String(e));
-    } finally { setLoading(false); }
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  const reload = useCallback(() => {
+    const controller = new AbortController();
+    void loadBarcodeData(controller.signal);
+    return () => controller.abort();
+  }, [loadBarcodeData]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void loadBarcodeData(controller.signal);
+    return () => {
+      controller.abort();
+      setData(null);
+    };
+  }, [loadBarcodeData]);
 
   // Pre-compute stats per chart once per dataset load.
   const statsByKey = useMemo(() => {
@@ -2981,7 +2999,7 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
             filenameBase={`barcode-${view}-${focusKey || comparing.length || visibleCharts.length}`}
             disabled={!data || visibleCharts.length === 0}
           />
-          <button onClick={load} className="p-1 rounded text-slate-500 dark:text-gray-400 hover:bg-slate-100 dark:hover:bg-gray-700" title="Reload">
+          <button onClick={reload} className="p-1 rounded text-slate-500 dark:text-gray-400 hover:bg-slate-100 dark:hover:bg-gray-700" title="Reload">
             <RefreshCw className={cn('w-3.5 h-3.5', loading && 'animate-spin')} />
           </button>
         </div>

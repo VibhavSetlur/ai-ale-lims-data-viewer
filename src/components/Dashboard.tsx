@@ -1,8 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import DataTable from './DataTable';
-import MutationExplorer from './MutationExplorer';
+import dynamic from 'next/dynamic';
 import { fetchData, IS_STATIC, BASE_PATH } from '../lib/dataSource';
 import { DEPLOYMENT_CHANNELS, type BuildInfo } from '../lib/buildInfo';
 import { releaseNotes } from '../lib/releaseNotes';
@@ -50,6 +49,9 @@ const SIDEBAR_COLLAPSED_KEY = 'lims:sidebarCollapsed';
 const ACTIVE_VIEW_KEY = 'lims:activeView';
 
 type ActiveView = 'tables' | 'mutations';
+
+const MutationExplorer = dynamic(() => import('./MutationExplorer'), { ssr: false, loading: () => <div className="p-4 text-sm text-[var(--text-soft)]">Loading Mutation Explorer…</div> });
+const DataTable = dynamic(() => import('./DataTable'), { ssr: false, loading: () => <div className="p-4 text-sm text-[var(--text-soft)]">Loading table browser…</div> });
 
 interface MirrorInfo {
   driver: 'sqlite' | 'mysql';
@@ -133,10 +135,10 @@ export default function Dashboard({ initialTables, buildInfo }: DashboardProps) 
   // hide barcode help when there is no barcode data (e.g. the TFMN1 snapshot).
   useEffect(() => {
     let cancelled = false;
-    fetchData('/api/mutations')
+    fetchData('/api/mutations-stats')
       .then(r => r.json())
       .then(j => { if (!cancelled) setHasBarcodes(Boolean(j?.stats?.hasBarcodes)); })
-      .catch(() => {});
+      .catch(() => { if (!cancelled) setHasBarcodes(false); });
     return () => { cancelled = true; };
   }, []);
 
@@ -902,17 +904,11 @@ export default function Dashboard({ initialTables, buildInfo }: DashboardProps) 
         </aside>
 
         <div className="flex-1 min-w-0 p-3 flex flex-col overflow-hidden bg-[var(--surface-2)] relative">
-          {/*
-            Always mount MutationExplorer so its dataset preloads in the
-            background as soon as the app boots; keeps selection/filter/tab
-            state across view switches.
-          */}
-          <div className={cn("flex-1 min-h-0", activeView === 'mutations' ? "block" : "hidden")}>
-            <MutationExplorer />
-          </div>
-          <div className={cn("flex-1 min-h-0", activeView === 'tables' ? "block" : "hidden")}>
-            {activeTable ? (
-              <DataTable tableName={activeTable} />
+          <div className="flex-1 min-h-0">
+            {activeView === 'mutations' ? (
+              <MutationExplorer />
+            ) : activeTable ? (
+              <DataTable key={activeTable} tableName={activeTable} />
             ) : (
               <div className="flex flex-col items-center justify-center h-full bg-[var(--surface)] rounded-lg border border-[var(--border)] text-[var(--text-soft)] text-sm gap-2" style={{ boxShadow: 'var(--shadow-sm)' }}>
                 <Database className="w-10 h-10 text-[var(--ink-300)]" />

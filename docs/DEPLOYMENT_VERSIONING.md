@@ -82,6 +82,9 @@ The codebase is shared. Differences are data and deployment metadata:
 - Private and staging use the full database. They show Barcode Charts when
   `verAB_barcodes` exists and has rows.
 - Server/local mode follows the active runtime database, so capabilities can vary.
+- The dashboard now checks barcode capability through a lightweight
+  `/api/mutations-stats` probe instead of loading the full mutation dataset just
+  to read `hasBarcodes`.
 
 ## Manuscript and Publication Notes
 

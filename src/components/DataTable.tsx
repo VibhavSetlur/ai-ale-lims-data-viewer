@@ -419,14 +419,27 @@ export default function DataTable({ tableName }: DataTableProps) {
           if (/[",\r\n]/.test(s)) s = `"${s.replace(/"/g, '""')}"`;
           return s;
         };
-        const lines = [cols.map(esc).join(',')];
-        for (const row of res.rows) lines.push(cols.map(c => esc((row as Record<string, unknown>)[c])).join(','));
-        const blob = new Blob([lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
-        a.download = `${tableName}.csv`;
-        document.body.appendChild(a); a.click(); a.remove();
-        URL.revokeObjectURL(a.href);
+        const blobParts: string[] = [];
+        let chunk: string[] = [];
+        chunk.push(cols.map(esc).join(','));
+        for (const row of res.rows) {
+          chunk.push(cols.map(c => esc((row as Record<string, unknown>)[c])).join(','));
+          if (chunk.length >= 5000) {
+            blobParts.push(chunk.join('\r\n'));
+            chunk = [];
+          }
+        }
+        if (chunk.length > 0) blobParts.push(chunk.join('\r\n'));
+        const blob = new Blob(blobParts, { type: 'text/csv;charset=utf-8;' });
+        chunk = [];
+        const blobUrl = URL.createObjectURL(blob);
+        const downloadLink = document.createElement('a');
+        downloadLink.href = blobUrl;
+        downloadLink.download = `${tableName}.csv`;
+        document.body.appendChild(downloadLink);
+        downloadLink.click();
+        downloadLink.remove();
+        URL.revokeObjectURL(blobUrl);
         return;
       }
       const params = buildQueryString(false);
