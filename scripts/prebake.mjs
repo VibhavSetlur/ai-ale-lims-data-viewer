@@ -38,6 +38,7 @@ const curatedTargets = [
   })),
   { key: 'mutations-stats', url: '/api/mutations-stats' },
   { key: 'barcode-counts', url: '/api/barcode-counts' },
+  { key: 'library-variants', url: '/api/library-variants' },
   { key: 'tables', url: '/api/tables?withCounts=1' },
   { key: 'mirror-info', url: '/api/mirror-info' },
   { key: 'config', url: '/api/config' },
