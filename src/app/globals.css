@@ -155,6 +155,7 @@ body {
 .lims-pill-mut  { background: var(--data-mut-bg);  color: var(--data-mut); }
 .lims-pill-cn   { background: var(--data-cn-bg);   color: var(--data-cn); }
 .lims-pill-grow { background: var(--data-grow-bg); color: var(--data-grow); }
+.lims-pill-ai   { background: var(--data-cn-bg); color: var(--data-cn); border: 1px solid color-mix(in srgb, var(--data-cn) 35%, transparent); }
 
 /* Nav item */
 .lims-nav {
