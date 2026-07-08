@@ -202,7 +202,7 @@ export default function Dashboard({ initialTables, buildInfo }: DashboardProps) 
         title: 'Step 1 — Sample Selection',
         body: 'This is where every analysis starts. You filter the lineages you care about and tick them; everything downstream (Comparative, Copy Number, Barcode) then acts on exactly that selection.',
         look: 'A filterable table of samples. Each row has metadata chips and a small OD600 growth sparkline on the right.',
-        tryIt: 'Tick a few sample checkboxes, then watch the count badge on the Compare Mutations tab go up.',
+        tryIt: 'Tick a few sample checkboxes, then watch the count badge on the Comparative View tab go up.',
         before: () => go('mutations', 'samples'),
       },
       {
@@ -222,7 +222,7 @@ export default function Dashboard({ initialTables, buildInfo }: DashboardProps) 
       },
       {
         target: 'tab-compare',
-        title: 'Step 2 — Compare Mutations (the heatmap)',
+        title: 'Step 2 — Comparative View (the heatmap)',
         body: 'Your selected samples become columns; mutations and copy-number regions become rows; each cell is colored by its value. This is the figure most people put in a paper.',
         look: 'A grid of colored cells. Click it to open the view if it has not opened yet.',
         before: () => go('mutations', 'compare'),
@@ -315,7 +315,7 @@ export default function Dashboard({ initialTables, buildInfo }: DashboardProps) 
         { target: 'tab-compare', title: 'Carry the selection forward', body: 'Every other tab acts on exactly your selection; the badge shows the count.', before: () => go('mutations', 'samples') },
       ],
       comparative: [
-        { target: 'tab-compare', title: 'Compare Mutations', body: 'A heatmap of mutation frequency + copy-number rows across your selected samples.', before: () => go('mutations', 'compare') },
+        { target: 'tab-compare', title: 'Comparative View', body: 'A heatmap of mutation frequency + copy-number rows across your selected samples.', before: () => go('mutations', 'compare') },
         { target: 'compare-controls', title: 'Controls + the color rule', body: 'Frequency cells use a fixed 0-100% scale; copy-number rows use a row-local scale. Filter by class or metric here.', tryIt: 'Switch the metric dropdown to "copy number".', before: () => go('mutations', 'compare') },
         { target: 'tab-compare', title: 'Provided vs spontaneous', body: 'Amber outline = donor DNA; outline + 0% = provided but unobserved; no outline = spontaneous. Click a mutation name for genome context.', before: () => go('mutations', 'compare') },
         { target: 'compare-controls', title: 'Export', body: 'Export figure (PNG/SVG/HTML/Print) for the heatmap; CSV for the values.', before: () => go('mutations', 'compare') },
@@ -852,7 +852,7 @@ export default function Dashboard({ initialTables, buildInfo }: DashboardProps) 
                     </div>
                     <div className="flex gap-2">
                       <span className="lims-pill lims-pill-cn shrink-0 mt-0.5">CMP</span>
-                      <span><span className="font-medium text-[var(--text)]">Compare Mutations</span> — side-by-side mutation calls and copy-number rows.</span>
+                      <span><span className="font-medium text-[var(--text)]">Comparative View</span> — side-by-side mutation calls and copy-number rows.</span>
                     </div>
                     <div className="flex gap-2">
                       <span className="lims-pill lims-pill-grow shrink-0 mt-0.5">BC</span>

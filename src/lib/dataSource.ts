@@ -55,14 +55,6 @@ function apiUrlToKey(apiUrl: string): string | null {
   }
   if (pathPart === 'mutations-stats') return 'mutations-stats';
   if (pathPart === 'barcode-counts') return 'barcode-counts';
-  if (pathPart === 'library-variants') {
-    const exp = params.get('experiment');
-    const samples = params.get('samples');
-    if (exp && samples) return `library-variants__experiment_${exp}__samples_${samples}`;
-    if (exp) return `library-variants__experiment_${exp}`;
-    if (samples) return `library-variants__samples_${samples}`;
-    return 'library-variants__all';
-  }
   if (pathPart === 'tables') return 'tables';
   if (pathPart === 'mirror-info') return 'mirror-info';
   if (pathPart === 'config') return 'config';
