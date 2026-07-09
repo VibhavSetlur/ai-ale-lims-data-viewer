@@ -1,10 +1,11 @@
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronDown, ChevronUp, Download, Info, LineChart, Loader2, PanelsTopLeft, Sparkles, X } from 'lucide-react';
+import { ChevronDown, ChevronUp, Download, Info, LineChart, Loader2, PanelsTopLeft, Sparkles, X, GitCompare, Boxes, Barcode, MousePointerClick } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import ExportFigureMenu from './ExportFigureMenu';
+import { fetchData } from '@/lib/dataSource';
 
 function cn(...inputs: ClassValue[]) { return twMerge(clsx(inputs)); }
 
@@ -22,6 +23,67 @@ interface MutationSample {
   donor_dna?: string;
   selection_note?: string;
   growth_curve?: GrowthPoint[];
+}
+
+/* ---------- Transfer-series (faceted OD-vs-transfer) types ---------- */
+
+// Mirror of /api/growth-series response. Kept local so the component owns its
+// own contract; the endpoint's exported interfaces are the source of truth.
+interface GrowthSeriesPoint { transfer: number; od: number; maxOd: number }
+interface GrowthSeriesLineage {
+  lineageId: string;
+  experiment: string;
+  genotypeLabel: string;
+  replicate?: string;
+  condition?: string;
+  strain?: string;
+  points: GrowthSeriesPoint[];
+}
+interface GrowthSeriesDataset {
+  aggregation: 'endpoint';
+  transferRange: { min: number; max: number };
+  lineages: GrowthSeriesLineage[];
+  warnings: string[];
+}
+
+type Aggregation = 'endpoint' | 'max';
+type PrimaryMode = 'series' | 'within';
+
+// Fixed 5-color replicate palette so color == replicate in EVERY panel.
+const REPLICATE_COLORS: Record<string, string> = {
+  '1': '#2563eb', // blue
+  '2': '#16a34a', // green
+  '3': '#ea580c', // orange
+  '4': '#9333ea', // purple
+  '5': '#dc2626', // red
+};
+const REPLICATE_ORDER = ['1', '2', '3', '4', '5'];
+function replicateColor(rep: string | undefined): string {
+  return (rep && REPLICATE_COLORS[rep]) || '#64748b';
+}
+
+const NO_DNA_LABEL = 'No DNA';
+
+// Facet panel geometry (small multiples).
+const FW = 300;
+const FH = 190;
+const FPAD = { l: 42, r: 12, t: 12, b: 30 };
+
+// Client-side lineage parse: "TFMN1.fba.1.T5.P" -> "TFMN1.fba.1". Mirrors
+// parseLineageTransfer in the mutations route so we can map a selected seq_sample
+// id back to its Robotic_OD lineage (sample_name) without a server round trip.
+function seqSampleToLineage(seqSample: string): string | null {
+  const m = seqSample.match(/\.T(\d+)(?=\.|$)/);
+  if (!m || m.index === undefined) return null;
+  return seqSample.slice(0, m.index);
+}
+
+// Order genotype panels: single-mutation genotypes first (alpha), then combos
+// (contain a comma), then "No DNA" last. Within each bucket, alpha.
+function genotypeSortRank(label: string): number {
+  if (label === NO_DNA_LABEL) return 2;
+  if (label.includes(',')) return 1;
+  return 0;
 }
 
 type SortKey = 'experiment' | 'dna' | 'replicate' | 'transfer';
@@ -140,7 +202,58 @@ function InfoPopover({ title, children, align = 'left' }: { title: string; child
   );
 }
 
-export default function GrowthCurveComparison({ samples, selected, loading }: { samples: MutationSample[]; selected: Set<string>; loading?: boolean }) {
+interface GrowthCurveComparisonProps {
+  samples: MutationSample[];
+  selected: Set<string>;
+  loading?: boolean;
+  experiment?: string;
+  setSelected?: React.Dispatch<React.SetStateAction<Set<string>>>;
+  setTab?: (tab: 'samples' | 'compare' | 'growth' | 'libraryVariants' | 'copynumber' | 'barcodes') => void;
+  hasBarcodes?: boolean;
+}
+
+export default function GrowthCurveComparison(props: GrowthCurveComparisonProps) {
+  const { samples, selected, loading, experiment = '', setSelected, setTab, hasBarcodes = false } = props;
+  const [primaryMode, setPrimaryMode] = useState<PrimaryMode>('series');
+
+  // Transfer-series view state (primary faceted view).
+  const [series1, setSeries1] = useState<GrowthSeriesDataset | null>(null);
+  const [seriesLoading, setSeriesLoading] = useState(true);
+  const [seriesError, setSeriesError] = useState<string | null>(null);
+  const [seriesAgg, setSeriesAgg] = useState<Aggregation>('endpoint');
+  const [seriesLog, setSeriesLog] = useState(true);            // default LOG for the faceted view
+  const [sharedAxes, setSharedAxes] = useState(true);          // shared vs per-panel autoscale
+  const [fullFigure, setFullFigure] = useState(false);         // publication mode: ignore selection
+  const [hoveredRep, setHoveredRep] = useState<string | null>(null);
+  const [isolatedReps, setIsolatedReps] = useState<Set<string>>(() => new Set());
+  const [seriesTip, setSeriesTip] = useState<HoverTip | null>(null);
+  const seriesFigureRef = useRef<HTMLDivElement>(null);
+
+  // Fetch the transfer-series dataset (via fetchData so static mode works). Uses
+  // the same experiment filter as the loaded mutations dataset.
+  useEffect(() => {
+    let cancelled = false;
+    setSeriesLoading(true);
+    setSeriesError(null);
+    const url = experiment
+      ? `/api/growth-series?experiment=${encodeURIComponent(experiment)}`
+      : '/api/growth-series';
+    fetchData(url)
+      .then(r => r.json())
+      .then((json: GrowthSeriesDataset & { error?: string }) => {
+        if (cancelled) return;
+        if (json && json.error) { setSeriesError(json.error); setSeries1(null); }
+        else setSeries1(json as GrowthSeriesDataset);
+      })
+      .catch(err => {
+        if (cancelled) return;
+        setSeriesError(err instanceof Error ? err.message : 'Failed to load growth series');
+        setSeries1(null);
+      })
+      .finally(() => { if (!cancelled) setSeriesLoading(false); });
+    return () => { cancelled = true; };
+  }, [experiment]);
+
   const [logScale, setLogScale] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>('overlay');
   const [sortOrder, setSortOrder] = useState<SortKey[]>(DEFAULT_SORT);
@@ -148,6 +261,29 @@ export default function GrowthCurveComparison({ samples, selected, loading }: { 
   const [isolatedSampleIds, setIsolatedSampleIds] = useState<Set<string>>(() => new Set());
   const [tooltip, setTooltip] = useState<HoverTip | null>(null);
   const figureRef = useRef<HTMLDivElement>(null);
+
+  // Map selected seq_sample ids -> Robotic_OD lineage ids (sample_name).
+  const selectedLineageIds = useMemo(() => {
+    const set = new Set<string>();
+    for (const id of selected) {
+      const lin = seqSampleToLineage(id);
+      if (lin) set.add(lin);
+    }
+    return set;
+  }, [selected]);
+
+  // Sequenced seq_sample ids per lineage, computed from samples[]. Only these
+  // exist as clickable ids in the other tabs, so cross-view buttons union these.
+  const sequencedIdsByLineage = useMemo(() => {
+    const map = new Map<string, string[]>();
+    for (const s of samples) {
+      const lin = seqSampleToLineage(s.id);
+      if (!lin) continue;
+      const arr = map.get(lin);
+      if (arr) arr.push(s.id); else map.set(lin, [s.id]);
+    }
+    return map;
+  }, [samples]);
 
   const selectedSamples = useMemo(
     () => samples.filter(sample => selected.has(sample.id)).sort(compareSamples(sortOrder)),
@@ -258,6 +394,166 @@ export default function GrowthCurveComparison({ samples, selected, loading }: { 
     });
   };
 
+  /* ---------- Transfer-series derived state (faceted view) ---------- */
+
+  const allLineages = series1?.lineages ?? [];
+
+  // Which lineages to plot: full-figure mode plots everything; explorer mode
+  // (default) reflows to lineages that map from the current selection.
+  const plottedLineages = useMemo(() => {
+    if (fullFigure) return allLineages;
+    if (selectedLineageIds.size === 0) return [];
+    return allLineages.filter(l => selectedLineageIds.has(l.lineageId));
+  }, [allLineages, fullFigure, selectedLineageIds]);
+
+  // Facet by genotypeLabel, ordered: single mutation, combos, No DNA.
+  const facets = useMemo(() => {
+    const byGenotype = new Map<string, GrowthSeriesLineage[]>();
+    for (const l of plottedLineages) {
+      const arr = byGenotype.get(l.genotypeLabel);
+      if (arr) arr.push(l); else byGenotype.set(l.genotypeLabel, [l]);
+    }
+    const entries = Array.from(byGenotype.entries());
+    entries.sort((a, b) => {
+      const ra = genotypeSortRank(a[0]);
+      const rb = genotypeSortRank(b[0]);
+      if (ra !== rb) return ra - rb;
+      return a[0].localeCompare(b[0]);
+    });
+    // Stable replicate order within a panel.
+    for (const [, arr] of entries) {
+      arr.sort((x, y) => {
+        const rx = x.replicate ? parseInt(x.replicate, 10) : 99;
+        const ry = y.replicate ? parseInt(y.replicate, 10) : 99;
+        if (rx !== ry) return rx - ry;
+        return x.lineageId.localeCompare(y.lineageId);
+      });
+    }
+    return entries;
+  }, [plottedLineages]);
+
+  const seriesPoint = (p: GrowthSeriesPoint): number => (seriesAgg === 'max' ? p.maxOd : p.od);
+
+  // Global (shared) domain across all plotted lineages for the current aggregation.
+  const globalDomain = useMemo(() => {
+    let xMin = Infinity, xMax = -Infinity, yMax = 0;
+    const positives: number[] = [];
+    for (const l of plottedLineages) {
+      for (const p of l.points) {
+        if (p.transfer < xMin) xMin = p.transfer;
+        if (p.transfer > xMax) xMax = p.transfer;
+        const v = seriesPoint(p);
+        if (v > yMax) yMax = v;
+        if (v > 0) positives.push(v);
+      }
+    }
+    if (!Number.isFinite(xMin)) { xMin = series1?.transferRange.min ?? 0; xMax = series1?.transferRange.max ?? 1; }
+    const logLo = Math.max(0.001, positives.length ? Math.min(...positives) * 0.7 : 0.001);
+    return { xMin, xMax: xMax === xMin ? xMin + 1 : xMax, yMin: 0, yMax: Math.max(0.05, yMax), logLo };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [plottedLineages, seriesAgg, series1]);
+
+  // Reps present across plotted lineages, for the shared legend.
+  const presentReps = useMemo(() => {
+    const set = new Set<string>();
+    for (const l of plottedLineages) if (l.replicate) set.add(l.replicate);
+    return REPLICATE_ORDER.filter(r => set.has(r));
+  }, [plottedLineages]);
+
+  const repVisible = (rep: string | undefined): boolean =>
+    isolatedReps.size === 0 || (!!rep && isolatedReps.has(rep));
+
+  const toggleRep = (rep: string) => setIsolatedReps(prev => {
+    const next = new Set(prev);
+    if (next.has(rep)) next.delete(rep); else next.add(rep);
+    return next;
+  });
+
+  // Cross-view helpers: union all sequenced ids for a set of lineages.
+  const idsForLineages = (lineageIds: string[]): string[] => {
+    const out: string[] = [];
+    for (const lin of lineageIds) {
+      const ids = sequencedIdsByLineage.get(lin);
+      if (ids) out.push(...ids);
+    }
+    return out;
+  };
+  const lineageHasSequenced = (lin: string): boolean => (sequencedIdsByLineage.get(lin)?.length ?? 0) > 0;
+
+  const selectLineages = (lineageIds: string[]) => {
+    if (!setSelected) return;
+    const add = idsForLineages(lineageIds);
+    if (add.length === 0) return;
+    setSelected(prev => { const next = new Set(prev); for (const id of add) next.add(id); return next; });
+  };
+  const showIn = (lineageIds: string[], target: 'compare' | 'libraryVariants' | 'barcodes') => {
+    selectLineages(lineageIds);
+    setTab?.(target);
+  };
+
+  const exportSeriesCsv = () => {
+    const rows: string[][] = [];
+    for (const l of plottedLineages) {
+      for (const p of l.points) {
+        rows.push([l.lineageId, l.genotypeLabel, l.replicate || '', String(p.transfer), String(p.od), String(p.maxOd)]);
+      }
+    }
+    const csv = [['lineageId', 'genotype', 'replicate', 'transfer', 'endpoint_od', 'max_od'], ...rows]
+      .map(r => r.map(csvEscape).join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    const dlUrl = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = dlUrl;
+    link.download = `growth-series-${plottedLineages.length}lineages-${seriesAgg}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(dlUrl);
+  };
+
+  /* ---------- Render: primary mode = transfer series (faceted) ---------- */
+  if (primaryMode === 'series') {
+    return (
+      <TransferSeriesView
+        loading={seriesLoading || !!loading}
+        error={seriesError}
+        dataset={series1}
+        facets={facets}
+        plottedCount={plottedLineages.length}
+        totalLineageCount={allLineages.length}
+        seriesAgg={seriesAgg}
+        setSeriesAgg={setSeriesAgg}
+        seriesLog={seriesLog}
+        setSeriesLog={setSeriesLog}
+        sharedAxes={sharedAxes}
+        setSharedAxes={setSharedAxes}
+        fullFigure={fullFigure}
+        setFullFigure={setFullFigure}
+        globalDomain={globalDomain}
+        seriesPoint={seriesPoint}
+        presentReps={presentReps}
+        hoveredRep={hoveredRep}
+        setHoveredRep={setHoveredRep}
+        isolatedReps={isolatedReps}
+        toggleRep={toggleRep}
+        repVisible={repVisible}
+        selectionEmpty={selectedLineageIds.size === 0}
+        tip={seriesTip}
+        setTip={setSeriesTip}
+        figureRef={seriesFigureRef}
+        onExportCsv={exportSeriesCsv}
+        onSwitchToWithin={() => setPrimaryMode('within')}
+        // cross-view
+        hasSetSelected={!!setSelected}
+        hasSetTab={!!setTab}
+        hasBarcodes={hasBarcodes}
+        lineageHasSequenced={lineageHasSequenced}
+        selectLineages={selectLineages}
+        showIn={showIn}
+      />
+    );
+  }
+
   if (loading) {
     return (
       <div className="flex-1 min-h-0 p-3">
@@ -311,6 +607,9 @@ export default function GrowthCurveComparison({ samples, selected, loading }: { 
         </header>
 
         <div className="flex flex-wrap items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] p-2" data-figure-omit>
+          <button type="button" onClick={() => setPrimaryMode('series')} className="lims-btn lims-btn-secondary" title="Return to the faceted OD-vs-transfer figure">
+            <PanelsTopLeft className="h-3.5 w-3.5" /> Transfer series
+          </button>
           <div className="flex items-center gap-1">
             <button type="button" data-on={!logScale} onClick={() => setLogScale(false)} className="lims-toggle">Linear Y</button>
             <button type="button" data-on={logScale} onClick={() => setLogScale(true)} className="lims-toggle">Log Y</button>
@@ -520,6 +819,365 @@ function FloatingTooltip({ tip }: { tip: HoverTip }) {
   return (
     <div className="pointer-events-none absolute z-40 rounded bg-slate-900/95 px-2 py-1 font-mono text-[11px] text-white shadow-lg ring-1 ring-black/20" style={{ left: tip.x, top: tip.y, transform: `translate(${tip.flipX ? 'calc(-100% - 18px)' : '18px'}, ${tip.flipY ? '20px' : 'calc(-100% - 14px)'})`, whiteSpace: 'pre' }}>
       {tip.text}
+    </div>
+  );
+}
+
+/* =====================================================================
+   TransferSeriesView: faceted OD-vs-transfer small multiples (Phase 1)
+   ===================================================================== */
+
+interface SeriesDomain { xMin: number; xMax: number; yMin: number; yMax: number; logLo: number }
+
+// Integer transfer ticks; keep the panel readable by thinning when the range is
+// wide (0..33 -> every 5th plus endpoints).
+function transferTicks(xMin: number, xMax: number): number[] {
+  const span = xMax - xMin;
+  if (span <= 0) return [xMin];
+  const step = span > 20 ? 5 : span > 10 ? 2 : 1;
+  const ticks: number[] = [];
+  for (let t = Math.ceil(xMin); t <= xMax; t += step) ticks.push(t);
+  if (ticks[ticks.length - 1] !== xMax) ticks.push(xMax);
+  return ticks;
+}
+
+function seriesLogTicks(max: number, logLo: number): number[] {
+  const ticks = [0.001, 0.003, 0.01, 0.03, 0.1, 0.3, 1, 3].filter(v => v >= logLo * 0.99 && v <= max * 1.01);
+  return ticks.length ? ticks : [logLo, max];
+}
+
+interface TransferSeriesViewProps {
+  loading: boolean;
+  error: string | null;
+  dataset: GrowthSeriesDataset | null;
+  facets: [string, GrowthSeriesLineage[]][];
+  plottedCount: number;
+  totalLineageCount: number;
+  seriesAgg: Aggregation;
+  setSeriesAgg: (a: Aggregation) => void;
+  seriesLog: boolean;
+  setSeriesLog: (b: boolean) => void;
+  sharedAxes: boolean;
+  setSharedAxes: (b: boolean) => void;
+  fullFigure: boolean;
+  setFullFigure: (b: boolean) => void;
+  globalDomain: SeriesDomain;
+  seriesPoint: (p: GrowthSeriesPoint) => number;
+  presentReps: string[];
+  hoveredRep: string | null;
+  setHoveredRep: (r: string | null) => void;
+  isolatedReps: Set<string>;
+  toggleRep: (r: string) => void;
+  repVisible: (rep: string | undefined) => boolean;
+  selectionEmpty: boolean;
+  tip: HoverTip | null;
+  setTip: (t: HoverTip | null) => void;
+  figureRef: React.RefObject<HTMLDivElement | null>;
+  onExportCsv: () => void;
+  onSwitchToWithin: () => void;
+  hasSetSelected: boolean;
+  hasSetTab: boolean;
+  hasBarcodes: boolean;
+  lineageHasSequenced: (lin: string) => boolean;
+  selectLineages: (lineageIds: string[]) => void;
+  showIn: (lineageIds: string[], target: 'compare' | 'libraryVariants' | 'barcodes') => void;
+}
+
+function TransferSeriesView(p: TransferSeriesViewProps) {
+  if (p.loading) {
+    return (
+      <div className="flex-1 min-h-0 p-3">
+        <div className="lims-surface flex h-full min-h-[320px] items-center justify-center rounded-xl text-[13px] text-[var(--text-soft)]">
+          <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Loading growth series...
+        </div>
+      </div>
+    );
+  }
+
+  const warn = p.dataset?.warnings?.[0] || p.error;
+  const noData = !p.dataset || p.dataset.lineages.length === 0;
+
+  return (
+    <div className="flex-1 min-h-0 overflow-auto bg-[var(--surface-2)] p-3">
+      <section className="lims-surface flex min-h-full flex-col gap-3 rounded-xl p-4 shadow-sm">
+        <header className="flex flex-wrap items-start gap-3">
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2">
+              <PanelsTopLeft className="h-4 w-4 shrink-0 text-[var(--data-grow)]" />
+              <h2 className="truncate text-[15px] font-semibold text-[var(--text)]">Compare Growth Curves</h2>
+              <InfoPopover title="Transfer series (endpoint OD by transfer)" align="right">
+                Small multiples faceted by genotype (Transforming_DNA). Each panel holds up to five replicate lines colored by replicate number. X is the ALE transfer (integer); Y is OD on a log scale by default. Endpoint OD is the reading at the last timepoint of each transfer; toggle to max OD without refetching. In explorer mode the panels reflow to your selected samples; use Load full figure for every lineage.
+              </InfoPopover>
+            </div>
+            <p className="mt-1 text-[12px] leading-relaxed text-[var(--text-soft)]">Publication-style OD-vs-transfer figure: one panel per genotype, replicate-colored lines, log Y, endpoint or max OD, shared or per-panel axes.</p>
+          </div>
+          <div className="flex flex-wrap items-center gap-3 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2">
+            <Stat value={p.facets.length.toLocaleString()} label="genotypes" />
+            <Stat value={p.plottedCount.toLocaleString()} label="lineages" />
+            <Stat value={p.totalLineageCount.toLocaleString()} label="total lineages" />
+            <Stat value={`${p.dataset?.transferRange.min ?? 0}..${p.dataset?.transferRange.max ?? 0}`} label="transfers" />
+          </div>
+        </header>
+
+        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] p-2" data-figure-omit>
+          <div className="flex items-center gap-1">
+            <button type="button" data-on={p.seriesAgg === 'endpoint'} onClick={() => p.setSeriesAgg('endpoint')} className="lims-toggle">Endpoint OD</button>
+            <button type="button" data-on={p.seriesAgg === 'max'} onClick={() => p.setSeriesAgg('max')} className="lims-toggle">Max OD</button>
+          </div>
+          <div className="flex items-center gap-1">
+            <button type="button" data-on={!p.seriesLog} onClick={() => p.setSeriesLog(false)} className="lims-toggle">Linear Y</button>
+            <button type="button" data-on={p.seriesLog} onClick={() => p.setSeriesLog(true)} className="lims-toggle">Log Y</button>
+          </div>
+          <div className="flex items-center gap-1">
+            <button type="button" data-on={p.sharedAxes} onClick={() => p.setSharedAxes(true)} className="lims-toggle">Shared axes</button>
+            <button type="button" data-on={!p.sharedAxes} onClick={() => p.setSharedAxes(false)} className="lims-toggle">Per-panel</button>
+          </div>
+          <div className="flex items-center gap-1">
+            <button type="button" data-on={!p.fullFigure} onClick={() => p.setFullFigure(false)} className="lims-toggle">Selected only</button>
+            <button type="button" data-on={p.fullFigure} onClick={() => p.setFullFigure(true)} className="lims-toggle" title="Plot every lineage from the endpoint, ignoring selection">Full figure</button>
+          </div>
+          <button type="button" onClick={p.onExportCsv} className="lims-btn lims-btn-secondary" disabled={p.plottedCount === 0} title="Export long-format growth series as CSV">
+            <Download className="h-3.5 w-3.5" /> CSV
+          </button>
+          <ExportFigureMenu getTarget={() => p.figureRef.current} title="AI-ALE growth series by genotype" filenameBase={`growth-series-${p.seriesAgg}-${p.seriesLog ? 'log' : 'linear'}`} disabled={p.plottedCount === 0} compact />
+          <button type="button" onClick={p.onSwitchToWithin} className="lims-btn lims-btn-ghost" title="Switch to the within-transfer overlay of your selected samples">
+            <LineChart className="h-3.5 w-3.5" /> Within-transfer curves
+          </button>
+        </div>
+
+        {warn && (
+          <div className="rounded-lg border border-amber-200 bg-amber-50/80 p-2 text-[11px] leading-relaxed text-amber-800 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-200">
+            {warn}
+          </div>
+        )}
+
+        {/* Shared replicate legend */}
+        {p.presentReps.length > 0 && (
+          <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] p-2 text-[11px]" data-figure-omit>
+            <span className="lims-label mr-1">Replicate</span>
+            {p.presentReps.map(rep => {
+              const pressed = p.isolatedReps.has(rep);
+              const dim = p.hoveredRep !== null && p.hoveredRep !== rep;
+              return (
+                <button key={rep} type="button" aria-pressed={pressed} onClick={() => p.toggleRep(rep)} onMouseEnter={() => p.setHoveredRep(rep)} onMouseLeave={() => p.setHoveredRep(null)} data-on={pressed} className={cn('lims-toggle !py-1', pressed && 'ring-1 ring-[var(--accent-500)]', dim && 'opacity-45')}>
+                  <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: replicateColor(rep) }} />
+                  Rep {rep}
+                </button>
+              );
+            })}
+            <span className="ml-1 text-[var(--text-faint)]">hover to highlight, click to isolate</span>
+          </div>
+        )}
+
+        {/* Empty-selection prompt with a one-click full figure */}
+        {!noData && p.plottedCount === 0 && (
+          <div className="lims-surface flex min-h-[280px] flex-1 items-center justify-center rounded-xl p-6 text-center">
+            <div className="max-w-xl">
+              <MousePointerClick className="mx-auto mb-3 h-8 w-8 text-[var(--data-grow)]" />
+              <h3 className="text-[15px] font-semibold text-[var(--text)]">Select samples to reflow the figure</h3>
+              <p className="mt-2 text-[12px] leading-relaxed text-[var(--text-soft)]">
+                {p.selectionEmpty
+                  ? 'Choose samples in the Samples tab and their genotype panels appear here. Or plot the whole experiment now.'
+                  : 'Your selected samples did not map to any Robotic_OD lineage. Plot the whole experiment instead.'}
+              </p>
+              <button type="button" onClick={() => p.setFullFigure(true)} className="lims-btn lims-btn-primary mt-4">
+                <PanelsTopLeft className="h-4 w-4" /> Load full figure (all {p.totalLineageCount} lineages)
+              </button>
+            </div>
+          </div>
+        )}
+
+        {noData && (
+          <Notice title="No growth series available" text="No Robotic_OD data was returned for this experiment. Endpoint OD is read directly from Robotic_OD, so an empty result usually means the experiment has no OD readings." />
+        )}
+
+        {/* Faceted grid */}
+        {p.plottedCount > 0 && (
+          <div ref={p.figureRef} className="relative min-w-0 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3 shadow-sm" onMouseLeave={() => p.setTip(null)}>
+            {p.tip && <FloatingTooltip tip={p.tip} />}
+            <div className="mb-2 flex flex-wrap items-center gap-2 text-[12px] text-[var(--text-soft)]">
+              <span className="font-semibold text-[var(--text)]">Endpoint OD by transfer, faceted by genotype</span>
+              <span className="lims-chip">{p.facets.length} panels</span>
+              <span className="lims-chip">{p.seriesAgg === 'max' ? 'max OD' : 'endpoint OD'}</span>
+              <span className="lims-chip">{p.seriesLog ? 'log Y' : 'linear Y'}</span>
+              <span className="lims-chip">{p.sharedAxes ? 'shared axes' : 'per-panel'}</span>
+              {p.fullFigure && <span className="lims-chip lims-chip-accent">full figure</span>}
+            </div>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              {p.facets.map(([genotype, lineages]) => (
+                <FacetPanel
+                  key={genotype}
+                  genotype={genotype}
+                  lineages={lineages}
+                  seriesLog={p.seriesLog}
+                  sharedAxes={p.sharedAxes}
+                  globalDomain={p.globalDomain}
+                  seriesPoint={p.seriesPoint}
+                  hoveredRep={p.hoveredRep}
+                  repVisible={p.repVisible}
+                  figureRef={p.figureRef}
+                  setTip={p.setTip}
+                  hasSetSelected={p.hasSetSelected}
+                  hasSetTab={p.hasSetTab}
+                  hasBarcodes={p.hasBarcodes}
+                  lineageHasSequenced={p.lineageHasSequenced}
+                  selectLineages={p.selectLineages}
+                  showIn={p.showIn}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function seriesScales(domain: SeriesDomain, log: boolean) {
+  const innerW = FW - FPAD.l - FPAD.r;
+  const innerH = FH - FPAD.t - FPAD.b;
+  const x = (v: number) => FPAD.l + ((v - domain.xMin) / Math.max(1e-9, domain.xMax - domain.xMin)) * innerW;
+  const logMin = Math.log10(domain.logLo);
+  const logMax = Math.log10(Math.max(domain.logLo * 1.1, domain.yMax));
+  const y = (v: number) => {
+    if (log) {
+      const safe = Math.max(domain.logLo, v);
+      return FPAD.t + innerH - ((Math.log10(safe) - logMin) / Math.max(1e-9, logMax - logMin)) * innerH;
+    }
+    return FPAD.t + innerH - ((v - domain.yMin) / Math.max(1e-9, domain.yMax - domain.yMin)) * innerH;
+  };
+  return { x, y, innerW, innerH };
+}
+
+interface FacetPanelProps {
+  genotype: string;
+  lineages: GrowthSeriesLineage[];
+  seriesLog: boolean;
+  sharedAxes: boolean;
+  globalDomain: SeriesDomain;
+  seriesPoint: (p: GrowthSeriesPoint) => number;
+  hoveredRep: string | null;
+  repVisible: (rep: string | undefined) => boolean;
+  figureRef: React.RefObject<HTMLDivElement | null>;
+  setTip: (t: HoverTip | null) => void;
+  hasSetSelected: boolean;
+  hasSetTab: boolean;
+  hasBarcodes: boolean;
+  lineageHasSequenced: (lin: string) => boolean;
+  selectLineages: (lineageIds: string[]) => void;
+  showIn: (lineageIds: string[], target: 'compare' | 'libraryVariants' | 'barcodes') => void;
+}
+
+function FacetPanel(pp: FacetPanelProps) {
+  const { genotype, lineages, seriesLog, sharedAxes, globalDomain, seriesPoint } = pp;
+
+  // Per-panel domain (autoscale) when sharedAxes is off.
+  const domain: SeriesDomain = useMemo(() => {
+    if (sharedAxes) return globalDomain;
+    let xMin = Infinity, xMax = -Infinity, yMax = 0;
+    const positives: number[] = [];
+    for (const l of lineages) for (const pt of l.points) {
+      if (pt.transfer < xMin) xMin = pt.transfer;
+      if (pt.transfer > xMax) xMax = pt.transfer;
+      const v = seriesPoint(pt);
+      if (v > yMax) yMax = v;
+      if (v > 0) positives.push(v);
+    }
+    if (!Number.isFinite(xMin)) { xMin = 0; xMax = 1; }
+    const logLo = Math.max(0.001, positives.length ? Math.min(...positives) * 0.7 : 0.001);
+    return { xMin, xMax: xMax === xMin ? xMin + 1 : xMax, yMin: 0, yMax: Math.max(0.05, yMax), logLo };
+  }, [sharedAxes, globalDomain, lineages, seriesPoint]);
+
+  const scales = seriesScales(domain, seriesLog);
+
+  // Sequenced ids across all lineages in this panel (for panel-level buttons).
+  const seqLineages = lineages.filter(l => pp.lineageHasSequenced(l.lineageId)).map(l => l.lineageId);
+  const canCross = pp.hasSetSelected && seqLineages.length > 0;
+
+  const onMove = (event: React.MouseEvent<SVGRectElement>) => {
+    const svg = event.currentTarget.ownerSVGElement;
+    const target = pp.figureRef.current;
+    if (!svg || !target) return;
+    const svgRect = svg.getBoundingClientRect();
+    const figRect = target.getBoundingClientRect();
+    const px = ((event.clientX - svgRect.left) / Math.max(1, svgRect.width)) * FW;
+    const py = ((event.clientY - svgRect.top) / Math.max(1, svgRect.height)) * FH;
+    let best: { lin: GrowthSeriesLineage; pt: GrowthSeriesPoint; d: number; sx: number; sy: number } | null = null;
+    for (const l of lineages) {
+      if (!pp.repVisible(l.replicate)) continue;
+      for (const pt of l.points) {
+        const sx = scales.x(pt.transfer);
+        const sy = scales.y(seriesPoint(pt));
+        const d = Math.hypot(px - sx, py - sy);
+        if (!best || d < best.d) best = { lin: l, pt, d, sx, sy };
+      }
+    }
+    if (!best) return;
+    const x = svgRect.left - figRect.left + best.sx * (svgRect.width / FW);
+    const y = svgRect.top - figRect.top + best.sy * (svgRect.height / FH);
+    pp.setTip({
+      x, y,
+      flipX: x > figRect.width - 220,
+      flipY: y < 70,
+      text: `${best.lin.lineageId}\n${best.lin.genotypeLabel} · Rep ${best.lin.replicate ?? '?'}\nT${best.pt.transfer} · OD ${fmtNumber(seriesPoint(best.pt), 3)}`,
+    });
+  };
+
+  return (
+    <div className="min-w-0 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] p-2">
+      <div className="mb-1 flex min-w-0 items-center justify-between gap-1.5">
+        <span className="truncate font-mono text-[11px] font-semibold text-[var(--text)]" title={genotype}>{genotype}</span>
+        <span className="shrink-0 text-[10px] text-[var(--text-faint)]">{lineages.length} rep{lineages.length === 1 ? '' : 's'}</span>
+      </div>
+      <svg width="100%" viewBox={`0 0 ${FW} ${FH}`} preserveAspectRatio="xMinYMin meet" role="img" aria-label={`${genotype} OD by transfer`}>
+        {/* axes */}
+        {(seriesLog ? seriesLogTicks(domain.yMax, domain.logLo) : [0, 0.25, 0.5, 0.75, 1].map(f => domain.yMax * f)).map(tick => {
+          const y = scales.y(tick);
+          return <g key={`y-${tick}`}><line x1={FPAD.l} x2={FW - FPAD.r} y1={y} y2={y} stroke="var(--border)" /><text x={FPAD.l - 5} y={y + 3} textAnchor="end" fontSize={8} fill="var(--text-faint)">{fmtNumber(tick, tick < 0.1 ? 3 : 2)}</text></g>;
+        })}
+        {transferTicks(domain.xMin, domain.xMax).map(tick => {
+          const x = scales.x(tick);
+          return <g key={`x-${tick}`}><line x1={x} x2={x} y1={FPAD.t} y2={FPAD.t + scales.innerH} stroke="var(--border)" opacity="0.5" /><text x={x} y={FH - FPAD.b + 14} textAnchor="middle" fontSize={8} fill="var(--text-faint)">{tick}</text></g>;
+        })}
+        <line x1={FPAD.l} x2={FPAD.l} y1={FPAD.t} y2={FPAD.t + scales.innerH} stroke="var(--border-strong)" />
+        <line x1={FPAD.l} x2={FW - FPAD.r} y1={FPAD.t + scales.innerH} y2={FPAD.t + scales.innerH} stroke="var(--border-strong)" />
+        <text x={FPAD.l + scales.innerW / 2} y={FH - 2} textAnchor="middle" fontSize={8} fill="var(--text-soft)">transfer</text>
+        {/* replicate lines */}
+        {lineages.map(l => {
+          const visible = pp.repVisible(l.replicate);
+          const focused = pp.hoveredRep !== null && pp.hoveredRep === l.replicate;
+          const dim = !visible || (pp.hoveredRep !== null && !focused);
+          const color = replicateColor(l.replicate);
+          const d = l.points.map((pt, i) => `${i === 0 ? 'M' : 'L'} ${scales.x(pt.transfer).toFixed(1)} ${scales.y(seriesPoint(pt)).toFixed(1)}`).join(' ');
+          return (
+            <path key={l.lineageId} d={d} fill="none" stroke={color} strokeWidth={focused ? 2.6 : 1.6} opacity={dim ? 0.14 : 0.92} />
+          );
+        })}
+        <rect x={FPAD.l} y={FPAD.t} width={scales.innerW} height={scales.innerH} fill="transparent" onMouseMove={onMove} onMouseLeave={() => pp.setTip(null)} />
+      </svg>
+      {/* cross-view buttons (only for sequenced lineages) */}
+      {canCross && (
+        <div className="mt-1.5 flex flex-wrap items-center gap-1" data-figure-omit>
+          <button type="button" onClick={() => pp.selectLineages(seqLineages)} className="lims-toggle !py-1 !text-[10px]" title="Add all sequenced samples for this genotype's lineages to the selection">
+            <MousePointerClick className="h-3 w-3" /> Select
+          </button>
+          {pp.hasSetTab && (
+            <button type="button" onClick={() => pp.showIn(seqLineages, 'compare')} className="lims-toggle !py-1 !text-[10px]" title="Select these lineages and open Compare Mutations">
+              <GitCompare className="h-3 w-3" /> Mutations
+            </button>
+          )}
+          {pp.hasSetTab && pp.hasBarcodes && (
+            <button type="button" onClick={() => pp.showIn(seqLineages, 'libraryVariants')} className="lims-toggle !py-1 !text-[10px]" title="Select these lineages and open Library Variants">
+              <Boxes className="h-3 w-3" /> Variants
+            </button>
+          )}
+          {pp.hasSetTab && pp.hasBarcodes && (
+            <button type="button" onClick={() => pp.showIn(seqLineages, 'barcodes')} className="lims-toggle !py-1 !text-[10px]" title="Select these lineages and open Barcode Charts">
+              <Barcode className="h-3 w-3" /> Barcodes
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }

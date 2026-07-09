@@ -36,6 +36,11 @@ const curatedTargets = [
     key: `mutations__experiment_${e}`,
     url: `/api/mutations?experiment=${encodeURIComponent(e)}`,
   })),
+  { key: 'growth-series__all', url: '/api/growth-series' },
+  ...EXPERIMENTS.map(e => ({
+    key: `growth-series__experiment_${e}`,
+    url: `/api/growth-series?experiment=${encodeURIComponent(e)}`,
+  })),
   { key: 'mutations-stats', url: '/api/mutations-stats' },
   { key: 'barcode-counts', url: '/api/barcode-counts' },
   { key: 'library-variants', url: '/api/library-variants' },

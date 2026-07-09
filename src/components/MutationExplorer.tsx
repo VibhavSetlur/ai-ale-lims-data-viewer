@@ -747,6 +747,10 @@ export default function MutationExplorer() {
             samples={data?.samples ?? []}
             selected={selected}
             loading={loading}
+            experiment={experiment}
+            setSelected={setSelected}
+            setTab={setTab}
+            hasBarcodes={data?.stats?.hasBarcodes === true}
           />
         </div>
         <div className={cn('flex-1 min-h-0 flex flex-col', tab === 'libraryVariants' ? '' : 'hidden')}>
