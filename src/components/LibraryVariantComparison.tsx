@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle, BarChart3, ChevronDown, ChevronRight, ChevronUp, Clipboard,
-  Download, Grid3X3, Info, Loader2, Sparkles, TrendingUp, X,
+  Download, Grid3X3, Info, Loader2, Sparkles, X,
 } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -33,6 +33,8 @@ interface LibraryVariant {
   position?: string | number;
   label: string;
   aiGenerated: boolean;
+  verAaiGenerated?: boolean;
+  verBaiGenerated?: boolean;
   metadata: Record<string, unknown>;
 }
 
@@ -53,25 +55,34 @@ interface LibraryVariantDataset {
   error?: string;
 }
 
-type ChartMode = 'bars' | 'heatmap' | 'lines';
+type ChartMode = 'bars' | 'heatmap';
 type MetricMode = 'abundance' | 'count';
-type SortKey = 'experiment' | 'dna' | 'replicate' | 'transfer';
+type SortKey = 'experiment' | 'condition' | 'strain' | 'dna' | 'replicate' | 'transfer';
 type HoverTip = { x: number; y: number; text: string; flipX: boolean; flipY: boolean };
 type VariantWithStats = LibraryVariant & { totalAbundance: number; totalCount: number; maxAbundance: number; maxCount: number; present: number };
 type VariantSortMode = 'total' | 'alpha';
+type ColumnBand = { levelKey: SortKey; levelLabel: string; cells: { key: string; label: string; colCount: number; rows: MutationSample[]; fullRows: MutationSample[] }[] };
 
 const SORT_LEVELS: readonly { key: SortKey; label: string }[] = [
   { key: 'experiment', label: 'Experiment' },
+  { key: 'condition', label: 'Condition' },
+  { key: 'strain', label: 'Strain' },
   { key: 'dna', label: 'DNA' },
   { key: 'replicate', label: 'Replicate' },
   { key: 'transfer', label: 'Transfer' },
 ];
 const SORT_LEVEL_BY_KEY = new Map(SORT_LEVELS.map(level => [level.key, level]));
-const DEFAULT_SORT: SortKey[] = ['experiment', 'dna', 'replicate', 'transfer'];
+const DEFAULT_SORT: SortKey[] = ['experiment', 'condition', 'strain', 'dna', 'replicate', 'transfer'];
 const TOP_OPTIONS = [10, 20, 50, 0] as const;
 const GOLDEN = 137.508;
 const FILL_SAT = 45;
 const FILL_LIGHT = 52;
+const BAR_COL_W = 58;
+const BAR_PAD_L = 64;
+const BAR_PAD_R = 26;
+const BAR_PAD_T = 18;
+const BAR_PAD_B = 92;
+const HEATMAP_BAND_H = 24;
 
 function parseCandidate(label: string): { a: string; b: string } | null {
   const match = label.match(/^(A\d+)-(B\d+)$/i);
@@ -104,18 +115,48 @@ function textColorFor(hslColor: string): string {
   return light >= threshold ? '#0f172a' : '#ffffff';
 }
 
-function sampleSortValue(sample: MutationSample, key: SortKey): string | number | null {
+function boolFromUnknown(value: unknown): boolean {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value !== 0;
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    return normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'y';
+  }
+  return false;
+}
+
+function variantAiA(variant: LibraryVariant): boolean {
+  return boolFromUnknown(variant.verAaiGenerated ?? variant.metadata['verA AI-generated']);
+}
+
+function variantAiB(variant: LibraryVariant): boolean {
+  return boolFromUnknown(variant.verBaiGenerated ?? variant.metadata['verB AI-generated']);
+}
+
+function variantHasPartnerAi(variant: LibraryVariant): boolean {
+  return variantAiA(variant) || variantAiB(variant) || boolFromUnknown(variant.aiGenerated);
+}
+
+function groupValue(sample: MutationSample, key: SortKey): string | number | null {
   if (key === 'experiment') return sample.experiment || null;
+  if (key === 'condition') return sample.condition || null;
+  if (key === 'strain') return sample.strain || null;
   if (key === 'dna') return sample.donor_dna || null;
   if (key === 'replicate') return sample.replicate || null;
   return typeof sample.transfer === 'number' ? sample.transfer : null;
 }
 
+function groupLabel(sample: MutationSample, key: SortKey): string {
+  const value = groupValue(sample, key);
+  if (value == null || value === '') return 'none';
+  return key === 'transfer' ? `T${value}` : String(value);
+}
+
 function compareSamples(order: SortKey[]) {
   return (a: MutationSample, b: MutationSample): number => {
     for (const key of order) {
-      const av = sampleSortValue(a, key);
-      const bv = sampleSortValue(b, key);
+      const av = groupValue(a, key);
+      const bv = groupValue(b, key);
       if (av == null && bv == null) continue;
       if (av == null) return 1;
       if (bv == null) return -1;
@@ -147,7 +188,7 @@ function sampleLabel(sample: MutationSample): string {
 }
 
 function sampleSubtitle(sample: MutationSample): string {
-  return [sample.experiment, sample.donor_dna, sample.replicate ? `Rep ${sample.replicate}` : null, typeof sample.transfer === 'number' ? `T${sample.transfer}` : null]
+  return [sample.experiment, sample.condition, sample.strain, sample.donor_dna, sample.replicate ? `Rep ${sample.replicate}` : null, typeof sample.transfer === 'number' ? `T${sample.transfer}` : null]
     .filter(Boolean).join(' · ');
 }
 
@@ -208,6 +249,7 @@ export default function LibraryVariantComparison({ samples, selected, loading: s
   const [topN, setTopN] = useState<number>(20);
   const [variantSort, setVariantSort] = useState<VariantSortMode>('total');
   const [showHeatmapValues, setShowHeatmapValues] = useState(false);
+  const [showGroupedHeaders, setShowGroupedHeaders] = useState(true);
   const [sortOrder, setSortOrder] = useState<SortKey[]>(DEFAULT_SORT);
   const [hoveredVariantId, setHoveredVariantId] = useState<string | null>(null);
   const [isolatedVariantIds, setIsolatedVariantIds] = useState<Set<string>>(() => new Set());
@@ -289,8 +331,11 @@ export default function LibraryVariantComparison({ samples, selected, loading: s
   }))), [effectiveMetric, selectedSamples, valueBySampleVariant, visibleVariants]);
   const colors = useMemo(() => new Map(visibleVariants.map(variant => [variant.variantId, colorForCandidate(variant.label)])), [visibleVariants]);
   const activeVariantIds = isolatedVariantIds.size > 0 ? isolatedVariantIds : visibleVariantIds;
-  const anyAi = visibleVariants.some(variant => variant.aiGenerated);
-  const aiCount = visibleVariants.filter(variant => variant.aiGenerated).length;
+  const aiCount = visibleVariants.filter(variantHasPartnerAi).length;
+  const verAAiCount = visibleVariants.filter(variantAiA).length;
+  const verBAiCount = visibleVariants.filter(variantAiB).length;
+  const anyAi = aiCount > 0;
+  const columnBands = useMemo<ColumnBand[]>(() => buildColumnBands(selectedSamples, selectedSamples, sortOrder), [selectedSamples, sortOrder]);
   const topMeanVariant = useMemo(() => {
     if (visibleVariants.length === 0 || selectedSamples.length === 0) return null;
     return visibleVariants.reduce<{ variant: VariantWithStats; mean: number } | null>((best, variant) => {
@@ -326,11 +371,13 @@ export default function LibraryVariantComparison({ samples, selected, loading: s
   };
 
   const exportCsv = () => {
-    const header = ['variant', 'library', 'ai_generated', 'metric', ...selectedSamples.map(sampleLabel)];
+    const header = ['variant', 'library', 'ai_generated', 'verA_ai_generated', 'verB_ai_generated', 'metric', ...selectedSamples.map(sampleLabel)];
     const rows = visibleVariants.map(variant => [
       variant.label,
       metadataText(variant.metadata.Library ?? variant.library),
-      variant.aiGenerated ? 'yes' : 'no',
+      variantHasPartnerAi(variant) ? 'yes' : 'no',
+      variantAiA(variant) ? 'yes' : 'no',
+      variantAiB(variant) ? 'yes' : 'no',
       effectiveMetric === 'count' ? 'count' : 'relative_abundance',
       ...selectedSamples.map(sample => String(valueFor(sample.id, variant.variantId))),
     ]);
@@ -409,15 +456,16 @@ export default function LibraryVariantComparison({ samples, selected, loading: s
               <Sparkles className="h-4 w-4 shrink-0 text-[var(--accent-600)]" />
               <h2 className="truncate text-[15px] font-semibold text-[var(--text)]">Compare Library Variants</h2>
               <InfoPopover title="About this view" align="right">
-                Compares verAB library-variant abundance across your selected samples. Colors are stable per variant identity, and variants inferred from AI-generated library candidates are marked with an AI badge.
+                Compares verAB library-variant abundance across your selected samples. Colors are stable per variant identity, grouped headers follow the sample sort priority, and AI badges mark the specific verA or verB partner from Library_candidates metadata.
               </InfoPopover>
             </div>
-            <p className="mt-1 text-[12px] leading-relaxed text-[var(--text-soft)]">Stable colors, responsive charts, sortable sample priority, CSV export, figure export, and Library_candidates metadata in one view.</p>
+            <p className="mt-1 text-[12px] leading-relaxed text-[var(--text-soft)]">Barcode-style vertical bars and heatmap, sortable experimental-factor headers, CSV export, figure export, and Library_candidates metadata in one view.</p>
           </div>
           <div className="flex flex-wrap items-center gap-3 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2">
             <Stat value={selectedSamples.length.toLocaleString()} label="samples" />
             <Stat value={visibleVariants.length.toLocaleString()} label={topN <= 0 ? 'variants' : `of ${rankedVariants.length}`} />
             <Stat value={aiCount.toLocaleString()} label="AI variants" />
+            <Stat value={`${verAAiCount}/${verBAiCount}`} label="verA/verB AI" />
             <Stat value={topMeanVariant ? fmtValue(topMeanVariant.mean, effectiveMetric) : 'n/a'} label="top mean" />
             <Stat value={valueRange} label="range" />
           </div>
@@ -425,9 +473,8 @@ export default function LibraryVariantComparison({ samples, selected, loading: s
 
         <div className="flex flex-wrap items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] p-2" data-figure-omit>
           <div className="flex items-center gap-1">
-            <ModeButton active={mode === 'bars'} onClick={() => setMode('bars')} icon={<BarChart3 className="h-3.5 w-3.5" />}>Bars</ModeButton>
+            <ModeButton active={mode === 'bars'} onClick={() => setMode('bars')} icon={<BarChart3 className="h-3.5 w-3.5" />}>Vertical bars</ModeButton>
             <ModeButton active={mode === 'heatmap'} onClick={() => setMode('heatmap')} icon={<Grid3X3 className="h-3.5 w-3.5" />}>Heatmap</ModeButton>
-            <ModeButton active={mode === 'lines'} onClick={() => setMode('lines')} icon={<TrendingUp className="h-3.5 w-3.5" />}>Lines</ModeButton>
           </div>
           <label className="flex items-center gap-1.5 text-[11px] text-[var(--text-soft)]">
             <span className="lims-label">Top variants</span>
@@ -442,6 +489,7 @@ export default function LibraryVariantComparison({ samples, selected, loading: s
               <option value="alpha">Alphabetical</option>
             </select>
           </label>
+          <button type="button" className="lims-toggle" data-on={showGroupedHeaders} onClick={() => setShowGroupedHeaders(value => !value)}>Grouped headers</button>
           {mode === 'heatmap' && (
             <button type="button" className="lims-toggle" data-on={showHeatmapValues} onClick={() => setShowHeatmapValues(value => !value)}>Show values</button>
           )}
@@ -473,16 +521,15 @@ export default function LibraryVariantComparison({ samples, selected, loading: s
               {tooltip && <FloatingTooltip tip={tooltip} />}
               <div className="border-b border-[var(--border)] bg-[var(--surface-2)] px-3 py-2">
                 <div className="flex flex-wrap items-center gap-2 text-[12px] text-[var(--text-soft)]">
-                  <span className="font-semibold text-[var(--text)]">{mode === 'bars' ? 'Grouped bars' : mode === 'heatmap' ? 'Variant heatmap' : 'Variant trajectories'}</span>
+                  <span className="font-semibold text-[var(--text)]">{mode === 'bars' ? 'Vertical stacked bars' : 'Variant heatmap'}</span>
                   <span className="lims-chip">{visibleVariants.length} variants</span>
                   <span className="lims-chip">{selectedSamples.length} samples</span>
                   {topMeanVariant && <span className="lims-chip" title={topMeanVariant.variant.label}>Top mean: {topMeanVariant.variant.label}</span>}
-                  {anyAi && <span className="lims-pill lims-pill-ai">AI = candidate metadata marked AI-generated</span>}
+                  {anyAi && <span className="lims-pill lims-pill-ai">AI badge marks the specific verA or verB partner</span>}
                 </div>
               </div>
-              {mode === 'bars' && <BarsChart variants={visibleVariants} samples={selectedSamples} colors={colors} metric={effectiveMetric} maxValue={maxValue} valueFor={valueFor} hoveredVariantId={hoveredVariantId} activeVariantIds={activeVariantIds} onHoverVariant={setHoveredVariantId} onTip={setTipFromPointer} />}
-              {mode === 'heatmap' && <HeatmapChart variants={visibleVariants} samples={selectedSamples} colors={colors} metric={effectiveMetric} maxValue={maxValue} valueFor={valueFor} hoveredVariantId={hoveredVariantId} activeVariantIds={activeVariantIds} onHoverVariant={setHoveredVariantId} onTip={setTipFromPointer} showValues={showHeatmapValues} />}
-              {mode === 'lines' && <LinesChart variants={visibleVariants} samples={selectedSamples} colors={colors} metric={effectiveMetric} maxValue={maxValue} valueFor={valueFor} hoveredVariantId={hoveredVariantId} activeVariantIds={activeVariantIds} onHoverVariant={setHoveredVariantId} onTip={setTipFromPointer} />}
+              {mode === 'bars' && <BarsChart variants={visibleVariants} samples={selectedSamples} colors={colors} metric={effectiveMetric} maxValue={maxValue} valueFor={valueFor} hoveredVariantId={hoveredVariantId} activeVariantIds={activeVariantIds} onHoverVariant={setHoveredVariantId} onTip={setTipFromPointer} columnBands={columnBands} showGroupedHeaders={showGroupedHeaders} />}
+              {mode === 'heatmap' && <HeatmapChart variants={visibleVariants} samples={selectedSamples} colors={colors} metric={effectiveMetric} maxValue={maxValue} valueFor={valueFor} hoveredVariantId={hoveredVariantId} activeVariantIds={activeVariantIds} onHoverVariant={setHoveredVariantId} onTip={setTipFromPointer} showValues={showHeatmapValues} columnBands={columnBands} showGroupedHeaders={showGroupedHeaders} />}
             </div>
             <VariantLegend variants={visibleVariants} colors={colors} isolated={isolatedVariantIds} hoveredVariantId={hoveredVariantId} onHover={setHoveredVariantId} onToggle={toggleIsolated} />
           </div>
@@ -492,6 +539,25 @@ export default function LibraryVariantComparison({ samples, selected, loading: s
       </section>
     </div>
   );
+}
+
+function buildColumnBands(visibleSamples: MutationSample[], allSamples: MutationSample[], groupOrder: SortKey[]): ColumnBand[] {
+  return groupOrder.map((levelKey, levelIdx) => {
+    const cells: ColumnBand['cells'] = [];
+    for (const sample of visibleSamples) {
+      const composite = groupOrder.slice(0, levelIdx + 1).map(key => metadataText(groupValue(sample, key))).join('||');
+      const label = groupLabel(sample, levelKey);
+      const prev = cells[cells.length - 1];
+      if (prev?.key === composite) {
+        prev.colCount += 1;
+        prev.rows.push(sample);
+      } else {
+        const fullRows = allSamples.filter(full => groupOrder.slice(0, levelIdx + 1).map(key => metadataText(groupValue(full, key))).join('||') === composite);
+        cells.push({ key: composite, label, colCount: 1, rows: [sample], fullRows });
+      }
+    }
+    return { levelKey, levelLabel: SORT_LEVEL_BY_KEY.get(levelKey)?.label ?? levelKey, cells };
+  });
 }
 
 function Stat({ value, label }: { value: string; label: string }) {
@@ -517,7 +583,7 @@ function SortPriorityRow({ order, onMove, onDisable, onEnable, onReset }: { orde
   const disabled = SORT_LEVELS.map(level => level.key).filter(key => !order.includes(key));
   return (
     <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] p-2 text-[11px] text-[var(--text-soft)]" data-figure-omit>
-      <span className="lims-label mr-1" title="Samples are sorted by the enabled factors from priority 1 onward.">Sort samples by</span>
+      <span className="lims-label mr-1" title="Samples are sorted by the enabled factors from priority 1 onward. Grouped chart headers use the same order.">Sort and group samples by</span>
       {order.map((key, idx) => {
         const level = SORT_LEVEL_BY_KEY.get(key);
         return (
@@ -537,21 +603,27 @@ function SortPriorityRow({ order, onMove, onDisable, onEnable, onReset }: { orde
   );
 }
 
+function AiBadge() {
+  return <span className="lims-pill lims-pill-ai shrink-0 !px-1 !py-0 text-[8px] leading-3 opacity-90">AI</span>;
+}
+
 function VariantLabel({ variant, color, rank, compact = false }: { variant: LibraryVariant; color: string; rank?: number; compact?: boolean }) {
   const parsed = parseCandidate(variant.label);
+  const meta = variant.metadata;
+  const aLabel = metadataText(meta.verA_name) || parsed?.a || metadataText(meta.verA);
+  const bLabel = metadataText(meta.verB_name) || parsed?.b || metadataText(meta.verB);
   return (
-    <div className="flex min-w-0 items-center gap-1.5" title={variant.label}>
+    <div className="flex min-w-0 items-center gap-1.5" title={`${variant.label}\nverA: ${aLabel || 'unknown'} ${variantAiA(variant) ? '(AI-generated)' : '(not AI-generated)'}\nverB: ${bLabel || 'unknown'} ${variantAiB(variant) ? '(AI-generated)' : '(not AI-generated)'}`}>
       {rank != null && <span className="shrink-0 text-[10px] tabular-nums text-[var(--text-faint)]">{rank}.</span>}
       <span className="h-2.5 w-2.5 shrink-0 rounded-full ring-1 ring-black/10" style={{ backgroundColor: color }} />
       {parsed ? (
-        <span className={cn('grid shrink-0 grid-cols-1 gap-0.5 font-mono leading-none', compact ? 'w-[58px]' : 'w-[70px]')}>
-          <span className="rounded bg-[var(--surface-3)] px-1 py-0.5 text-[9.5px] font-semibold text-[var(--text)]">{parsed.a}</span>
-          <span className="rounded bg-[var(--surface-3)] px-1 py-0.5 text-[9.5px] font-semibold text-[var(--text)]">{parsed.b}</span>
+        <span className={cn('grid shrink min-w-0 grid-cols-1 gap-0.5 font-mono leading-none', compact ? 'w-[74px]' : 'w-[92px]')}>
+          <span className="flex min-w-0 items-center gap-0.5 rounded bg-[var(--surface-3)] px-1 py-0.5 text-[9.5px] font-semibold text-[var(--text)]"><span className="truncate">{parsed.a}</span>{variantAiA(variant) && <AiBadge />}</span>
+          <span className="flex min-w-0 items-center gap-0.5 rounded bg-[var(--surface-3)] px-1 py-0.5 text-[9.5px] font-semibold text-[var(--text)]"><span className="truncate">{parsed.b}</span>{variantAiB(variant) && <AiBadge />}</span>
         </span>
       ) : (
         <span className={cn('lims-id truncate font-semibold', compact ? 'max-w-[120px]' : 'max-w-[220px]')}>{variant.label}</span>
       )}
-      {variant.aiGenerated && <span className="lims-pill lims-pill-ai shrink-0 opacity-80">AI</span>}
     </div>
   );
 }
@@ -559,43 +631,6 @@ function VariantLabel({ variant, color, rank, compact = false }: { variant: Libr
 function isDimmed(variantId: string, hoveredVariantId: string | null, activeVariantIds: Set<string>): boolean {
   if (!activeVariantIds.has(variantId)) return true;
   return hoveredVariantId !== null && hoveredVariantId !== variantId;
-}
-
-function BarsChart({ variants, samples, colors, metric, maxValue, valueFor, hoveredVariantId, activeVariantIds, onHoverVariant, onTip }: ChartProps) {
-  const minWidth = Math.max(720, 180 + samples.length * 96);
-  return (
-    <div className="overflow-x-auto p-3">
-      <div className="space-y-3" style={{ minWidth }}>
-        <div className="grid gap-3 text-[10px] uppercase tracking-wide text-[var(--text-faint)]" style={{ gridTemplateColumns: `210px repeat(${samples.length}, minmax(96px, 1fr))` }}>
-          <div>Variant</div>
-          {samples.map(sample => <div key={sample.id} className="truncate text-center" title={`${sampleLabel(sample)}\n${sampleSubtitle(sample)}`}>{sampleLabel(sample)}</div>)}
-        </div>
-        {variants.map((variant, idx) => {
-          const color = colors.get(variant.variantId) ?? colorForCandidate(variant.label);
-          const dim = isDimmed(variant.variantId, hoveredVariantId, activeVariantIds);
-          return (
-            <div key={variant.variantId} className={cn('grid items-center gap-3 rounded-lg border border-transparent px-2 py-2 transition-colors', idx % 2 === 1 && 'bg-[var(--surface-2)]/55', hoveredVariantId === variant.variantId && '!border-[var(--accent-300)] !bg-[var(--accent-50)]')} style={{ gridTemplateColumns: `210px repeat(${samples.length}, minmax(96px, 1fr))` }} onMouseEnter={() => onHoverVariant(variant.variantId)} onMouseLeave={() => onHoverVariant(null)}>
-              <VariantLabel variant={variant} color={color} rank={idx + 1} />
-              {samples.map(sample => {
-                const value = valueFor(sample.id, variant.variantId);
-                const width = value > 0 ? Math.max(2, (value / maxValue) * 100) : 0;
-                return (
-                  <div key={sample.id} className="min-w-0 rounded-md bg-[var(--surface)]/60 p-1" onMouseEnter={event => onTip(event, `${variant.label}\n${sampleLabel(sample)}\n${fmtValue(value, metric)}`)} title={`${variant.label}\n${sampleLabel(sample)}\n${fmtValue(value, metric)}`}>
-                    <div className="h-7 rounded bg-[var(--surface-3)] p-1 ring-1 ring-inset ring-[var(--border)]">
-                      <div className="flex h-full items-center justify-end rounded px-1 text-[10px] font-semibold tabular-nums transition-opacity" style={{ width: `${width}%`, minWidth: value > 0 ? 6 : 0, backgroundColor: color, color: textColorFor(color), opacity: dim ? 0.18 : 1 }}>
-                        {width > 34 ? fmtValue(value, metric) : ''}
-                      </div>
-                    </div>
-                    <div className="mt-0.5 truncate text-right text-[10px] tabular-nums text-[var(--text-faint)]">{width <= 34 ? fmtValue(value, metric) : ''}</div>
-                  </div>
-                );
-              })}
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
 }
 
 interface ChartProps {
@@ -609,23 +644,110 @@ interface ChartProps {
   activeVariantIds: Set<string>;
   onHoverVariant: (variantId: string | null) => void;
   onTip: (event: React.MouseEvent<HTMLElement | SVGElement>, text: string) => void;
+  columnBands: ColumnBand[];
+  showGroupedHeaders: boolean;
 }
 
-function HeatmapChart({ variants, samples, colors, metric, maxValue, valueFor, hoveredVariantId, activeVariantIds, onHoverVariant, onTip, showValues }: ChartProps & { showValues: boolean }) {
+function BandsHeaderStrip({ bands, sampleCount, colWidth, padLeft, padRight }: { bands: ColumnBand[]; sampleCount: number; colWidth: number; padLeft: number; padRight: number }) {
+  const gridTemplateColumns = `${padLeft}px repeat(${sampleCount}, ${colWidth}px) ${padRight}px`;
+  return (
+    <div className="space-y-0.5 text-[9px] uppercase tracking-wide text-[var(--text-faint)]" style={{ width: padLeft + sampleCount * colWidth + padRight }}>
+      {bands.map(band => (
+        <div key={band.levelKey} className="grid gap-0.5" style={{ gridTemplateColumns }}>
+          <div className="flex items-center justify-end pr-2 font-semibold">{band.levelLabel}</div>
+          {band.cells.map(cell => (
+            <div key={cell.key} className="min-w-0 rounded border border-[var(--border)] bg-[var(--surface-2)] px-1 py-0.5 text-center" style={{ gridColumn: `span ${cell.colCount}` }} title={`${band.levelLabel}: ${cell.label}\n${cell.rows.length} sample${cell.rows.length === 1 ? '' : 's'}`}>
+              <div className="truncate">{cell.label}</div>
+            </div>
+          ))}
+          <div />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function BarsChart({ variants, samples, colors, metric, maxValue, valueFor, hoveredVariantId, activeVariantIds, onHoverVariant, onTip, columnBands, showGroupedHeaders }: ChartProps) {
+  const chartHeight = 390;
+  const width = Math.max(720, BAR_PAD_L + samples.length * BAR_COL_W + BAR_PAD_R);
+  const innerH = chartHeight - BAR_PAD_T - BAR_PAD_B;
+  const baseY = BAR_PAD_T + innerH;
+  const sampleTotals = samples.map(sample => variants.reduce((sum, variant) => sum + valueFor(sample.id, variant.variantId), 0));
+  const yMax = Math.max(maxValue, ...sampleTotals, metric === 'abundance' ? 0.01 : 1);
+  const ticks = [0, 0.25, 0.5, 0.75, 1];
+  const groupComposites = samples.map(sample => columnBands[0]?.cells.find(cell => cell.rows.some(row => row.id === sample.id))?.key ?? '');
+  return (
+    <div className="overflow-x-auto p-3">
+      <div className="space-y-2" style={{ width }}>
+        {showGroupedHeaders && <BandsHeaderStrip bands={columnBands} sampleCount={samples.length} colWidth={BAR_COL_W} padLeft={BAR_PAD_L} padRight={BAR_PAD_R} />}
+        <svg width={width} height={chartHeight} role="img" aria-label="Library variant vertical stacked bars">
+          {ticks.map(tick => {
+            const y = baseY - tick * innerH;
+            return <g key={tick}><line x1={BAR_PAD_L} x2={width - BAR_PAD_R} y1={y} y2={y} stroke="var(--border)" /><text x={BAR_PAD_L - 8} y={y + 3} textAnchor="end" fontSize="10" fill="var(--text-faint)">{fmtValue(yMax * tick, metric)}</text></g>;
+          })}
+          <text x={14} y={BAR_PAD_T + innerH / 2} transform={`rotate(-90 14 ${BAR_PAD_T + innerH / 2})`} textAnchor="middle" fontSize="10" fill="var(--text-soft)">{metric === 'count' ? 'count' : 'relative abundance'}</text>
+          <line x1={BAR_PAD_L} x2={BAR_PAD_L} y1={BAR_PAD_T} y2={baseY} stroke="var(--border-strong)" />
+          <line x1={BAR_PAD_L} x2={width - BAR_PAD_R} y1={baseY} y2={baseY} stroke="var(--border-strong)" />
+          {samples.slice(1).map((sample, idx) => {
+            if (groupComposites[idx] === groupComposites[idx + 1]) return null;
+            const x = BAR_PAD_L + (idx + 1) * BAR_COL_W;
+            return <line key={`div-${sample.id}`} x1={x} x2={x} y1={BAR_PAD_T} y2={baseY + 8} stroke="var(--border-strong)" strokeDasharray="4 4" opacity="0.7" />;
+          })}
+          {samples.map((sample, sampleIdx) => {
+            const slotX = BAR_PAD_L + sampleIdx * BAR_COL_W;
+            const barW = Math.min(34, BAR_COL_W * 0.62);
+            const x = slotX + (BAR_COL_W - barW) / 2;
+            let yCursor = baseY;
+            return (
+              <g key={sample.id}>
+                {variants.map(variant => {
+                  const value = valueFor(sample.id, variant.variantId);
+                  if (value <= 0) return null;
+                  const h = Math.max(0.5, (value / yMax) * innerH);
+                  yCursor -= h;
+                  const color = colors.get(variant.variantId) ?? colorForCandidate(variant.label);
+                  const dim = isDimmed(variant.variantId, hoveredVariantId, activeVariantIds);
+                  return (
+                    <rect key={variant.variantId} x={x} y={yCursor} width={barW} height={h} rx={h > 4 ? 1.5 : 0} fill={color} opacity={dim ? 0.18 : 0.92} stroke="rgba(15,23,42,0.18)" strokeWidth={h > 6 ? 0.4 : 0} onMouseEnter={event => { onHoverVariant(variant.variantId); onTip(event, `${variant.label}\n${sampleLabel(sample)}\n${fmtValue(value, metric)}\nverA: ${variantAiA(variant) ? 'AI-generated' : 'not AI-generated'}\nverB: ${variantAiB(variant) ? 'AI-generated' : 'not AI-generated'}`); }} />
+                  );
+                })}
+                <text x={slotX + BAR_COL_W / 2} y={baseY + 18} textAnchor="end" transform={`rotate(-42 ${slotX + BAR_COL_W / 2} ${baseY + 18})`} fontSize="10" fill="var(--text-soft)">{sampleLabel(sample).slice(0, 18)}</text>
+              </g>
+            );
+          })}
+        </svg>
+      </div>
+    </div>
+  );
+}
+
+function HeatmapChart({ variants, samples, colors, metric, maxValue, valueFor, hoveredVariantId, activeVariantIds, onHoverVariant, onTip, showValues, columnBands, showGroupedHeaders }: ChartProps & { showValues: boolean }) {
+  const bandRows = showGroupedHeaders ? columnBands : [];
+  const headerTop = bandRows.length * HEATMAP_BAND_H;
   return (
     <div className="overflow-auto p-3">
       <div className="sticky left-0 mb-3 flex w-fit items-center gap-2 rounded-md border border-[var(--border)] bg-[var(--surface-2)] px-2 py-1 text-[11px] text-[var(--text-soft)]">
         <span className="lims-label">Color scale</span>
-        <span>0</span><span className="h-2 w-36 rounded bg-gradient-to-r from-[var(--surface-3)] via-[var(--accent-300)] to-[var(--accent-700)] ring-1 ring-[var(--border)]" /><span>{fmtValue(maxValue, metric)}</span>
+        <span>0</span><span className="relative h-3 w-36 overflow-hidden rounded bg-[var(--surface-3)] ring-1 ring-[var(--border)]"><span className="absolute inset-0 bg-[var(--accent-600)] opacity-25" /><span className="absolute inset-y-0 right-0 w-1/3 bg-[var(--accent-600)] opacity-90" /></span><span>{fmtValue(maxValue, metric)}</span>
       </div>
-      <table className="border-separate text-[11px]" style={{ borderSpacing: 0 }}>
+      <table className="border-separate text-[11px]" style={{ borderSpacing: 2 }}>
         <thead>
+          {bandRows.map((band, idx) => (
+            <tr key={band.levelKey}>
+              <th className="sticky left-0 z-40 min-w-[110px] border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-left text-[9px] uppercase tracking-wide text-[var(--text-faint)]" style={{ top: idx * HEATMAP_BAND_H }}>{band.levelLabel}</th>
+              {band.cells.map(cell => (
+                <th key={cell.key} colSpan={cell.colCount} className="sticky z-30 max-w-[180px] border border-[var(--border)] bg-[var(--surface-2)] px-1 py-1 text-center text-[9px] uppercase tracking-wide text-[var(--text-faint)]" style={{ top: idx * HEATMAP_BAND_H }} title={`${band.levelLabel}: ${cell.label}\n${cell.rows.length} sample${cell.rows.length === 1 ? '' : 's'}`}>
+                  <div className="truncate">{cell.label}</div>
+                </th>
+              ))}
+            </tr>
+          ))}
           <tr>
-            <th className="sticky left-0 top-0 z-30 h-24 min-w-[210px] border-b border-r border-[var(--border)] bg-[var(--surface)] p-2 text-left text-[10px] uppercase tracking-wide text-[var(--text-faint)]">Variant</th>
+            <th className="sticky left-0 z-40 h-20 min-w-[110px] border border-[var(--border)] bg-[var(--surface)] p-2 text-left text-[10px] uppercase tracking-wide text-[var(--text-faint)]" style={{ top: headerTop }}>Variant</th>
             {samples.map(sample => (
-              <th key={sample.id} className="sticky top-0 z-20 h-24 min-w-[76px] max-w-[76px] border-b border-l border-[var(--border)] bg-[var(--surface)] p-1 align-bottom">
-                <div className="flex h-20 items-end justify-center overflow-hidden">
-                  <div className="w-20 -rotate-45 truncate text-left font-mono text-[10px] text-[var(--text)]" title={`${sampleLabel(sample)}\n${sampleSubtitle(sample)}`}>{sampleLabel(sample)}</div>
+              <th key={sample.id} className="sticky z-30 h-20 min-w-[34px] max-w-[34px] border border-[var(--border)] bg-[var(--surface)] p-0 align-bottom" style={{ top: headerTop }}>
+                <div className="flex h-20 w-[34px] items-end justify-center overflow-hidden">
+                  <div className="w-20 -rotate-45 truncate pb-1 text-left font-mono text-[10px] text-[var(--text)]" title={`${sampleLabel(sample)}\n${sampleSubtitle(sample)}`}>{sampleLabel(sample)}</div>
                 </div>
               </th>
             ))}
@@ -637,14 +759,16 @@ function HeatmapChart({ variants, samples, colors, metric, maxValue, valueFor, h
             const dim = isDimmed(variant.variantId, hoveredVariantId, activeVariantIds);
             return (
               <tr key={variant.variantId} className={idx % 2 === 1 ? 'bg-[var(--surface-2)]/45' : undefined} onMouseEnter={() => onHoverVariant(variant.variantId)} onMouseLeave={() => onHoverVariant(null)}>
-                <td className={cn('sticky left-0 z-10 border-b border-r border-[var(--border)] bg-inherit p-2', hoveredVariantId === variant.variantId && 'bg-[var(--accent-50)]')}><VariantLabel variant={variant} color={color} rank={idx + 1} /></td>
+                <td className={cn('sticky left-0 z-10 border border-[var(--border)] bg-[var(--surface)] p-2', hoveredVariantId === variant.variantId && 'bg-[var(--accent-50)]')}><VariantLabel variant={variant} color={color} rank={idx + 1} compact /></td>
                 {samples.map(sample => {
                   const value = valueFor(sample.id, variant.variantId);
-                  const alpha = Math.max(0.04, Math.min(1, value / maxValue));
+                  const alpha = value > 0 ? Math.max(0.12, Math.min(1, value / maxValue)) : 0.04;
+                  const textColor = alpha > 0.58 ? textColorFor(color) : 'var(--text)';
                   return (
-                    <td key={sample.id} className="border-b border-l border-[var(--border)] p-0.5 text-center" onMouseEnter={event => onTip(event, `${variant.label}\n${sampleLabel(sample)}\n${fmtValue(value, metric)}`)}>
-                      <div className="flex h-8 min-w-[68px] items-center justify-center rounded text-[10px] font-semibold tabular-nums transition-opacity" style={{ backgroundColor: `color-mix(in srgb, ${color} ${Math.round(alpha * 82)}%, var(--surface))`, color: alpha > 0.55 ? textColorFor(color) : 'var(--text)', opacity: dim ? 0.18 : 1 }} title={`${variant.label}\n${sampleLabel(sample)}\n${fmtValue(value, metric)}`}>
-                        {showValues ? fmtValue(value, metric) : ''}
+                    <td key={sample.id} className="border border-[var(--border)] p-0 text-center" onMouseEnter={event => { onHoverVariant(variant.variantId); onTip(event, `${variant.label}\n${sampleLabel(sample)}\n${fmtValue(value, metric)}\nverA: ${variantAiA(variant) ? 'AI-generated' : 'not AI-generated'}\nverB: ${variantAiB(variant) ? 'AI-generated' : 'not AI-generated'}`); }}>
+                      <div className="relative flex h-7 w-[34px] items-center justify-center overflow-hidden rounded text-[9px] font-semibold tabular-nums transition-opacity" title={`${variant.label}\n${sampleLabel(sample)}\n${fmtValue(value, metric)}`} style={{ opacity: dim ? 0.18 : 1, color: textColor }}>
+                        <span className="absolute inset-0" style={{ backgroundColor: color, opacity: alpha }} />
+                        <span className="relative z-10">{showValues ? fmtValue(value, metric) : ''}</span>
                       </div>
                     </td>
                   );
@@ -658,51 +782,10 @@ function HeatmapChart({ variants, samples, colors, metric, maxValue, valueFor, h
   );
 }
 
-function LinesChart({ variants, samples, colors, metric, maxValue, valueFor, hoveredVariantId, activeVariantIds, onHoverVariant, onTip }: ChartProps) {
-  const width = Math.max(760, samples.length * 82 + 120);
-  const height = 360;
-  const pad = { l: 58, r: 24, t: 22, b: 84 };
-  const innerW = width - pad.l - pad.r;
-  const innerH = height - pad.t - pad.b;
-  return (
-    <div className="overflow-x-auto p-3">
-      <svg width="100%" height={height} viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="xMinYMin meet" role="img" aria-label="Library variant trajectories" style={{ minWidth: width }}>
-        {[0, 0.25, 0.5, 0.75, 1].map(tick => {
-          const y = pad.t + innerH - tick * innerH;
-          return <g key={tick}><line x1={pad.l} x2={width - pad.r} y1={y} y2={y} stroke="var(--border)" /><text x={pad.l - 8} y={y + 3} textAnchor="end" fontSize="10" fill="var(--text-faint)">{fmtValue(maxValue * tick, metric)}</text></g>;
-        })}
-        <line x1={pad.l} x2={pad.l} y1={pad.t} y2={pad.t + innerH} stroke="var(--border-strong)" />
-        <line x1={pad.l} x2={width - pad.r} y1={pad.t + innerH} y2={pad.t + innerH} stroke="var(--border-strong)" />
-        {variants.map(variant => {
-          const color = colors.get(variant.variantId) ?? colorForCandidate(variant.label);
-          const points = samples.map((sample, idx) => {
-            const x = samples.length === 1 ? pad.l + innerW / 2 : pad.l + (idx / (samples.length - 1)) * innerW;
-            const value = valueFor(sample.id, variant.variantId);
-            const y = pad.t + innerH - (value / maxValue) * innerH;
-            return { x, y, value, sample };
-          });
-          const dim = isDimmed(variant.variantId, hoveredVariantId, activeVariantIds);
-          const focused = hoveredVariantId === variant.variantId;
-          return (
-            <g key={variant.variantId} onMouseEnter={() => onHoverVariant(variant.variantId)} onMouseLeave={() => onHoverVariant(null)}>
-              <polyline fill="none" stroke={color} strokeWidth={focused ? 3.5 : variant.aiGenerated ? 2.6 : 2.2} strokeDasharray={variant.aiGenerated ? '6 4' : undefined} points={points.map(point => `${point.x},${point.y}`).join(' ')} opacity={dim ? 0.16 : 0.92} />
-              {points.map(point => <circle key={`${variant.variantId}-${point.sample.id}`} cx={point.x} cy={point.y} r={focused ? 4.5 : 3.2} fill={color} stroke="var(--surface)" strokeWidth="1.5" opacity={dim ? 0.16 : 1} onMouseEnter={event => onTip(event, `${variant.label}\n${sampleLabel(point.sample)}\n${fmtValue(point.value, metric)}`)} />)}
-            </g>
-          );
-        })}
-        {samples.map((sample, idx) => {
-          const x = samples.length === 1 ? pad.l + innerW / 2 : pad.l + (idx / (samples.length - 1)) * innerW;
-          return <text key={sample.id} x={x} y={height - 18} textAnchor="end" transform={`rotate(-38 ${x} ${height - 18})`} fontSize="10" fill="var(--text-soft)">{sampleLabel(sample).slice(0, 18)}</text>;
-        })}
-      </svg>
-    </div>
-  );
-}
-
 function VariantLegend({ variants, colors, isolated, hoveredVariantId, onHover, onToggle }: { variants: VariantWithStats[]; colors: Map<string, string>; isolated: Set<string>; hoveredVariantId: string | null; onHover: (variantId: string | null) => void; onToggle: (variantId: string) => void }) {
   return (
     <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3">
-      <div className="mb-2 flex flex-wrap items-center gap-2 text-[12px]"><span className="font-semibold text-[var(--text)]">Interactive legend</span><span className="text-[11px] text-[var(--text-soft)]">Hover to highlight. Click to isolate one or more variants.</span>{isolated.size > 0 && <span className="lims-chip lims-chip-accent">{isolated.size} isolated</span>}</div>
+      <div className="mb-2 flex flex-wrap items-center gap-2 text-[12px]"><span className="font-semibold text-[var(--text)]">Interactive legend</span><span className="text-[11px] text-[var(--text-soft)]">Hover to highlight. Click to isolate one or more variants.</span><span className="lims-pill lims-pill-ai">AI marks the specific verA or verB partner</span>{isolated.size > 0 && <span className="lims-chip lims-chip-accent">{isolated.size} isolated</span>}</div>
       <div className="flex max-h-36 flex-wrap gap-1.5 overflow-auto pr-1">
         {variants.map(variant => {
           const color = colors.get(variant.variantId) ?? colorForCandidate(variant.label);
@@ -712,7 +795,8 @@ function VariantLegend({ variants, colors, isolated, hoveredVariantId, onHover, 
             <button key={variant.variantId} type="button" aria-pressed={pressed} onClick={() => onToggle(variant.variantId)} onMouseEnter={() => onHover(variant.variantId)} onMouseLeave={() => onHover(null)} className={cn('lims-toggle max-w-full !py-1', pressed && 'ring-1 ring-[var(--accent-500)]', dim && 'opacity-45')} data-on={pressed} title={variant.label}>
               <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: color }} />
               <span className="min-w-0 truncate font-mono">{parseCandidate(variant.label) ? variant.label.replace('-', ' / ') : variant.label}</span>
-              {variant.aiGenerated && <span className="lims-pill lims-pill-ai opacity-80">AI</span>}
+              {variantAiA(variant) && <span className="lims-pill lims-pill-ai opacity-80">verA AI</span>}
+              {variantAiB(variant) && <span className="lims-pill lims-pill-ai opacity-80">verB AI</span>}
             </button>
           );
         })}
@@ -727,7 +811,7 @@ function MetadataPanel({ variants, colors, expanded, setExpanded, hoveredVariant
     <aside className="min-w-0 rounded-xl border border-[var(--border)] bg-[var(--surface)] shadow-sm">
       <div className="border-b border-[var(--border)] bg-[var(--surface-2)] px-3 py-2">
         <div className="font-semibold text-[13px] text-[var(--text)]">Variant metadata</div>
-        <div className="text-[11px] text-[var(--text-soft)]">Library_candidates fields for the visible Top N set.</div>
+        <div className="text-[11px] text-[var(--text-soft)]">Library_candidates fields for the visible Top N set. AI status is split by verA and verB partner.</div>
       </div>
       <div className="max-h-[680px] overflow-auto p-2">
         <table className="w-full table-fixed border-separate text-[11px]" style={{ borderSpacing: 0 }}>
@@ -750,7 +834,7 @@ function MetadataPanel({ variants, colors, expanded, setExpanded, hoveredVariant
                   <tr className={cn('transition-colors', idx % 2 === 1 && 'bg-[var(--surface-2)]/45', focused ? 'bg-[var(--accent-50)]' : 'hover:bg-[var(--surface-2)]')} onMouseEnter={() => onHover(variant.variantId)} onMouseLeave={() => onHover(null)}>
                     <td className="border-b border-[var(--border)] p-2 align-top"><VariantLabel variant={variant} color={color} rank={idx + 1} compact /><div className="mt-1 text-[10px] tabular-nums text-[var(--text-faint)]">present {variant.present}/{sampleCount} · max {fmtValue(variant.maxAbundance, 'abundance')}</div></td>
                     <MetaCell value={library} onCopy={onCopy} />
-                    <td className="border-b border-[var(--border)] p-2 align-top"><div className="grid gap-1"><div className="min-w-0 rounded border border-[var(--border)] bg-[var(--surface)] px-1.5 py-1"><span className="lims-label">verA</span><div className="truncate" title={aName}>{aName || '—'}</div><div className="truncate text-[var(--text-faint)]" title={aType}>{aType}</div></div><div className="min-w-0 rounded border border-[var(--border)] bg-[var(--surface)] px-1.5 py-1"><span className="lims-label">verB</span><div className="truncate" title={bName}>{bName || '—'}</div><div className="truncate text-[var(--text-faint)]" title={bType}>{bType}</div></div></div></td>
+                    <td className="border-b border-[var(--border)] p-2 align-top"><div className="grid gap-1"><PartnerMeta label="verA" name={aName} type={aType} ai={variantAiA(variant)} /><PartnerMeta label="verB" name={bName} type={bType} ai={variantAiB(variant)} /></div></td>
                     <td className="border-b border-[var(--border)] p-1.5 align-top"><button type="button" onClick={() => toggleExpanded(variant.variantId)} className="rounded p-1 hover:bg-[var(--surface-3)]" title="Show full metadata">{isOpen ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}</button></td>
                   </tr>
                   {isOpen && <tr><td colSpan={4} className="border-b border-[var(--border)] bg-[var(--surface-2)] p-2"><ExpandedMetadata metadata={meta} onCopy={onCopy} /></td></tr>}
@@ -761,6 +845,16 @@ function MetadataPanel({ variants, colors, expanded, setExpanded, hoveredVariant
         </table>
       </div>
     </aside>
+  );
+}
+
+function PartnerMeta({ label, name, type, ai }: { label: 'verA' | 'verB'; name: string; type: string; ai: boolean }) {
+  return (
+    <div className="min-w-0 rounded border border-[var(--border)] bg-[var(--surface)] px-1.5 py-1">
+      <div className="flex min-w-0 items-center gap-1"><span className="lims-label">{label}</span>{ai && <span className="lims-pill lims-pill-ai opacity-90">AI-generated</span>}</div>
+      <div className="truncate" title={name}>{name || '—'}</div>
+      <div className="truncate text-[var(--text-faint)]" title={`${type}${ai ? ' · AI-generated' : ' · not AI-generated'}`}>{type}{type ? ' · ' : ''}{ai ? 'AI-generated' : 'not AI-generated'}</div>
+    </div>
   );
 }
 

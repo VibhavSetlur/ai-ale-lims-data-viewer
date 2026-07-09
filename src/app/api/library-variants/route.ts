@@ -8,6 +8,8 @@ export interface LibraryVariant {
   position?: string | number;
   label: string;
   aiGenerated: boolean;
+  verAaiGenerated: boolean;
+  verBaiGenerated: boolean;
   metadata: Record<string, string | number | boolean | null>;
 }
 
@@ -188,7 +190,9 @@ export async function GET() {
       const { verA, verB } = parseCandidate(row.Candidate);
       const aMeta = metadata.get(metadataKey(row.Transformation_library, row.verA || verA) ?? '');
       const bMeta = metadata.get(metadataKey(row.Transformation_library, row.verB || verB) ?? '');
-      const aiGenerated = normalizeBool(aMeta?.aiGenerated) || normalizeBool(bMeta?.aiGenerated);
+      const verAaiGenerated = normalizeBool(aMeta?.aiGenerated);
+      const verBaiGenerated = normalizeBool(bMeta?.aiGenerated);
+      const aiGenerated = verAaiGenerated || verBaiGenerated;
       if (!variants.has(row.Candidate)) {
         variants.set(row.Candidate, {
           variantId: row.Candidate,
@@ -197,6 +201,8 @@ export async function GET() {
           position: [row.verA || verA, row.verB || verB].filter(Boolean).join(' / ') || undefined,
           label: row.Candidate,
           aiGenerated,
+          verAaiGenerated,
+          verBaiGenerated,
           metadata: {
             Candidate: row.Candidate,
             Library: row.Transformation_library,
@@ -207,13 +213,20 @@ export async function GET() {
             verA_type: (aMeta?.Feature_type ?? null) as string | null,
             verB_type: (bMeta?.Feature_type ?? null) as string | null,
             'AI-generated': aiGenerated,
+            'verA AI-generated': verAaiGenerated,
+            'verB AI-generated': verBaiGenerated,
             verA_metadata: aMeta ? JSON.stringify(compactMetadata(aMeta)) : null,
             verB_metadata: bMeta ? JSON.stringify(compactMetadata(bMeta)) : null,
           },
         });
       } else if (aiGenerated) {
-        variants.get(row.Candidate)!.aiGenerated = true;
-        variants.get(row.Candidate)!.metadata['AI-generated'] = true;
+        const existing = variants.get(row.Candidate)!;
+        existing.aiGenerated ||= aiGenerated;
+        existing.verAaiGenerated ||= verAaiGenerated;
+        existing.verBaiGenerated ||= verBaiGenerated;
+        existing.metadata['AI-generated'] = existing.aiGenerated;
+        existing.metadata['verA AI-generated'] = existing.verAaiGenerated;
+        existing.metadata['verB AI-generated'] = existing.verBaiGenerated;
       }
       measurements.push({
         sampleId,
