@@ -6,6 +6,11 @@ export interface ReleaseNote {
 
 export const releaseNotes: readonly ReleaseNote[] = [
   {
+    version: '1.4.1',
+    date: '2026-07-09',
+    summary: 'Made the comparison figures practical to publish. Fixed figure export so PNG and SVG now render the full multi-panel growth figure and the library variant heatmap as real images instead of falling back to HTML. Exported figures now use full un-muted colors regardless of on-screen highlighting. Added growth figure arrangement controls for column count, panel show or hide, panel reorder, a figure title, and single-panel focus, plus a per-genotype summary of endpoint OD, max OD, and recovery transfer. In Compare Library Variants the heatmap no longer dims cells and hides the interactive legend since it is not needed there, while the bar chart keeps the legend, the heatmap sample header is labeled sample_name and is now vertical so it fits, and a clear selection control is easier to reach.',
+  },
+  {
     version: '1.4.0',
     date: '2026-07-09',
     summary: 'Rebuilt Compare Growth Curves around a faceted OD-vs-transfer figure. Small multiples are faceted by genotype (Transforming_DNA), each panel holds up to five replicate lines colored by replicate number, X is the ALE transfer and Y is OD on a log scale by default. Endpoint OD is read directly from Robotic_OD so all lineages appear, including those with no sequenced sample. Added an endpoint vs max OD toggle, log or linear Y, shared or per-panel axes, a selected-samples reflow, a full-figure mode that plots every lineage, cross-view buttons into Compare Mutations, Library Variants, and Barcode Charts for sequenced lineages, and CSV plus figure export. The original within-transfer overlay is kept as a secondary mode.',

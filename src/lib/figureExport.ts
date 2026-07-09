@@ -141,6 +141,96 @@ function escapeXml(s: string): string {
   return s.replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c] || c));
 }
 
+// Compose a container holding MANY panel <svg>s (e.g. the faceted growth-series
+// small multiples) into ONE self-contained SVG, laid out on a grid that mirrors
+// the on-screen positions. Each panel is inlined (styles baked) and placed via a
+// <g transform>. This is what makes PNG/SVG/print export the WHOLE figure instead
+// of silently downgrading to HTML when no single chart <svg> exists.
+function buildComposedSvgFromPanels(container: HTMLElement, svgs: SVGSVGElement[], opts: { title?: string; caption?: string } = {}): string {
+  // Derive each panel's intrinsic size and its on-screen position so we can keep
+  // the same reading order and rough columns in the exported figure.
+  const containerRect = container.getBoundingClientRect();
+  type Panel = { svg: SVGSVGElement; w: number; h: number; left: number; top: number };
+  const panels: Panel[] = svgs.map(svg => {
+    const r = svg.getBoundingClientRect();
+    const vb = svg.viewBox?.baseVal;
+    const w = Math.max(1, Math.round((vb && vb.width) || r.width || 300));
+    const h = Math.max(1, Math.round((vb && vb.height) || r.height || 190));
+    return { svg, w, h, left: r.left - containerRect.left, top: r.top - containerRect.top };
+  });
+  // Group panels into rows by their on-screen top (within a tolerance), then sort
+  // each row by left. This reproduces the CSS-grid layout in the export.
+  const tol = 12;
+  const rows: Panel[][] = [];
+  for (const p of [...panels].sort((a, b) => a.top - b.top || a.left - b.left)) {
+    const row = rows.find(r => Math.abs(r[0].top - p.top) <= tol);
+    if (row) row.push(p); else rows.push([p]);
+  }
+  rows.forEach(r => r.sort((a, b) => a.left - b.left));
+
+  const gap = 14;
+  const cellW = Math.max(...panels.map(p => p.w));
+  const cellH = Math.max(...panels.map(p => p.h));
+  const cols = Math.max(1, ...rows.map(r => r.length));
+  const nRows = rows.length;
+
+  const padX = 24;
+  const title = opts.title?.trim();
+  const caption = opts.caption?.trim();
+  const padTop = title ? 46 : 18;
+  const padBottom = caption ? 34 : 18;
+  const gridW = cols * cellW + (cols - 1) * gap;
+  const gridH = nRows * cellH + (nRows - 1) * gap;
+  const totalW = gridW + padX * 2;
+  const totalH = gridH + padTop + padBottom;
+
+  const groups: string[] = [];
+  rows.forEach((row, ri) => {
+    row.forEach((p, ci) => {
+      const clone = p.svg.cloneNode(true) as SVGSVGElement;
+      inlineComputedStyles(p.svg, clone);
+      clone.querySelectorAll('[data-figure-omit]').forEach(el => el.remove());
+      clone.removeAttribute('class');
+      clone.setAttribute('width', String(p.w));
+      clone.setAttribute('height', String(p.h));
+      if (!clone.getAttribute('viewBox')) clone.setAttribute('viewBox', `0 0 ${p.w} ${p.h}`);
+      clone.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+      const x = padX + ci * (cellW + gap);
+      const y = padTop + ri * (cellH + gap);
+      clone.setAttribute('x', String(x));
+      clone.setAttribute('y', String(y));
+      groups.push(serialize(clone));
+    });
+  });
+
+  const titleSvg = title
+    ? `<text x="${padX}" y="26" font-family="${FONT_SANS}" font-size="16" font-weight="700" fill="#0f172a">${escapeXml(title)}</text>`
+    : '';
+  const captionSvg = caption
+    ? `<text x="${padX}" y="${totalH - 12}" font-family="${FONT_MONO}" font-size="10.5" fill="#64748b">${escapeXml(caption)}</text>`
+    : '';
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="${totalW}" height="${totalH}" viewBox="0 0 ${totalW} ${totalH}" font-family="${FONT_SANS}">
+<rect x="0" y="0" width="${totalW}" height="${totalH}" fill="#ffffff"/>
+${titleSvg}
+${groups.join('\n')}
+${captionSvg}
+</svg>
+`;
+}
+
+// Return the list of chart panel svgs in a container, excluding tiny legend/icon
+// svgs and anything marked data-figure-omit.
+function collectPanelSvgs(container: HTMLElement): SVGSVGElement[] {
+  return Array.from(container.querySelectorAll('svg'))
+    .filter(s => !s.closest('[data-figure-omit]'))
+    .filter(s => {
+      const r = (s as SVGSVGElement).getBoundingClientRect();
+      return r.width * r.height > 3000; // drop inline icon svgs
+    }) as SVGSVGElement[];
+}
+
 function serialize(node: Element): string {
   return new XMLSerializer().serializeToString(node);
 }
@@ -261,6 +351,46 @@ function syncFormState(source: HTMLElement, clone: HTMLElement) {
   });
 }
 
+// Wrap an HTML element (e.g. the library-variant heatmap <table>) in a fully
+// self-contained SVG via foreignObject, with the document stylesheet baked in.
+// This lets an "SVG" export of an HTML/table figure produce a real .svg file
+// instead of silently downgrading to .html.
+function htmlElementToSvgString(element: HTMLElement, title: string): string {
+  const w = Math.max(1, Math.round(Math.max(element.scrollWidth, element.getBoundingClientRect().width)));
+  const innerH = Math.max(1, Math.round(Math.max(element.scrollHeight, element.getBoundingClientRect().height)));
+  const padX = 20, padTop = 44, padBottom = 30;
+  const totalW = w + padX * 2;
+  const totalH = innerH + padTop + padBottom;
+  const clone = element.cloneNode(true) as HTMLElement;
+  syncFormState(element, clone);
+  clone.querySelectorAll('[data-figure-omit]').forEach(el => el.remove());
+  clone.style.overflow = 'visible';
+  clone.style.maxHeight = 'none';
+  clone.style.height = 'auto';
+  clone.style.width = `${w}px`;
+  const styles = collectStyles();
+  const xhtml = new XMLSerializer().serializeToString(clone);
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="${totalW}" height="${totalH}" viewBox="0 0 ${totalW} ${totalH}">` +
+    `<rect width="${totalW}" height="${totalH}" fill="#ffffff"/>` +
+    `<text x="${padX}" y="26" font-family="${FONT_SANS}" font-size="16" font-weight="700" fill="#0f172a">${escapeXml(title)}</text>` +
+    `<text x="${padX}" y="${totalH - 10}" font-family="${FONT_MONO}" font-size="10.5" fill="#64748b">AI-ALE LIMS viewer \u00b7 ${nowUtc()}</text>` +
+    `<foreignObject x="${padX}" y="${padTop}" width="${w}" height="${innerH}">` +
+    `<div xmlns="http://www.w3.org/1999/xhtml" style="width:${w}px;height:${innerH}px;background:#ffffff;color:#0f172a;overflow:hidden">` +
+    `<style>${styles}</style>${xhtml}</div></foreignObject></svg>
+`;
+}
+
+function exportHtmlElementSvg(element: HTMLElement, title: string, filenameBase: string): boolean {
+  try {
+    const text = htmlElementToSvgString(element, title);
+    downloadText(`${safeFilePart(filenameBase)}-${timestamp()}.svg`, text, 'image/svg+xml;charset=utf-8');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /* ------------------------------------------------------------------ HTML --- */
 
 export function exportElementHtml(element: HTMLElement | null, title: string, filenameBase: string): boolean {
@@ -300,8 +430,11 @@ export function printFigure(target: HTMLElement | SVGSVGElement | null, title: s
   if (!win) return false;
   let bodyInner: string;
   const svg = target instanceof SVGSVGElement ? target : resolveSvg(target);
+  const panels = svg ? [] : (target instanceof HTMLElement ? collectPanelSvgs(target) : []);
   if (svg) {
     bodyInner = buildStandaloneSvg(svg, { title, caption: `AI-ALE LIMS viewer · ${nowUtc()}` });
+  } else if (panels.length > 1 && target instanceof HTMLElement) {
+    bodyInner = buildComposedSvgFromPanels(target, panels, { title, caption: `AI-ALE LIMS viewer · ${nowUtc()}` });
   } else if (target instanceof HTMLElement) {
     const clone = target.cloneNode(true) as HTMLElement;
     syncFormState(target, clone);
@@ -326,8 +459,16 @@ body { margin: 0.4in; background:#fff; color:#0f172a; font-family:${FONT_SANS}; 
 
 // Pick the single chart <svg> to export from a container. A grid of multiple
 // SVGs rasterizes as HTML instead (no single vector makes sense there).
+//
+// Views that compose their whole figure as ONE root <svg> (e.g. the faceted
+// growth series) tag it with data-figure-root so we always serialize that svg
+// directly, no area/count heuristics. This is additive: callers that pass a
+// single svg or a div with one svg keep the existing behavior below.
 function resolveSvg(target: HTMLElement | SVGSVGElement): SVGSVGElement | null {
   if (target instanceof SVGSVGElement) return target;
+  // Prefer an explicitly-tagged composed root figure if present.
+  const root = target.querySelector('svg[data-figure-root]');
+  if (root) return root as SVGSVGElement;
   const svgs = target.querySelectorAll('svg');
   if (svgs.length === 1) return svgs[0] as SVGSVGElement;
   // If there are several, prefer the largest (the main chart, not a legend icon).
@@ -351,9 +492,22 @@ export async function exportFigure(
   if (format === 'svg') {
     const svg = resolveSvg(target);
     if (svg) return exportSvgFigure(svg, title, filenameBase) ? 'svg' : null;
-    // No single vector chart (e.g. a grid or an HTML rows view): fall back to HTML.
     const el = target instanceof SVGSVGElement ? (target.parentElement as HTMLElement) : target;
-    return exportElementHtml(el, title, filenameBase) ? 'html' : null;
+    // Multi-panel figure (e.g. faceted growth series): compose all panel svgs
+    // into ONE vector so the whole figure exports, not just one panel.
+    if (el) {
+      const panels = collectPanelSvgs(el);
+      if (panels.length > 1) {
+        const text = buildComposedSvgFromPanels(el, panels, { title, caption: `AI-ALE LIMS viewer \u00b7 ${nowUtc()}` });
+        downloadText(`${safeFilePart(filenameBase)}-${timestamp()}.svg`, text, 'image/svg+xml;charset=utf-8');
+        return 'svg';
+      }
+      // No vector panels (e.g. an HTML/table heatmap): still produce a real .svg
+      // by embedding the element via foreignObject, never downgrade to HTML.
+      if (exportHtmlElementSvg(el, title, filenameBase)) return 'svg';
+      return exportElementHtml(el, title, filenameBase) ? 'html' : null;
+    }
+    return null;
   }
   if (format === 'html') {
     const el = target instanceof SVGSVGElement ? (target.parentElement as HTMLElement) : target;
@@ -363,6 +517,16 @@ export async function exportFigure(
   const svg = resolveSvg(target);
   if (svg && await svgToPng(svg, title, filenameBase)) return 'png';
   if (target instanceof HTMLElement) {
+    // Multi-panel figure: rasterize a composed single SVG of all panels (crisp,
+    // reliable) before touching the fragile foreignObject HTML path.
+    const panels = collectPanelSvgs(target);
+    if (panels.length > 1) {
+      const text = buildComposedSvgFromPanels(target, panels, { title, caption: `AI-ALE LIMS viewer \u00b7 ${nowUtc()}` });
+      const m = text.match(/<svg[^>]*width="(\d+)"[^>]*height="(\d+)"/);
+      const w = m ? parseInt(m[1]) : 1000;
+      const h = m ? parseInt(m[2]) : 700;
+      if (await rasterize(text, w, h, 3, `${safeFilePart(filenameBase)}-${timestamp()}.png`)) return 'png';
+    }
     if (await htmlElementToPng(target, title, filenameBase)) return 'png';
     return exportElementHtml(target, title, filenameBase) ? 'html' : null;
   }

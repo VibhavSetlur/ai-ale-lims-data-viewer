@@ -176,6 +176,81 @@ function csvEscape(value: string): string {
   return /[",\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
 }
 
+/* ---------- Per-genotype quantitative summary (cheap from points[]) ---------- */
+
+interface GenotypeMetric {
+  genotype: string;
+  replicateCount: number;
+  finalTransfer: number;
+  finalMean: number;   // mean endpoint OD at the final transfer across replicates
+  finalMin: number;
+  finalMax: number;
+  maxOd: number;       // max OD reached across all replicates + transfers
+  maxOdTransfer: number;
+  recoveryTransfer: number | null; // first transfer OD climbs back above earlyMin*factor
+}
+
+const RECOVERY_FACTOR = 2; // "recovered" = OD rises to >= 2x its early minimum.
+
+// Compute a genotype's summary from its replicate lineages using the currently
+// selected aggregation value (endpoint or max OD). All O(points).
+function computeGenotypeMetric(
+  genotype: string,
+  lineages: GrowthSeriesLineage[],
+  value: (p: GrowthSeriesPoint) => number,
+): GenotypeMetric {
+  let finalTransfer = -Infinity;
+  for (const l of lineages) for (const p of l.points) if (p.transfer > finalTransfer) finalTransfer = p.transfer;
+  if (!Number.isFinite(finalTransfer)) finalTransfer = 0;
+
+  const finalVals: number[] = [];
+  let maxOd = 0, maxOdTransfer = finalTransfer;
+  for (const l of lineages) {
+    for (const p of l.points) {
+      const v = value(p);
+      if (v > maxOd) { maxOd = v; maxOdTransfer = p.transfer; }
+    }
+    const fp = l.points.find(p => p.transfer === finalTransfer);
+    if (fp) finalVals.push(value(fp));
+  }
+  const finalMean = finalVals.length ? finalVals.reduce((a, b) => a + b, 0) / finalVals.length : 0;
+  const finalMin = finalVals.length ? Math.min(...finalVals) : 0;
+  const finalMax = finalVals.length ? Math.max(...finalVals) : 0;
+
+  // Recovery transfer: use the replicate-mean trend per transfer. Find the early
+  // minimum (first third of the transfer span), then the first later transfer
+  // whose mean rises to >= RECOVERY_FACTOR * that minimum.
+  const byTransfer = new Map<number, number[]>();
+  for (const l of lineages) for (const p of l.points) {
+    const arr = byTransfer.get(p.transfer);
+    const v = value(p);
+    if (arr) arr.push(v); else byTransfer.set(p.transfer, [v]);
+  }
+  const trend = Array.from(byTransfer.entries())
+    .map(([t, vs]) => ({ t, mean: vs.reduce((a, b) => a + b, 0) / vs.length }))
+    .sort((a, b) => a.t - b.t);
+  let recoveryTransfer: number | null = null;
+  if (trend.length >= 3) {
+    const earlyCount = Math.max(1, Math.floor(trend.length / 3));
+    const early = trend.slice(0, earlyCount);
+    let minT = early[0].t, minV = early[0].mean;
+    for (const e of early) if (e.mean < minV) { minV = e.mean; minT = e.t; }
+    const threshold = Math.max(minV * RECOVERY_FACTOR, minV + 1e-6);
+    for (const e of trend) {
+      if (e.t > minT && e.mean >= threshold) { recoveryTransfer = e.t; break; }
+    }
+  }
+
+  return {
+    genotype,
+    replicateCount: lineages.length,
+    finalTransfer,
+    finalMean, finalMin, finalMax,
+    maxOd, maxOdTransfer,
+    recoveryTransfer,
+  };
+}
+
 function InfoPopover({ title, children, align = 'left' }: { title: string; children: React.ReactNode; align?: 'left' | 'right' }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -228,6 +303,22 @@ export default function GrowthCurveComparison(props: GrowthCurveComparisonProps)
   const [isolatedReps, setIsolatedReps] = useState<Set<string>>(() => new Set());
   const [seriesTip, setSeriesTip] = useState<HoverTip | null>(null);
   const seriesFigureRef = useRef<HTMLDivElement>(null);
+
+  // Arrangement + figure controls (drive both screen and export layout).
+  const [columns, setColumns] = useState<number>(3);
+  const [figureTitle, setFigureTitle] = useState<string>('');
+  const [hiddenGenotypes, setHiddenGenotypes] = useState<Set<string>>(() => new Set());
+  const [genotypeOrder, setGenotypeOrder] = useState<string[]>([]);
+  const [focusGenotype, setFocusGenotype] = useState<string | null>(null);
+  const [showSummary, setShowSummary] = useState<boolean>(true);
+  const [showBand, setShowBand] = useState<boolean>(false);
+  const [crossMsg, setCrossMsg] = useState<string | null>(null);
+  const crossMsgTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const flashCross = (msg: string) => {
+    setCrossMsg(msg);
+    if (crossMsgTimer.current) clearTimeout(crossMsgTimer.current);
+    crossMsgTimer.current = setTimeout(() => setCrossMsg(null), 2600);
+  };
 
   // Fetch the transfer-series dataset (via fetchData so static mode works). Uses
   // the same experiment filter as the loaded mutations dataset.
@@ -406,8 +497,9 @@ export default function GrowthCurveComparison(props: GrowthCurveComparisonProps)
     return allLineages.filter(l => selectedLineageIds.has(l.lineageId));
   }, [allLineages, fullFigure, selectedLineageIds]);
 
-  // Facet by genotypeLabel, ordered: single mutation, combos, No DNA.
-  const facets = useMemo(() => {
+  // Facet by genotypeLabel, ordered: single mutation, combos, No DNA. This is
+  // the DEFAULT (natural) order; user reordering / hiding is layered on top.
+  const naturalFacets = useMemo(() => {
     const byGenotype = new Map<string, GrowthSeriesLineage[]>();
     for (const l of plottedLineages) {
       const arr = byGenotype.get(l.genotypeLabel);
@@ -431,6 +523,53 @@ export default function GrowthCurveComparison(props: GrowthCurveComparisonProps)
     }
     return entries;
   }, [plottedLineages]);
+
+  // All genotypes present (natural order), used to build the arrangement chips.
+  const allGenotypes = useMemo(() => naturalFacets.map(([g]) => g), [naturalFacets]);
+
+  // Effective panel order: user order for known genotypes, then any new ones in
+  // natural order. Prunes genotypes that vanished from the data.
+  const orderedGenotypes = useMemo(() => {
+    const present = new Set(allGenotypes);
+    const fromUser = genotypeOrder.filter(g => present.has(g));
+    const seen = new Set(fromUser);
+    const appended = allGenotypes.filter(g => !seen.has(g));
+    return [...fromUser, ...appended];
+  }, [allGenotypes, genotypeOrder]);
+
+  // Panels actually drawn: ordered, minus hidden, unless focusing one genotype.
+  const facets = useMemo(() => {
+    const byGenotype = new Map(naturalFacets);
+    const order = focusGenotype && byGenotype.has(focusGenotype)
+      ? [focusGenotype]
+      : orderedGenotypes.filter(g => !hiddenGenotypes.has(g));
+    return order
+      .filter(g => byGenotype.has(g))
+      .map(g => [g, byGenotype.get(g)!] as [string, GrowthSeriesLineage[]]);
+  }, [naturalFacets, orderedGenotypes, hiddenGenotypes, focusGenotype]);
+
+  const moveGenotype = (g: string, delta: -1 | 1) => {
+    setGenotypeOrder(() => {
+      const base = orderedGenotypes;
+      const idx = base.indexOf(g);
+      if (idx < 0) return base;
+      const target = idx + delta;
+      if (target < 0 || target >= base.length) return base;
+      const next = [...base];
+      [next[idx], next[target]] = [next[target], next[idx]];
+      return next;
+    });
+  };
+  const toggleGenotypeHidden = (g: string) => setHiddenGenotypes(prev => {
+    const next = new Set(prev);
+    if (next.has(g)) next.delete(g); else next.add(g);
+    return next;
+  });
+  const resetArrangement = () => {
+    setGenotypeOrder([]);
+    setHiddenGenotypes(new Set());
+    setFocusGenotype(null);
+  };
 
   const seriesPoint = (p: GrowthSeriesPoint): number => (seriesAgg === 'max' ? p.maxOd : p.od);
 
@@ -460,6 +599,13 @@ export default function GrowthCurveComparison(props: GrowthCurveComparisonProps)
     return REPLICATE_ORDER.filter(r => set.has(r));
   }, [plottedLineages]);
 
+  // Per-genotype summary metrics for the visible (facet-ordered) panels.
+  const genotypeMetrics = useMemo(
+    () => facets.map(([g, lineages]) => computeGenotypeMetric(g, lineages, seriesPoint)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [facets, seriesAgg],
+  );
+
   const repVisible = (rep: string | undefined): boolean =>
     isolatedReps.size === 0 || (!!rep && isolatedReps.has(rep));
 
@@ -483,32 +629,66 @@ export default function GrowthCurveComparison(props: GrowthCurveComparisonProps)
   const selectLineages = (lineageIds: string[]) => {
     if (!setSelected) return;
     const add = idsForLineages(lineageIds);
-    if (add.length === 0) return;
+    if (add.length === 0) { flashCross('No sequenced samples for these lineages'); return; }
     setSelected(prev => { const next = new Set(prev); for (const id of add) next.add(id); return next; });
+    flashCross(`Added ${add.length} sequenced sample${add.length === 1 ? '' : 's'} to selection`);
+  };
+  const TARGET_LABEL: Record<'compare' | 'libraryVariants' | 'barcodes', string> = {
+    compare: 'Compare Mutations',
+    libraryVariants: 'Library Variants',
+    barcodes: 'Barcode Charts',
   };
   const showIn = (lineageIds: string[], target: 'compare' | 'libraryVariants' | 'barcodes') => {
-    selectLineages(lineageIds);
+    if (!setSelected) return;
+    const add = idsForLineages(lineageIds);
+    if (add.length === 0) { flashCross('No sequenced samples for these lineages'); return; }
+    setSelected(prev => { const next = new Set(prev); for (const id of add) next.add(id); return next; });
+    flashCross(`Selected ${add.length} sample${add.length === 1 ? '' : 's'}, opening ${TARGET_LABEL[target]}`);
     setTab?.(target);
   };
 
-  const exportSeriesCsv = () => {
-    const rows: string[][] = [];
-    for (const l of plottedLineages) {
-      for (const p of l.points) {
-        rows.push([l.lineageId, l.genotypeLabel, l.replicate || '', String(p.transfer), String(p.od), String(p.maxOd)]);
-      }
-    }
-    const csv = [['lineageId', 'genotype', 'replicate', 'transfer', 'endpoint_od', 'max_od'], ...rows]
-      .map(r => r.map(csvEscape).join(',')).join('\n');
+  const downloadCsv = (rows: string[][], filename: string) => {
+    const csv = rows.map(r => r.map(csvEscape).join(',')).join('\n');
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
     const dlUrl = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = dlUrl;
-    link.download = `growth-series-${plottedLineages.length}lineages-${seriesAgg}.csv`;
+    link.download = filename;
     document.body.appendChild(link);
     link.click();
     link.remove();
     URL.revokeObjectURL(dlUrl);
+  };
+
+  // CSV of the actually-plotted lineages (drives the "appears broken" fix: the
+  // button exports what is on screen, faceted/hidden panels included via facets).
+  const exportSeriesCsv = () => {
+    const drawn = facets.flatMap(([, lineages]) => lineages);
+    const rows: string[][] = [['lineageId', 'genotype', 'replicate', 'transfer', 'endpoint_od', 'max_od']];
+    for (const l of drawn) {
+      for (const p of l.points) {
+        rows.push([l.lineageId, l.genotypeLabel, l.replicate || '', String(p.transfer), String(p.od), String(p.maxOd)]);
+      }
+    }
+    downloadCsv(rows, `growth-series-${drawn.length}lineages-${seriesAgg}.csv`);
+  };
+
+  // CSV of the per-genotype summary table (matches what the UI shows).
+  const exportSummaryCsv = () => {
+    const rows: string[][] = [[
+      'genotype', 'replicates', 'final_transfer',
+      `final_${seriesAgg}_od_mean`, `final_${seriesAgg}_od_min`, `final_${seriesAgg}_od_max`,
+      `max_${seriesAgg}_od`, 'max_od_transfer', 'recovery_transfer',
+    ]];
+    for (const m of genotypeMetrics) {
+      rows.push([
+        m.genotype, String(m.replicateCount), String(m.finalTransfer),
+        fmtNumber(m.finalMean, 3), fmtNumber(m.finalMin, 3), fmtNumber(m.finalMax, 3),
+        fmtNumber(m.maxOd, 3), String(m.maxOdTransfer),
+        m.recoveryTransfer === null ? 'n/a' : String(m.recoveryTransfer),
+      ]);
+    }
+    downloadCsv(rows, `growth-series-summary-${genotypeMetrics.length}genotypes-${seriesAgg}.csv`);
   };
 
   /* ---------- Render: primary mode = transfer series (faceted) ---------- */
@@ -538,15 +718,38 @@ export default function GrowthCurveComparison(props: GrowthCurveComparisonProps)
         toggleRep={toggleRep}
         repVisible={repVisible}
         selectionEmpty={selectedLineageIds.size === 0}
+        selectedSampleCount={selected.size}
         tip={seriesTip}
         setTip={setSeriesTip}
         figureRef={seriesFigureRef}
         onExportCsv={exportSeriesCsv}
+        onExportSummaryCsv={exportSummaryCsv}
         onSwitchToWithin={() => setPrimaryMode('within')}
-        // cross-view
+        // arrangement + figure
+        columns={columns}
+        setColumns={setColumns}
+        figureTitle={figureTitle}
+        setFigureTitle={setFigureTitle}
+        allGenotypes={orderedGenotypes}
+        hiddenGenotypes={hiddenGenotypes}
+        toggleGenotypeHidden={toggleGenotypeHidden}
+        moveGenotype={moveGenotype}
+        focusGenotype={focusGenotype}
+        setFocusGenotype={setFocusGenotype}
+        resetArrangement={resetArrangement}
+        showSummary={showSummary}
+        setShowSummary={setShowSummary}
+        showBand={showBand}
+        setShowBand={setShowBand}
+        genotypeMetrics={genotypeMetrics}
+        // selection controls
+        onClearSelection={() => setSelected?.(new Set())}
+        onPlotFull={() => setFullFigure(true)}
         hasSetSelected={!!setSelected}
+        // cross-view
         hasSetTab={!!setTab}
         hasBarcodes={hasBarcodes}
+        crossMsg={crossMsg}
         lineageHasSequenced={lineageHasSequenced}
         selectLineages={selectLineages}
         showIn={showIn}
@@ -870,14 +1073,37 @@ interface TransferSeriesViewProps {
   toggleRep: (r: string) => void;
   repVisible: (rep: string | undefined) => boolean;
   selectionEmpty: boolean;
+  selectedSampleCount: number;
   tip: HoverTip | null;
   setTip: (t: HoverTip | null) => void;
   figureRef: React.RefObject<HTMLDivElement | null>;
   onExportCsv: () => void;
+  onExportSummaryCsv: () => void;
   onSwitchToWithin: () => void;
+  // arrangement + figure
+  columns: number;
+  setColumns: (n: number) => void;
+  figureTitle: string;
+  setFigureTitle: (s: string) => void;
+  allGenotypes: string[];
+  hiddenGenotypes: Set<string>;
+  toggleGenotypeHidden: (g: string) => void;
+  moveGenotype: (g: string, delta: -1 | 1) => void;
+  focusGenotype: string | null;
+  setFocusGenotype: (g: string | null) => void;
+  resetArrangement: () => void;
+  showSummary: boolean;
+  setShowSummary: (b: boolean) => void;
+  showBand: boolean;
+  setShowBand: (b: boolean) => void;
+  genotypeMetrics: GenotypeMetric[];
+  // selection controls
+  onClearSelection: () => void;
+  onPlotFull: () => void;
   hasSetSelected: boolean;
   hasSetTab: boolean;
   hasBarcodes: boolean;
+  crossMsg: string | null;
   lineageHasSequenced: (lin: string) => boolean;
   selectLineages: (lineageIds: string[]) => void;
   showIn: (lineageIds: string[], target: 'compare' | 'libraryVariants' | 'barcodes') => void;

@@ -20,6 +20,8 @@ export default function ExportFigureMenu({
   disabled,
   compact,
   label = 'Export figure',
+  onBeforeExport,
+  onAfterExport,
 }: {
   getTarget: () => HTMLElement | SVGSVGElement | null;
   title: string;
@@ -27,6 +29,11 @@ export default function ExportFigureMenu({
   disabled?: boolean;
   compact?: boolean;
   label?: string;
+  // Optional hooks so a caller can neutralize transient UI state (e.g. legend
+  // isolate/dim) before the figure is captured, then restore it after. This is
+  // what keeps exported colors un-muted regardless of on-screen highlighting.
+  onBeforeExport?: () => void;
+  onAfterExport?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState<FigureExportFormat | 'print' | null>(null);
@@ -49,27 +56,38 @@ export default function ExportFigureMenu({
     setTimeout(() => setDone(null), 2200);
   };
 
+  // Let a caller-supplied onBeforeExport() (e.g. clearing legend isolate/dim)
+  // commit to the DOM before we serialize. Two rAFs = one React commit + paint.
+  const nextFrame = () => new Promise<void>(r => requestAnimationFrame(() => requestAnimationFrame(() => r())));
+
   const run = async (format: FigureExportFormat) => {
     const target = getTarget();
     if (!target) { flash('Nothing to export yet'); setOpen(false); return; }
     setBusy(format);
+    setOpen(false);
     try {
-      const res = await exportFigure(target, format, title, filenameBase);
+      if (onBeforeExport) { onBeforeExport(); await nextFrame(); }
+      const res = await exportFigure(getTarget(), format, title, filenameBase);
       flash(res ? `Saved ${res.toUpperCase()}` : 'Export failed');
     } finally {
+      onAfterExport?.();
       setBusy(null);
-      setOpen(false);
     }
   };
 
-  const doPrint = () => {
+  const doPrint = async () => {
     const target = getTarget();
     if (!target) { flash('Nothing to print yet'); setOpen(false); return; }
     setBusy('print');
-    const ok = printFigure(target, title);
-    flash(ok ? 'Opened print dialog' : 'Print blocked by browser');
-    setBusy(null);
     setOpen(false);
+    try {
+      if (onBeforeExport) { onBeforeExport(); await nextFrame(); }
+      const ok = printFigure(getTarget(), title);
+      flash(ok ? 'Opened print dialog' : 'Print blocked by browser');
+    } finally {
+      onAfterExport?.();
+      setBusy(null);
+    }
   };
 
   const items: { key: FigureExportFormat | 'print'; icon: React.ReactNode; label: string; hint: string; onClick: () => void }[] = [

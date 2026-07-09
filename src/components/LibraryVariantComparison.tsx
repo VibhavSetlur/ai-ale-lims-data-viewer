@@ -253,6 +253,8 @@ export default function LibraryVariantComparison({ samples, selected, loading: s
   const [sortOrder, setSortOrder] = useState<SortKey[]>(DEFAULT_SORT);
   const [hoveredVariantId, setHoveredVariantId] = useState<string | null>(null);
   const [isolatedVariantIds, setIsolatedVariantIds] = useState<Set<string>>(() => new Set());
+  // Snapshot of legend state saved during export so figures render un-muted.
+  const exportRestore = useRef<{ hovered: string | null; isolated: Set<string> } | null>(null);
   const [tooltip, setTooltip] = useState<HoverTip | null>(null);
   const [expandedMetadata, setExpandedMetadata] = useState<Set<string>>(() => new Set());
   const figureRef = useRef<HTMLDivElement>(null);
@@ -502,7 +504,15 @@ export default function LibraryVariantComparison({ samples, selected, loading: s
           <button type="button" onClick={exportCsv} className="lims-btn lims-btn-secondary" disabled={visibleVariants.length === 0} title="Export the current variant by sample matrix as CSV">
             <Download className="h-3.5 w-3.5" /> CSV
           </button>
-          <ExportFigureMenu getTarget={() => figureRef.current} title={`AI-ALE library variants ${mode}`} filenameBase={`library-variants-${mode}-${effectiveMetric}`} disabled={visibleVariants.length === 0} compact />
+          <ExportFigureMenu
+            getTarget={() => figureRef.current}
+            title={`AI-ALE library variants ${mode}`}
+            filenameBase={`library-variants-${mode}-${effectiveMetric}`}
+            disabled={visibleVariants.length === 0}
+            compact
+            onBeforeExport={() => { exportRestore.current = { hovered: hoveredVariantId, isolated: isolatedVariantIds }; setHoveredVariantId(null); setIsolatedVariantIds(new Set()); }}
+            onAfterExport={() => { const r = exportRestore.current; if (r) { setHoveredVariantId(r.hovered); setIsolatedVariantIds(r.isolated); exportRestore.current = null; } }}
+          />
           <div className="ml-auto text-[11px] tabular-nums text-[var(--text-faint)]">{effectiveMetric === 'count' ? 'Counts' : 'Per-sample relative abundance'}</div>
         </div>
 
@@ -531,7 +541,7 @@ export default function LibraryVariantComparison({ samples, selected, loading: s
               {mode === 'bars' && <BarsChart variants={visibleVariants} samples={selectedSamples} colors={colors} metric={effectiveMetric} maxValue={maxValue} valueFor={valueFor} hoveredVariantId={hoveredVariantId} activeVariantIds={activeVariantIds} onHoverVariant={setHoveredVariantId} onTip={setTipFromPointer} columnBands={columnBands} showGroupedHeaders={showGroupedHeaders} />}
               {mode === 'heatmap' && <HeatmapChart variants={visibleVariants} samples={selectedSamples} colors={colors} metric={effectiveMetric} maxValue={maxValue} valueFor={valueFor} hoveredVariantId={hoveredVariantId} activeVariantIds={activeVariantIds} onHoverVariant={setHoveredVariantId} onTip={setTipFromPointer} showValues={showHeatmapValues} columnBands={columnBands} showGroupedHeaders={showGroupedHeaders} />}
             </div>
-            <VariantLegend variants={visibleVariants} colors={colors} isolated={isolatedVariantIds} hoveredVariantId={hoveredVariantId} onHover={setHoveredVariantId} onToggle={toggleIsolated} />
+            {mode === 'bars' && <VariantLegend variants={visibleVariants} colors={colors} isolated={isolatedVariantIds} hoveredVariantId={hoveredVariantId} onHover={setHoveredVariantId} onToggle={toggleIsolated} />}
           </div>
 
           <MetadataPanel variants={visibleVariants} colors={colors} expanded={expandedMetadata} setExpanded={setExpandedMetadata} hoveredVariantId={hoveredVariantId} onHover={setHoveredVariantId} onCopy={copyValue} sampleCount={selectedSamples.length} />
@@ -721,7 +731,7 @@ function BarsChart({ variants, samples, colors, metric, maxValue, valueFor, hove
   );
 }
 
-function HeatmapChart({ variants, samples, colors, metric, maxValue, valueFor, hoveredVariantId, activeVariantIds, onHoverVariant, onTip, showValues, columnBands, showGroupedHeaders }: ChartProps & { showValues: boolean }) {
+function HeatmapChart({ variants, samples, colors, metric, maxValue, valueFor, hoveredVariantId, onHoverVariant, onTip, showValues, columnBands, showGroupedHeaders }: ChartProps & { showValues: boolean }) {
   const bandRows = showGroupedHeaders ? columnBands : [];
   const headerTop = bandRows.length * HEATMAP_BAND_H;
   return (
@@ -743,11 +753,12 @@ function HeatmapChart({ variants, samples, colors, metric, maxValue, valueFor, h
             </tr>
           ))}
           <tr>
-            <th className="sticky left-0 z-40 h-20 min-w-[110px] border border-[var(--border)] bg-[var(--surface)] p-2 text-left text-[10px] uppercase tracking-wide text-[var(--text-faint)]" style={{ top: headerTop }}>Variant</th>
+            <th className="sticky left-0 z-40 h-28 min-w-[110px] border border-[var(--border)] bg-[var(--surface)] p-2 text-left align-bottom text-[10px] uppercase tracking-wide text-[var(--text-faint)]" style={{ top: headerTop }}>sample_name</th>
             {samples.map(sample => (
-              <th key={sample.id} className="sticky z-30 h-20 min-w-[34px] max-w-[34px] border border-[var(--border)] bg-[var(--surface)] p-0 align-bottom" style={{ top: headerTop }}>
-                <div className="flex h-20 w-[34px] items-end justify-center overflow-hidden">
-                  <div className="w-20 -rotate-45 truncate pb-1 text-left font-mono text-[10px] text-[var(--text)]" title={`${sampleLabel(sample)}\n${sampleSubtitle(sample)}`}>{sampleLabel(sample)}</div>
+              <th key={sample.id} className="sticky z-30 h-28 min-w-[34px] max-w-[34px] border border-[var(--border)] bg-[var(--surface)] p-0 align-bottom" style={{ top: headerTop }}>
+                <div className="flex h-28 w-[34px] items-end justify-center pb-1">
+                  {/* Vertical (not slanted) so the full sample_name fits the column box. */}
+                  <div className="max-h-[104px] truncate font-mono text-[10px] leading-none text-[var(--text)]" style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }} title={`${sampleLabel(sample)}\n${sampleSubtitle(sample)}`}>{sampleLabel(sample)}</div>
                 </div>
               </th>
             ))}
@@ -756,7 +767,9 @@ function HeatmapChart({ variants, samples, colors, metric, maxValue, valueFor, h
         <tbody>
           {variants.map((variant, idx) => {
             const color = colors.get(variant.variantId) ?? colorForCandidate(variant.label);
-            const dim = isDimmed(variant.variantId, hoveredVariantId, activeVariantIds);
+            // Heatmap intentionally never mutes cells: full color always, so it
+            // stays poster-readable and exports at full opacity. (The interactive
+            // legend/isolate dimming is a bar-chart-only affordance.)
             return (
               <tr key={variant.variantId} className={idx % 2 === 1 ? 'bg-[var(--surface-2)]/45' : undefined} onMouseEnter={() => onHoverVariant(variant.variantId)} onMouseLeave={() => onHoverVariant(null)}>
                 <td className={cn('sticky left-0 z-10 border border-[var(--border)] bg-[var(--surface)] p-2', hoveredVariantId === variant.variantId && 'bg-[var(--accent-50)]')}><VariantLabel variant={variant} color={color} rank={idx + 1} compact /></td>
@@ -766,7 +779,7 @@ function HeatmapChart({ variants, samples, colors, metric, maxValue, valueFor, h
                   const textColor = alpha > 0.58 ? textColorFor(color) : 'var(--text)';
                   return (
                     <td key={sample.id} className="border border-[var(--border)] p-0 text-center" onMouseEnter={event => { onHoverVariant(variant.variantId); onTip(event, `${variant.label}\n${sampleLabel(sample)}\n${fmtValue(value, metric)}\nverA: ${variantAiA(variant) ? 'AI-generated' : 'not AI-generated'}\nverB: ${variantAiB(variant) ? 'AI-generated' : 'not AI-generated'}`); }}>
-                      <div className="relative flex h-7 w-[34px] items-center justify-center overflow-hidden rounded text-[9px] font-semibold tabular-nums transition-opacity" title={`${variant.label}\n${sampleLabel(sample)}\n${fmtValue(value, metric)}`} style={{ opacity: dim ? 0.18 : 1, color: textColor }}>
+                      <div className="relative flex h-7 w-[34px] items-center justify-center overflow-hidden rounded text-[9px] font-semibold tabular-nums" title={`${variant.label}\n${sampleLabel(sample)}\n${fmtValue(value, metric)}`} style={{ color: textColor }}>
                         <span className="absolute inset-0" style={{ backgroundColor: color, opacity: alpha }} />
                         <span className="relative z-10">{showValues ? fmtValue(value, metric) : ''}</span>
                       </div>
