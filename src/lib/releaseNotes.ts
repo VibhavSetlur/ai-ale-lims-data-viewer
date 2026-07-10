@@ -6,6 +6,11 @@ export interface ReleaseNote {
 
 export const releaseNotes: readonly ReleaseNote[] = [
   {
+    version: '1.4.2',
+    date: '2026-07-10',
+    summary: 'Compare Library Variants change-request pass. Relative % vertical bars now normalize each sample to its own total so every stacked bar fills to 100 percent, and the y-axis reads a fixed 0 to 100 percent scale in that mode. Bar colors are full strength by default and only dim on hover or isolate, and figure export stays fully un-muted. Vertical bar x-axis labels now show the full sample name instead of a truncated one. In the heatmap the interactive color-scale legend is removed, the sample_name header reads upright vertical so it fits the column box, and every tile is a solid fully color-filled chip like Barcode Charts instead of a partially filled bordered box. Heatmap figure export now produces real PNG and SVG files by baking resolved colors into the exported figure instead of silently downgrading to HTML. Restored an easy to reach Clear selection control in Sample Selection.',
+  },
+  {
     version: '1.4.1',
     date: '2026-07-09',
     summary: 'Made the comparison figures practical to publish. Fixed figure export so PNG and SVG now render the full multi-panel growth figure and the library variant heatmap as real images instead of falling back to HTML. Exported figures now use full un-muted colors regardless of on-screen highlighting. Added growth figure arrangement controls for column count, panel show or hide, panel reorder, a figure title, and single-panel focus, plus a per-genotype summary of endpoint OD, max OD, and recovery transfer. In Compare Library Variants the heatmap no longer dims cells and hides the interactive legend since it is not needed there, while the bar chart keeps the legend, the heatmap sample header is labeled sample_name and is now vertical so it fits, and a clear selection control is easier to reach.',

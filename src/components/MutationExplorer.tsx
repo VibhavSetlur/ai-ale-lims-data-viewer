@@ -1170,6 +1170,15 @@ function SampleSelectionPanel({
             Reset all
           </button>
         )}
+        {selected.size > 0 && (
+          <button
+            onClick={() => setSelected(new Set())}
+            className="lims-btn lims-btn-ghost !text-[11px]"
+            title="Clear all samples from your selection"
+          >
+            <X className="w-3 h-3" /> Clear selection ({selected.size})
+          </button>
+        )}
         <div className="text-[11px] text-[var(--text-soft)] ml-auto tabular-nums whitespace-nowrap">
           {selected.size} selected · {filtered.length}/{samples.length} shown · {grouped.length} group{grouped.length === 1 ? '' : 's'}
         </div>

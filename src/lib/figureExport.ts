@@ -235,6 +235,34 @@ function serialize(node: Element): string {
   return new XMLSerializer().serializeToString(node);
 }
 
+// HTML/table figures (e.g. the library-variant heatmap) style themselves with
+// CSS custom properties (var(--...)) and Tailwind classes. When cloned into a
+// detached <foreignObject>, those variables no longer resolve, so backgrounds,
+// borders and text colors vanish and the SVG-image often fails to load, which
+// made PNG/SVG silently downgrade to HTML. We bake the RESOLVED computed style
+// of the key presentation properties onto the clone so the figure renders the
+// same colors it shows on screen.
+const HTML_STYLE_PROPS = [
+  'background-color', 'color', 'opacity', 'border-color', 'border-width',
+  'border-style', 'box-shadow', 'font-family', 'font-size', 'font-weight',
+  'font-style', 'text-align', 'writing-mode', 'transform',
+] as const;
+
+function inlineHtmlComputedStyles(orig: HTMLElement, clone: HTMLElement) {
+  const cs = window.getComputedStyle(orig);
+  for (const prop of HTML_STYLE_PROPS) {
+    const val = cs.getPropertyValue(prop);
+    if (val) clone.style.setProperty(prop, val);
+  }
+  const oc = orig.children, cc = clone.children;
+  for (let i = 0; i < oc.length && i < cc.length; i++) {
+    const oChild = oc[i], cChild = cc[i];
+    if (oChild instanceof HTMLElement && cChild instanceof HTMLElement) {
+      inlineHtmlComputedStyles(oChild, cChild);
+    }
+  }
+}
+
 /* ------------------------------------------------------------------ SVG ---- */
 
 export function exportSvgFigure(svg: SVGSVGElement | null, title: string, filenameBase: string): boolean {
@@ -291,6 +319,7 @@ async function htmlElementToPng(element: HTMLElement, title: string, filenameBas
   const totalH = innerH + padTop + padBottom;
   const clone = element.cloneNode(true) as HTMLElement;
   syncFormState(element, clone);
+  inlineHtmlComputedStyles(element, clone);
   clone.querySelectorAll('[data-figure-omit]').forEach(el => el.remove());
   // Neutralize scroll clipping on the clone so the full table paints.
   clone.style.overflow = 'visible';
@@ -363,6 +392,7 @@ function htmlElementToSvgString(element: HTMLElement, title: string): string {
   const totalH = innerH + padTop + padBottom;
   const clone = element.cloneNode(true) as HTMLElement;
   syncFormState(element, clone);
+  inlineHtmlComputedStyles(element, clone);
   clone.querySelectorAll('[data-figure-omit]').forEach(el => el.remove());
   clone.style.overflow = 'visible';
   clone.style.maxHeight = 'none';

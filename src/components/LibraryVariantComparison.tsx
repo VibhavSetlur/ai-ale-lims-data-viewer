@@ -693,7 +693,10 @@ function BarsChart({ variants, samples, colors, metric, maxValue, valueFor, hove
         <svg width={width} height={chartHeight} role="img" aria-label="Library variant vertical stacked bars">
           {ticks.map(tick => {
             const y = baseY - tick * innerH;
-            return <g key={tick}><line x1={BAR_PAD_L} x2={width - BAR_PAD_R} y1={y} y2={y} stroke="var(--border)" /><text x={BAR_PAD_L - 8} y={y + 3} textAnchor="end" fontSize="10" fill="var(--text-faint)">{fmtValue(yMax * tick, metric)}</text></g>;
+            // Relative % bars are normalized per sample to 100%, so the axis is a
+            // fixed 0..100% scale; count mode keeps the data-driven yMax scale.
+            const tickLabel = metric === 'abundance' ? fmtValue(tick, metric) : fmtValue(yMax * tick, metric);
+            return <g key={tick}><line x1={BAR_PAD_L} x2={width - BAR_PAD_R} y1={y} y2={y} stroke="var(--border)" /><text x={BAR_PAD_L - 8} y={y + 3} textAnchor="end" fontSize="10" fill="var(--text-faint)">{tickLabel}</text></g>;
           })}
           <text x={14} y={BAR_PAD_T + innerH / 2} transform={`rotate(-90 14 ${BAR_PAD_T + innerH / 2})`} textAnchor="middle" fontSize="10" fill="var(--text-soft)">{metric === 'count' ? 'count' : 'relative abundance'}</text>
           <line x1={BAR_PAD_L} x2={BAR_PAD_L} y1={BAR_PAD_T} y2={baseY} stroke="var(--border-strong)" />
@@ -708,20 +711,24 @@ function BarsChart({ variants, samples, colors, metric, maxValue, valueFor, hove
             const barW = Math.min(34, BAR_COL_W * 0.62);
             const x = slotX + (BAR_COL_W - barW) / 2;
             let yCursor = baseY;
+            // Relative % mode: normalize every bar to its OWN sample total so each
+            // stacked bar fills to 100%. Count mode keeps the shared yMax scale.
+            const sampleTotal = variants.reduce((sum, variant) => sum + valueFor(sample.id, variant.variantId), 0);
+            const denom = metric === 'abundance' ? (sampleTotal > 0 ? sampleTotal : 1) : yMax;
             return (
               <g key={sample.id}>
                 {variants.map(variant => {
                   const value = valueFor(sample.id, variant.variantId);
                   if (value <= 0) return null;
-                  const h = Math.max(0.5, (value / yMax) * innerH);
+                  const h = Math.max(0.5, (value / denom) * innerH);
                   yCursor -= h;
                   const color = colors.get(variant.variantId) ?? colorForCandidate(variant.label);
                   const dim = isDimmed(variant.variantId, hoveredVariantId, activeVariantIds);
                   return (
-                    <rect key={variant.variantId} x={x} y={yCursor} width={barW} height={h} rx={h > 4 ? 1.5 : 0} fill={color} opacity={dim ? 0.18 : 0.92} stroke="rgba(15,23,42,0.18)" strokeWidth={h > 6 ? 0.4 : 0} onMouseEnter={event => { onHoverVariant(variant.variantId); onTip(event, `${variant.label}\n${sampleLabel(sample)}\n${fmtValue(value, metric)}\nverA: ${variantAiA(variant) ? 'AI-generated' : 'not AI-generated'}\nverB: ${variantAiB(variant) ? 'AI-generated' : 'not AI-generated'}`); }} />
+                    <rect key={variant.variantId} x={x} y={yCursor} width={barW} height={h} rx={h > 4 ? 1.5 : 0} fill={color} opacity={dim ? 0.18 : 1} stroke="rgba(15,23,42,0.18)" strokeWidth={h > 6 ? 0.4 : 0} onMouseEnter={event => { onHoverVariant(variant.variantId); onTip(event, `${variant.label}\n${sampleLabel(sample)}\n${fmtValue(value, metric)}\nverA: ${variantAiA(variant) ? 'AI-generated' : 'not AI-generated'}\nverB: ${variantAiB(variant) ? 'AI-generated' : 'not AI-generated'}`); }} />
                   );
                 })}
-                <text x={slotX + BAR_COL_W / 2} y={baseY + 18} textAnchor="end" transform={`rotate(-42 ${slotX + BAR_COL_W / 2} ${baseY + 18})`} fontSize="10" fill="var(--text-soft)">{sampleLabel(sample).slice(0, 18)}</text>
+                <text x={slotX + BAR_COL_W / 2} y={baseY + 18} textAnchor="end" transform={`rotate(-42 ${slotX + BAR_COL_W / 2} ${baseY + 18})`} fontSize="10" fill="var(--text-soft)">{sampleLabel(sample)}</text>
               </g>
             );
           })}
@@ -736,10 +743,6 @@ function HeatmapChart({ variants, samples, colors, metric, maxValue, valueFor, h
   const headerTop = bandRows.length * HEATMAP_BAND_H;
   return (
     <div className="overflow-auto p-3">
-      <div className="sticky left-0 mb-3 flex w-fit items-center gap-2 rounded-md border border-[var(--border)] bg-[var(--surface-2)] px-2 py-1 text-[11px] text-[var(--text-soft)]">
-        <span className="lims-label">Color scale</span>
-        <span>0</span><span className="relative h-3 w-36 overflow-hidden rounded bg-[var(--surface-3)] ring-1 ring-[var(--border)]"><span className="absolute inset-0 bg-[var(--accent-600)] opacity-25" /><span className="absolute inset-y-0 right-0 w-1/3 bg-[var(--accent-600)] opacity-90" /></span><span>{fmtValue(maxValue, metric)}</span>
-      </div>
       <table className="border-separate text-[11px]" style={{ borderSpacing: 2 }}>
         <thead>
           {bandRows.map((band, idx) => (
@@ -757,8 +760,8 @@ function HeatmapChart({ variants, samples, colors, metric, maxValue, valueFor, h
             {samples.map(sample => (
               <th key={sample.id} className="sticky z-30 h-28 min-w-[34px] max-w-[34px] border border-[var(--border)] bg-[var(--surface)] p-0 align-bottom" style={{ top: headerTop }}>
                 <div className="flex h-28 w-[34px] items-end justify-center pb-1">
-                  {/* Vertical (not slanted) so the full sample_name fits the column box. */}
-                  <div className="max-h-[104px] truncate font-mono text-[10px] leading-none text-[var(--text)]" style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }} title={`${sampleLabel(sample)}\n${sampleSubtitle(sample)}`}>{sampleLabel(sample)}</div>
+                  {/* Upright vertical (bottom-to-top), not slanted, so the full sample_name fits the column box and stays readable. */}
+                  <div className="max-h-[104px] truncate font-mono text-[10px] leading-none text-[var(--text)]" style={{ writingMode: 'vertical-lr' }} title={`${sampleLabel(sample)}\n${sampleSubtitle(sample)}`}>{sampleLabel(sample)}</div>
                 </div>
               </th>
             ))}
@@ -778,10 +781,10 @@ function HeatmapChart({ variants, samples, colors, metric, maxValue, valueFor, h
                   const alpha = value > 0 ? Math.max(0.12, Math.min(1, value / maxValue)) : 0.04;
                   const textColor = alpha > 0.58 ? textColorFor(color) : 'var(--text)';
                   return (
-                    <td key={sample.id} className="border border-[var(--border)] p-0 text-center" onMouseEnter={event => { onHoverVariant(variant.variantId); onTip(event, `${variant.label}\n${sampleLabel(sample)}\n${fmtValue(value, metric)}\nverA: ${variantAiA(variant) ? 'AI-generated' : 'not AI-generated'}\nverB: ${variantAiB(variant) ? 'AI-generated' : 'not AI-generated'}`); }}>
-                      <div className="relative flex h-7 w-[34px] items-center justify-center overflow-hidden rounded text-[9px] font-semibold tabular-nums" title={`${variant.label}\n${sampleLabel(sample)}\n${fmtValue(value, metric)}`} style={{ color: textColor }}>
-                        <span className="absolute inset-0" style={{ backgroundColor: color, opacity: alpha }} />
-                        <span className="relative z-10">{showValues ? fmtValue(value, metric) : ''}</span>
+                    <td key={sample.id} className="p-0 text-center" onMouseEnter={event => { onHoverVariant(variant.variantId); onTip(event, `${variant.label}\n${sampleLabel(sample)}\n${fmtValue(value, metric)}\nverA: ${variantAiA(variant) ? 'AI-generated' : 'not AI-generated'}\nverB: ${variantAiB(variant) ? 'AI-generated' : 'not AI-generated'}`); }}>
+                      {/* Solid, fully color-filled chip (matches Barcode Charts tiles): color + intensity applied to the whole cell, no bordered box. */}
+                      <div className="flex h-7 w-[34px] items-center justify-center overflow-hidden rounded-sm text-[9px] font-semibold tabular-nums" title={`${variant.label}\n${sampleLabel(sample)}\n${fmtValue(value, metric)}`} style={{ backgroundColor: value > 0 ? color : 'transparent', opacity: value > 0 ? alpha : 1, color: textColor, boxShadow: value > 0 ? 'none' : 'inset 0 0 0 1px rgba(148,163,184,0.2)' }}>
+                        <span>{showValues ? fmtValue(value, metric) : ''}</span>
                       </div>
                     </td>
                   );
