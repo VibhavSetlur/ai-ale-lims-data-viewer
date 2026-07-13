@@ -167,8 +167,8 @@ export interface BarcodeHeatmapFigureSpec {
 
 export type FigureSpec = PairingFigureSpec | LibraryBarsFigureSpec | LibraryHeatmapFigureSpec | MutationHeatmapFigureSpec | LineChartFigureSpec | MultiLinePanelFigureSpec | BarcodeBarsFigureSpec | BarcodeHeatmapFigureSpec;
 
-const FONT_SANS = 'Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif';
-const FONT_MONO = 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace';
+const FONT_SANS = 'Inter, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, Arial, sans-serif';
+const FONT_MONO = 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, monospace';
 
 export const DEFAULT_FIGURE_OPTIONS: FigureRenderOptions = {
   title: '',
@@ -387,7 +387,7 @@ function renderLibraryBarsSvg(spec: LibraryBarsFigureSpec, options: FigureRender
       const drawn = spec.normalizedBars ? value / denom : value;
       const h = Math.max(0.5, drawn / Math.max(0.000001, yMax) * plotH);
       yCursor -= h;
-      parts.push(`<rect x="${x}" y="${yCursor}" width="${barW}" height="${h}" rx="${h > 4 ? 1.6 : 0}" fill="${escapeAttr(variant.color)}" stroke="rgba(15,23,42,0.2)" stroke-width="${h > 7 ? 0.45 : 0}"/>`);
+      parts.push(`<rect x="${x}" y="${yCursor}" width="${barW}" height="${h}" rx="${h > 4 ? 1.6 : 0}" fill="${escapeAttr(normalizeColorForSvg(variant.color))}" stroke="rgba(15,23,42,0.2)" stroke-width="${h > 7 ? 0.45 : 0}"/>`);
       if (options.showValues && h > valueSize * 1.45 && barW > 18) {
         const shown = spec.normalizedBars && spec.metric === 'abundance' ? drawn : value;
         parts.push(`<text x="${x + barW / 2}" y="${yCursor + h / 2 + valueSize * 0.34}" text-anchor="middle" font-family="${FONT_SANS}" font-size="${valueSize}" font-weight="750" fill="${escapeAttr(readableTextForFill(variant.color))}">${escapeXml(formatMetric(shown, spec.metric))}</text>`);
@@ -448,7 +448,7 @@ function renderLibraryHeatmapSvg(spec: LibraryHeatmapFigureSpec, options: Figure
     const parsed = splitVariantLabel(variant.label);
     const label = parsed ? `${parsed[0]} / ${parsed[1]}` : variant.label;
     parts.push(`<rect x="${gridX - 154}" y="${y + 1}" width="${142}" height="${Math.max(1, cell - 2)}" rx="3" fill="${rowIdx % 2 ? '#f8fafc' : '#ffffff'}" stroke="${escapeAttr(options.borderColor)}" stroke-opacity="0.45"/>`);
-    parts.push(`<circle cx="${gridX - 142}" cy="${y + cell / 2}" r="${Math.max(3, Math.min(5, cell * 0.18))}" fill="${escapeAttr(variant.color)}"/>`);
+    parts.push(`<circle cx="${gridX - 142}" cy="${y + cell / 2}" r="${Math.max(3, Math.min(5, cell * 0.18))}" fill="${escapeAttr(normalizeColorForSvg(variant.color))}"/>`);
     parts.push(`<text x="${gridX - 132}" y="${y + cell / 2 + tickSize * 0.34}" font-family="${FONT_MONO}" font-size="${tickSize}" font-weight="650" fill="${escapeAttr(options.textColor)}">${escapeXml(truncateLabel(label, 18))}</text>`);
     if (variant.aiA || variant.aiB) parts.push(`<text x="${gridX - 40}" y="${y + cell / 2 + tickSize * 0.34}" font-family="${FONT_SANS}" font-size="${8.5 * fs}" font-weight="800" fill="#7c2d12">${escapeXml(variant.aiA && variant.aiB ? 'A/B AI' : variant.aiA ? 'A AI' : 'B AI')}</text>`);
     spec.samples.forEach((sample, colIdx) => {
@@ -457,7 +457,7 @@ function renderLibraryHeatmapSvg(spec: LibraryHeatmapFigureSpec, options: Figure
       const value = entry?.value ?? 0;
       const normalized = entry?.normalizedValue ?? value;
       const alpha = value > 0 ? Math.max(0.14, Math.min(1, normalized / maxValue)) : 1;
-      const fill = value > 0 ? variant.color : options.emptyColor;
+      const fill = value > 0 ? normalizeColorForSvg(variant.color) : options.emptyColor;
       parts.push(`<rect x="${x + 1}" y="${y + 1}" width="${Math.max(1, cell - 2)}" height="${Math.max(1, cell - 2)}" rx="${Math.max(1.5, cell * 0.09)}" fill="${escapeAttr(fill)}" fill-opacity="${value > 0 ? alpha.toFixed(3) : '0.7'}" stroke="${escapeAttr(options.borderColor)}" stroke-opacity="0.55" stroke-width="0.65"/>`);
       if (options.showValues && value > 0 && cell > 19) {
         parts.push(`<text x="${x + cell / 2}" y="${y + cell / 2 + valueSize * 0.35}" text-anchor="middle" font-family="${FONT_SANS}" font-size="${Math.min(valueSize, cell * 0.26)}" font-weight="750" fill="${escapeAttr(alpha > 0.58 ? readableTextForFill(variant.color) : options.textColor)}">${escapeXml(entry?.valueLabel ?? formatMetric(value, spec.metric))}</text>`);
@@ -638,7 +638,7 @@ function drawBarcodeBarPanel(parts: string[], panel: BarcodeChartPanelSpec, norm
       const v = normalize === 'fraction' ? (entry?.fraction ?? 0) : raw;
       const h = Math.max(0.6, (v / Math.max(1e-9, yMax)) * plotH);
       yCursor -= h;
-      parts.push(`<rect x="${x}" y="${yCursor}" width="${barW}" height="${h}" rx="${h > 5 ? 1.5 : 0}" fill="${escapeAttr(candidate.color)}" stroke="rgba(15,23,42,0.22)" stroke-width="0.4"/>`);
+      parts.push(`<rect x="${x}" y="${yCursor}" width="${barW}" height="${h}" rx="${h > 5 ? 1.5 : 0}" fill="${escapeAttr(normalizeColorForSvg(candidate.color))}" stroke="rgba(15,23,42,0.22)" stroke-width="0.4"/>`);
     });
     parts.push(`<text x="${x + barW / 2}" y="${plotY + plotH + 17}" text-anchor="middle" font-family="${FONT_SANS}" font-size="${tickSize}" font-weight="650" fill="${escapeAttr(options.mutedTextColor)}">T${escapeXml(String(transfer))}</text>`);
   });
@@ -664,13 +664,13 @@ function drawBarcodeHeatmapPanel(parts: string[], panel: BarcodeChartPanelSpec, 
   });
   panel.candidates.forEach((candidate, ri) => {
     const y = gridY + ri * cellH;
-    parts.push(`<circle cx="${gridX - 100}" cy="${y + cellH / 2}" r="4" fill="${escapeAttr(candidate.color)}"/>`);
+    parts.push(`<circle cx="${gridX - 100}" cy="${y + cellH / 2}" r="4" fill="${escapeAttr(normalizeColorForSvg(candidate.color))}"/>`);
     parts.push(`<text x="${gridX - 92}" y="${y + cellH / 2 + tickSize * 0.34}" font-family="${FONT_MONO}" font-size="${tickSize}" fill="${escapeAttr(options.textColor)}">${escapeXml(truncateLabel(candidate.label, 14))}</text>`);
     panel.transfers.forEach((transfer, ti) => {
       const entry = valueMap.get(`${candidate.id}|${transfer}`);
       const frac = entry?.fraction ?? 0;
       const x = gridX + ti * cellW;
-      const fill = entry && entry.value > 0 ? candidate.color : options.emptyColor;
+      const fill = entry && entry.value > 0 ? normalizeColorForSvg(candidate.color) : options.emptyColor;
       const opacity = entry && entry.value > 0 ? Math.max(0.15, Math.min(1, frac)) : 0.7;
       parts.push(`<rect x="${x + 1}" y="${y + 1}" width="${Math.max(1, cellW - 2)}" height="${Math.max(1, cellH - 2)}" rx="2" fill="${escapeAttr(fill)}" fill-opacity="${opacity.toFixed(3)}" stroke="${escapeAttr(options.borderColor)}" stroke-opacity="0.55" stroke-width="0.55"/>`);
       if (options.showValues && frac >= 0.25 && cellW > 20 && cellH > 15) parts.push(`<text x="${x + cellW / 2}" y="${y + cellH / 2 + 3}" text-anchor="middle" font-family="${FONT_SANS}" font-size="${Math.min(8.5 * fs, cellH * 0.42)}" font-weight="750" fill="${escapeAttr(readableTextForFill(candidate.color))}">${Math.round(frac * 100)}</text>`);
@@ -685,7 +685,7 @@ function drawBarcodeLegend(parts: string[], panels: BarcodeChartPanelSpec[], opt
   let ly = y + 26;
   Array.from(candidates.values()).slice(0, 16).forEach((candidate, idx) => {
     const rowY = ly + idx * 20;
-    parts.push(`<rect x="${x}" y="${rowY - 11}" width="14" height="14" rx="3" fill="${escapeAttr(candidate.color)}" stroke="${escapeAttr(options.borderColor)}"/>`);
+    parts.push(`<rect x="${x}" y="${rowY - 11}" width="14" height="14" rx="3" fill="${escapeAttr(normalizeColorForSvg(candidate.color))}" stroke="${escapeAttr(options.borderColor)}"/>`);
     parts.push(`<text x="${x + 22}" y="${rowY}" font-family="${FONT_MONO}" font-size="${10.5 * fs}" fill="${escapeAttr(options.textColor)}">${escapeXml(truncateLabel(candidate.label, 20))}</text>`);
   });
   if (candidates.size > 16) parts.push(`<text x="${x}" y="${ly + 16 * 20 + 6}" font-family="${FONT_SANS}" font-size="${10.5 * fs}" fill="${escapeAttr(options.mutedTextColor)}">+ ${candidates.size - 16} more candidates</text>`);
@@ -750,8 +750,8 @@ function renderLineChartSvg(spec: LineChartFigureSpec, options: FigureRenderOpti
   (spec.referenceLines ?? []).forEach(ref => {
     if (!Number.isFinite(ref.y) || (spec.logY && ref.y <= 0)) return;
     const y = sy(ref.y);
-    parts.push(`<line x1="${padLeft}" x2="${padLeft + plotW}" y1="${y}" y2="${y}" stroke="${escapeAttr(ref.color ?? '#64748b')}" stroke-width="1.1" stroke-dasharray="${ref.dash ? '5 4' : 'none'}" stroke-opacity="0.72"/>`);
-    parts.push(`<text x="${padLeft + plotW - 4}" y="${y - 5}" text-anchor="end" font-family="${FONT_SANS}" font-size="${9.5 * fs}" fill="${escapeAttr(ref.color ?? options.mutedTextColor)}">${escapeXml(ref.label)}</text>`);
+    parts.push(`<line x1="${padLeft}" x2="${padLeft + plotW}" y1="${y}" y2="${y}" stroke="${escapeAttr(normalizeColorForSvg(ref.color ?? '#64748b'))}" stroke-width="1.1" stroke-dasharray="${ref.dash ? '5 4' : 'none'}" stroke-opacity="0.72"/>`);
+    parts.push(`<text x="${padLeft + plotW - 4}" y="${y - 5}" text-anchor="end" font-family="${FONT_SANS}" font-size="${9.5 * fs}" fill="${escapeAttr(normalizeColorForSvg(ref.color ?? options.mutedTextColor))}">${escapeXml(ref.label)}</text>`);
   });
 
   spec.series.forEach(series => {
@@ -759,9 +759,9 @@ function renderLineChartSvg(spec: LineChartFigureSpec, options: FigureRenderOpti
     if (pts.length === 0) return;
     const d = pts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${sx(p.x).toFixed(1)} ${sy(p.y).toFixed(1)}`).join(' ');
     const opacity = series.emphasis ? 1 : 0.72;
-    parts.push(`<path d="${d}" fill="none" stroke="${escapeAttr(series.color)}" stroke-width="${series.emphasis ? 3.2 : 2}" stroke-linejoin="round" stroke-linecap="round" stroke-opacity="${opacity}"/>`);
+    parts.push(`<path d="${d}" fill="none" stroke="${escapeAttr(normalizeColorForSvg(series.color))}" stroke-width="${series.emphasis ? 3.2 : 2}" stroke-linejoin="round" stroke-linecap="round" stroke-opacity="${opacity}"/>`);
     if (options.showValues || spec.showPoints !== false) {
-      pts.forEach(p => parts.push(`<circle cx="${sx(p.x)}" cy="${sy(p.y)}" r="${series.emphasis ? 3.6 : 2.8}" fill="${escapeAttr(series.color)}" stroke="#ffffff" stroke-width="1" stroke-opacity="0.95"/>`));
+      pts.forEach(p => parts.push(`<circle cx="${sx(p.x)}" cy="${sy(p.y)}" r="${series.emphasis ? 3.6 : 2.8}" fill="${escapeAttr(normalizeColorForSvg(series.color))}" stroke="#ffffff" stroke-width="1" stroke-opacity="0.95"/>`));
     }
   });
   if (options.showLegend) drawLineLegend(parts, spec, options, width - padRight + 32, padTop, fs);
@@ -859,8 +859,8 @@ function drawSmallLinePanel(parts: string[], panel: MultiLinePanelFigureSpec['pa
     const pts = series.points.filter(p => Number.isFinite(p.x) && Number.isFinite(p.y) && (!logY || p.y > 0)).sort((a, b) => a.x - b.x);
     if (pts.length === 0) return;
     const d = pts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${sx(p.x).toFixed(1)} ${sy(p.y).toFixed(1)}`).join(' ');
-    parts.push(`<path d="${d}" fill="none" stroke="${escapeAttr(series.color)}" stroke-width="${series.emphasis ? 2.6 : 1.8}" stroke-linejoin="round" stroke-linecap="round" stroke-opacity="${series.emphasis ? 1 : 0.85}"/>`);
-    if (showPoints) pts.forEach(p => parts.push(`<circle cx="${sx(p.x)}" cy="${sy(p.y)}" r="${series.emphasis ? 3 : 2.3}" fill="${escapeAttr(series.color)}" stroke="#ffffff" stroke-width="0.9"/>`));
+    parts.push(`<path d="${d}" fill="none" stroke="${escapeAttr(normalizeColorForSvg(series.color))}" stroke-width="${series.emphasis ? 2.6 : 1.8}" stroke-linejoin="round" stroke-linecap="round" stroke-opacity="${series.emphasis ? 1 : 0.85}"/>`);
+    if (showPoints) pts.forEach(p => parts.push(`<circle cx="${sx(p.x)}" cy="${sy(p.y)}" r="${series.emphasis ? 3 : 2.3}" fill="${escapeAttr(normalizeColorForSvg(series.color))}" stroke="#ffffff" stroke-width="0.9"/>`));
   });
 }
 
@@ -943,8 +943,8 @@ function drawLineLegendItems(parts: string[], seriesList: FigureLineSeries[], op
   let ly = y + 26;
   seriesList.slice(0, 14).forEach((series, idx) => {
     const rowY = ly + idx * 20;
-    parts.push(`<line x1="${x}" x2="${x + 16}" y1="${rowY - 4}" y2="${rowY - 4}" stroke="${escapeAttr(series.color)}" stroke-width="${series.emphasis ? 3.2 : 2}" stroke-linecap="round"/>`);
-    parts.push(`<circle cx="${x + 8}" cy="${rowY - 4}" r="3" fill="${escapeAttr(series.color)}" stroke="#ffffff" stroke-width="1"/>`);
+    parts.push(`<line x1="${x}" x2="${x + 16}" y1="${rowY - 4}" y2="${rowY - 4}" stroke="${escapeAttr(normalizeColorForSvg(series.color))}" stroke-width="${series.emphasis ? 3.2 : 2}" stroke-linecap="round"/>`);
+    parts.push(`<circle cx="${x + 8}" cy="${rowY - 4}" r="3" fill="${escapeAttr(normalizeColorForSvg(series.color))}" stroke="#ffffff" stroke-width="1"/>`);
     parts.push(`<text x="${x + 26}" y="${rowY}" font-family="${FONT_MONO}" font-size="${10.5 * fs}" fill="${escapeAttr(options.textColor)}">${escapeXml(truncateLabel(series.label, 22))}</text>`);
   });
   if (seriesList.length > 14) {
@@ -960,7 +960,7 @@ function drawVariantLegend(parts: string[], spec: LibraryBarsFigureSpec | Librar
   ly += 24;
   spec.variants.slice(0, 16).forEach((variant, idx) => {
     const rowY = ly + idx * 20;
-    parts.push(`<rect x="${x}" y="${rowY - 11}" width="14" height="14" rx="3" fill="${escapeAttr(variant.color)}" stroke="${escapeAttr(options.borderColor)}"/>`);
+    parts.push(`<rect x="${x}" y="${rowY - 11}" width="14" height="14" rx="3" fill="${escapeAttr(normalizeColorForSvg(variant.color))}" stroke="${escapeAttr(options.borderColor)}"/>`);
     parts.push(`<text x="${x + 22}" y="${rowY}" font-family="${FONT_MONO}" font-size="${10.5 * fs}" fill="${escapeAttr(options.textColor)}">${escapeXml(truncateLabel(variant.label, 20))}</text>`);
     if (variant.aiA || variant.aiB) parts.push(`<text x="${x + Math.min(maxWidth - 34, 132)}" y="${rowY}" font-family="${FONT_SANS}" font-size="${8.5 * fs}" font-weight="800" fill="#7c2d12">AI</text>`);
   });
@@ -1014,6 +1014,19 @@ function hslToHex(h: number, s: number, l: number): string {
   else { r = c; b = x; }
   const hex = (n: number) => Math.round((n + m) * 255).toString(16).padStart(2, '0');
   return `#${hex(r)}${hex(g)}${hex(b)}`;
+}
+
+// SVGs loaded via <img>/Image() (preview + PNG rasterize) reject CSS Color L4
+// space-separated hsl(). Convert any hsl(h s% l%) or hsl(h, s%, l%) to hex so
+// the exported/previewed SVG always decodes. Hex, rgb(), and named colors pass
+// through unchanged.
+function normalizeColorForSvg(color: string | undefined | null): string {
+  if (!color) return '#000000';
+  const c = color.trim();
+  // hsl( h [,/ ] s% [,/ ] l% ) - accept both comma and space separated
+  const m = c.match(/^hsla?\(\s*([\d.]+)(?:deg)?[\s,]+([\d.]+)%[\s,]+([\d.]+)%/i);
+  if (m) return hslToHex(Number.parseFloat(m[1]), Number.parseFloat(m[2]), Number.parseFloat(m[3]));
+  return c;
 }
 
 function formatTick(value: number): string {
@@ -1126,13 +1139,13 @@ function renderPairingSvg(spec: PairingFigureSpec, options: FigureRenderOptions)
     columns.forEach((col, colIdx) => {
       const x = gridX + colIdx * cell;
       const found = cellByKey.get(`${row.id}|${col.id}`);
-      const fill = found ? found.color : options.emptyColor;
+      const fill = found ? normalizeColorForSvg(found.color) : options.emptyColor;
       const opacity = found && maxValue > 0 && found.value != null ? Math.max(0.45, Math.min(1, 0.35 + 0.65 * found.value / maxValue)) : 1;
       parts.push(`<rect x="${x + 1}" y="${y + 1}" width="${Math.max(1, cell - 2)}" height="${Math.max(1, cell - 2)}" rx="${Math.max(1.5, cell * 0.09)}" fill="${escapeAttr(fill)}" fill-opacity="${opacity.toFixed(3)}" stroke="${escapeAttr(options.borderColor)}" stroke-width="0.75"/>`);
       if (found) {
         parts.push(`<circle cx="${x + cell / 2}" cy="${y + cell / 2}" r="${Math.max(2.2, cell * 0.12)}" fill="#ffffff" fill-opacity="0.86" stroke="rgba(15,23,42,0.18)" stroke-width="0.5"/>`);
         if (options.showValues && found.valueLabel) {
-          parts.push(`<text x="${x + cell / 2}" y="${y + cell / 2 + valueSize * 0.35}" text-anchor="middle" font-family="${FONT_SANS}" font-size="${Math.min(valueSize, cell * 0.28)}" font-weight="750" fill="${escapeAttr(textOnColor(found.color))}">${escapeXml(found.valueLabel)}</text>`);
+          parts.push(`<text x="${x + cell / 2}" y="${y + cell / 2 + valueSize * 0.35}" text-anchor="middle" font-family="${FONT_SANS}" font-size="${Math.min(valueSize, cell * 0.28)}" font-weight="750" fill="${escapeAttr(textOnColor(normalizeColorForSvg(found.color)))}">${escapeXml(found.valueLabel)}</text>`);
         }
         if (found.ai) {
           const r = Math.max(3, cell * 0.15);
@@ -1149,7 +1162,7 @@ function renderPairingSvg(spec: PairingFigureSpec, options: FigureRenderOptions)
     let ly = padTop;
     parts.push(`<text x="${lx}" y="${ly}" font-family="${FONT_SANS}" font-size="${labelSize}" font-weight="750" fill="${escapeAttr(options.textColor)}">${escapeXml(options.legendTitle || 'Partner pairing')}</text>`);
     ly += 24;
-    parts.push(`<rect x="${lx}" y="${ly - 12}" width="16" height="16" rx="3" fill="${uniqueColors[0] ? escapeAttr(uniqueColors[0]) : '#2563eb'}" stroke="${escapeAttr(options.borderColor)}"/>`);
+    parts.push(`<rect x="${lx}" y="${ly - 12}" width="16" height="16" rx="3" fill="${uniqueColors[0] ? escapeAttr(normalizeColorForSvg(uniqueColors[0])) : '#2563eb'}" stroke="${escapeAttr(options.borderColor)}"/>`);
     parts.push(`<circle cx="${lx + 8}" cy="${ly - 4}" r="3" fill="#ffffff" fill-opacity="0.86"/>`);
     parts.push(`<text x="${lx + 26}" y="${ly}" font-family="${FONT_SANS}" font-size="${11 * fs}" fill="${escapeAttr(options.mutedTextColor)}">Observed pair</text>`);
     ly += 25;
@@ -1172,7 +1185,7 @@ function renderPairingSvg(spec: PairingFigureSpec, options: FigureRenderOptions)
       uniqueColors.forEach((color, i) => {
         const x = lx + (i % 6) * 22;
         const y = ly + Math.floor(i / 6) * 20;
-        parts.push(`<rect x="${x}" y="${y}" width="15" height="15" rx="3" fill="${escapeAttr(color)}" stroke="${escapeAttr(options.borderColor)}"/>`);
+        parts.push(`<rect x="${x}" y="${y}" width="15" height="15" rx="3" fill="${escapeAttr(normalizeColorForSvg(color))}" stroke="${escapeAttr(options.borderColor)}"/>`);
       });
     }
   }

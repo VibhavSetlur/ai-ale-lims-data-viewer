@@ -42,6 +42,7 @@ export default function FigureExportModal({
   const [options, setOptions] = useState<FigureRenderOptions | null>(defaults);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [previewError, setPreviewError] = useState(false);
 
   React.useEffect(() => {
     setOptions(defaults);
@@ -53,6 +54,10 @@ export default function FigureExportModal({
     if (!svgText) return '';
     return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgText)}`;
   }, [svgText]);
+
+  React.useEffect(() => {
+    setPreviewError(false);
+  }, [previewUrl]);
 
   if (!open) return null;
 
@@ -101,8 +106,11 @@ export default function FigureExportModal({
           <div className="min-h-[360px] overflow-auto bg-slate-100 p-4 dark:bg-slate-950/30">
             <div className="mx-auto w-fit rounded-lg bg-white p-2 shadow ring-1 ring-slate-200">
               {previewUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={previewUrl} alt="Figure preview" className="max-h-[68vh] max-w-full" />
+                <>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={previewUrl} alt="Figure preview" className="max-h-[68vh] max-w-full" onLoad={() => setPreviewError(false)} onError={() => setPreviewError(true)} />
+                  {previewError && <div className="mt-2 text-[12px] text-red-600">Preview failed to render. Try a different format or reduce the selection.</div>}
+                </>
               ) : (
                 <div className="flex h-[420px] w-[640px] max-w-full items-center justify-center rounded border border-dashed border-slate-300 bg-white p-8 text-center text-[13px] text-slate-500">
                   This view uses the existing DOM PNG exporter. The exported PNG will use the current on-screen figure after export-safe cleanup.
