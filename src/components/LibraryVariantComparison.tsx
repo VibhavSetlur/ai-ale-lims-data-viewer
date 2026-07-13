@@ -361,6 +361,8 @@ export default function LibraryVariantComparison({ samples, selected, loading: s
     const aSet = new Set<string>();
     const bSet = new Set<string>();
     const byPair = new Map<string, VariantWithStats>();
+    const aAiSet = new Set<string>();
+    const bAiSet = new Set<string>();
     for (const variant of visibleVariants) {
       const parsed = parseCandidate(variant.label);
       const aMeta = metadataText(variant.metadata?.verA).trim();
@@ -371,10 +373,12 @@ export default function LibraryVariantComparison({ samples, selected, loading: s
       aSet.add(a);
       bSet.add(b);
       byPair.set(`${a}|${b}`, variant);
+      if (variantAiA(variant)) aAiSet.add(a);
+      if (variantAiB(variant)) bAiSet.add(b);
     }
     const aList = [...aSet].sort((x, y) => x.localeCompare(y, undefined, { numeric: true }));
     const bList = [...bSet].sort((x, y) => x.localeCompare(y, undefined, { numeric: true }));
-    return { aList, bList, byPair };
+    return { aList, bList, byPair, aAiSet, bAiSet };
   }, [visibleVariants]);
 
   const setTipFromPointer = (event: React.MouseEvent<HTMLElement | SVGElement>, text: string) => {
@@ -826,39 +830,83 @@ function HeatmapChart({ variants, samples, colors, metric, maxValue, valueFor, h
   );
 }
 
-function PartnerPairingTable({ pairs, colors, metric }: { pairs: { aList: string[]; bList: string[]; byPair: Map<string, VariantWithStats> }; colors: Map<string, string>; metric: MetricMode }) {
-  const { aList, bList, byPair } = pairs;
+function PartnerPairingTable({ pairs, colors, metric }: { pairs: { aList: string[]; bList: string[]; byPair: Map<string, VariantWithStats>; aAiSet: Set<string>; bAiSet: Set<string> }; colors: Map<string, string>; metric: MetricMode }) {
+  const { aList, bList, byPair, aAiSet, bAiSet } = pairs;
   const cellCount = aList.length * bList.length;
+  const exportRef = useRef<HTMLDivElement>(null);
+  const [size, setSize] = useState<'s' | 'm' | 'l'>('m');
+  const SIZE = {
+    s: { cell: 'h-4 w-4', dot: 'h-1 w-1', font: 'text-[9px]', hdr: 'text-[8px]' },
+    m: { cell: 'h-5 w-5', dot: 'h-1.5 w-1.5', font: 'text-[10px]', hdr: 'text-[9px]' },
+    l: { cell: 'h-8 w-8', dot: 'h-2 w-2', font: 'text-[13px]', hdr: 'text-[11px]' },
+  }[size];
   return (
-    <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3 shadow-sm">
+    <div ref={exportRef} className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3 shadow-sm">
       <div className="mb-2 flex flex-wrap items-center gap-2 text-[12px]">
         <span className="font-semibold text-[var(--text)]">VerA / VerB partner pairing</span>
         <span className="lims-chip">{byPair.size} combinations</span>
+        <button
+          type="button"
+          data-figure-omit
+          onClick={() => setSize(s => (s === 's' ? 'm' : s === 'm' ? 'l' : 's'))}
+          className="lims-btn lims-btn-secondary ml-auto"
+          title="Cycle swatch size (small / medium / large) for screenshots"
+        >
+          Size: {size.toUpperCase()}
+        </button>
+        <span data-figure-omit>
+          <ExportFigureMenu
+            getTarget={() => exportRef.current}
+            title="VerA / VerB partner pairing"
+            filenameBase="partner-pairing"
+            compact
+          />
+        </span>
       </div>
+      {(aAiSet.size > 0 || bAiSet.size > 0) && (
+        <div className="mb-2 flex flex-wrap items-center gap-2 text-[10px] text-[var(--text-soft)]">
+          <span className="lims-pill lims-pill-ai">AI</span>
+          <span>marks an AI-generated verA or verB partner. Cells with a ringed corner include an AI partner.</span>
+        </div>
+      )}
       {cellCount > 400 ? (
         <div className="text-[11px] text-[var(--text-soft)]">Too many combinations to tabulate</div>
       ) : (
         <div className="overflow-auto">
-          <table className="border-separate text-[10px]" style={{ borderSpacing: 2 }}>
+          <table className={cn('border-separate', SIZE.font)} style={{ borderSpacing: 2 }}>
             <thead>
               <tr>
-                <th className="sticky left-0 z-10 bg-[var(--surface)] px-2 py-1 text-left text-[9px] uppercase tracking-wide text-[var(--text-faint)]">VerA \ VerB</th>
-                {bList.map(b => <th key={b} className="px-1 py-1 font-mono text-[var(--text-soft)]">{b}</th>)}
+                <th className={cn('sticky left-0 z-10 bg-[var(--surface)] px-2 py-1 text-left uppercase tracking-wide text-[var(--text-faint)]', SIZE.hdr)}>VerA \ VerB</th>
+                {bList.map(b => (
+                  <th key={b} className="px-1 py-1 font-mono text-[var(--text-soft)]">
+                    <span className="inline-flex flex-col items-center gap-0.5">
+                      <span>{b}</span>
+                      {bAiSet.has(b) && <span className="lims-pill lims-pill-ai">AI</span>}
+                    </span>
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody>
               {aList.map(a => (
                 <tr key={a}>
-                  <th className="sticky left-0 z-10 bg-[var(--surface)] px-2 py-1 text-left font-mono text-[var(--text-soft)]">{a}</th>
+                  <th className="sticky left-0 z-10 bg-[var(--surface)] px-2 py-1 text-left font-mono text-[var(--text-soft)]">
+                    <span className="inline-flex items-center gap-1">
+                      <span>{a}</span>
+                      {aAiSet.has(a) && <span className="lims-pill lims-pill-ai">AI</span>}
+                    </span>
+                  </th>
                   {bList.map(b => {
                     const variant = byPair.get(`${a}|${b}`);
                     if (!variant) return <td key={b} className="px-1 py-1 text-center text-[var(--text-faint)]">-</td>;
                     const color = colors.get(variant.variantId) ?? '#888';
                     const total = metric === 'count' ? variant.totalCount : variant.totalAbundance;
+                    const aiCell = aAiSet.has(a) || bAiSet.has(b);
                     return (
-                      <td key={b} className="p-0 text-center" title={`${variant.label}\n${fmtValue(total, metric)}`}>
-                        <div className="mx-auto flex h-5 w-5 items-center justify-center rounded-sm" style={{ backgroundColor: color }}>
-                          <span className="h-1.5 w-1.5 rounded-full bg-white/80" />
+                      <td key={b} className="p-0 text-center" title={`${variant.label}${aiCell ? ' (AI partner)' : ''}\n${fmtValue(total, metric)}`}>
+                        <div className={cn('relative mx-auto flex items-center justify-center rounded-sm', SIZE.cell)} style={{ backgroundColor: color }}>
+                          <span className={cn('rounded-full bg-white/80', SIZE.dot)} />
+                          {aiCell && <span className="absolute right-0 top-0 h-1.5 w-1.5 rounded-full border border-white bg-black/70" title="AI-generated partner" />}
                         </div>
                       </td>
                     );

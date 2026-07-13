@@ -6,6 +6,11 @@ export interface ReleaseNote {
 
 export const releaseNotes: readonly ReleaseNote[] = [
   {
+    version: '1.5.0',
+    date: '2026-07-13',
+    summary: 'Improved the VerA / VerB partner pairing table for presentations. AI-generated partners are now marked with an AI pill on the matching verA row and verB column headers, and any cell that includes an AI partner shows a small ringed corner marker so it reads clearly in a screenshot, with a short legend built into the table. Added a size control to enlarge the swatches and text for slides, and added a figure export menu on the table itself so it can be saved as a PNG or SVG image or printed directly.',
+  },
+  {
     version: '1.4.3',
     date: '2026-07-13',
     summary: 'Compare Library Variants and Sample Selection fixes plus a LIMS data sync. Added a VerA / VerB partner pairing table beside the plot that shows which verA partners pair with which verB partners for the current selection, shown when a manageable number of samples is selected. Fixed the relative-abundance percentages on the vertical stacked bars so each combination percentage now matches its share of the bar that fills to 100 percent, not the raw per-sample fraction. Added Seqorder as a Sample Selection factor so results from different sequencing runs of the same sample can be filtered and compared. Fixed heatmap figure export so the PNG and SVG buttons produce real PNG and SVG files instead of downgrading to HTML, by relying on inlined resolved styles instead of the app stylesheet. Refreshed the local indexed database from the upstream mirror so newly uploaded verAB data is visible.',
