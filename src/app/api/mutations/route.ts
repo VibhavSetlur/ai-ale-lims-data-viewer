@@ -12,6 +12,7 @@ export interface MutationSample {
   condition?: string;
   strain?: string;
   donor_dna?: string;
+  has_barcodes?: boolean;
   selection_note?: string;
   growth_curve?: { t: number; od: number }[];
   growth_curve_source?: {
@@ -115,6 +116,8 @@ interface SeqSampleRow {
   transforming_dna: string | null;
   notes: string | null;
   seqorder: string | null;
+  has_barcodes: number | null;
+  barcode_read_count: number | null;
 }
 
 interface MutationRawRow {
@@ -307,25 +310,43 @@ function mutationKey(r: MutationRawRow): string {
 }
 
 /* ---------- SQL ----------
-   Drive samples FROM the Mutations table so the experiment label is whatever
-   breseq tagged the call with (not what the wet-lab folks happened to type in
-   Seq_samples — e.g. "Gyorgy" vs "GB1"/"GB2"/"GB3"). In this mirror no
-   seq_sample is tagged with more than one Experiment, so MIN("Experiment")
-   simply returns that single label (deterministic if that ever changes).
+   Drive mutation-bearing samples FROM the Mutations table so the experiment
+   label is whatever breseq tagged the call with (not what the wet-lab folks
+   happened to type in Seq_samples). Also union in positive verAB barcode samples:
+   amplicon-only barcode rows do not have Mutations rows, but researchers still
+   need to select them for verAB library comparisons.
 */
 
 // Build SAMPLES SQL on demand so the registry/experiment filters can be pushed
 // inside the CTE — a sample only appears if it had calls under the selected
 // registry/experiment. Params are appended in (experiment?, registry?) order.
-function buildSamplesSql(opts: { experiment: boolean; registry: boolean }): string {
+function buildSamplesSql(opts: { experiment: boolean; registry: boolean; barcodeSamples: boolean }): string {
   const inner: string[] = ['deleted = 0'];
   if (opts.experiment) inner.push('"Experiment" = ?');
   if (opts.registry)   inner.push('"Breseq_registry_ID" = ?');
+  const barcodeWhere: string[] = ['v.deleted = 0', 'COALESCE(v."Count", 0) > 0'];
+  if (opts.experiment) barcodeWhere.push('ss_filter."Experiment" = ?');
+  const barcodeUnion = opts.barcodeSamples ? `
+        UNION ALL
+        SELECT
+          v."Seqsample" AS seq_sample,
+          NULL AS experiment,
+          MIN(v."Seqorder") AS seqorder,
+          'barcode' AS source,
+          1 AS has_barcodes,
+          SUM(COALESCE(v."Count", 0)) AS barcode_read_count
+        FROM verAB_barcodes v
+        LEFT JOIN Seq_samples ss_filter
+          ON ss_filter."Sequencing_sample" = v."Seqsample" AND ss_filter.deleted = 0
+        WHERE ${barcodeWhere.join(' AND ')}
+        GROUP BY v."Seqsample"` : '';
   return `
     SELECT
       ms.seq_sample                              AS seq_sample,
       ms.experiment                              AS experiment_from_mutations,
       ms.seqorder                                AS seqorder,
+      ms.has_barcodes                            AS has_barcodes,
+      ms.barcode_read_count                      AS barcode_read_count,
       ss."Experiment"                            AS experiment_from_seq,
       ss."Sample_Name"                           AS sample_name,
       ss."Population_or_Single_colony?"          AS pop_or_colony_raw,
@@ -335,10 +356,29 @@ function buildSamplesSql(opts: { experiment: boolean; registry: boolean }): stri
       s."Transforming_DNA"                       AS transforming_dna,
       s."Notes"                                  AS notes
     FROM (
-      SELECT "Seq_sample" AS seq_sample, MIN("Experiment") AS experiment, MIN("Seqorder") AS seqorder
-      FROM Mutations
-      WHERE ${inner.join(' AND ')}
-      GROUP BY "Seq_sample"
+      SELECT
+        seq_sample,
+        MAX(CASE WHEN source = 'mutation' THEN experiment END) AS experiment,
+        COALESCE(
+          MAX(CASE WHEN source = 'mutation' THEN seqorder END),
+          MAX(CASE WHEN source = 'barcode' THEN seqorder END)
+        ) AS seqorder,
+        MAX(has_barcodes) AS has_barcodes,
+        SUM(barcode_read_count) AS barcode_read_count
+      FROM (
+        SELECT
+          "Seq_sample" AS seq_sample,
+          MIN("Experiment") AS experiment,
+          MIN("Seqorder") AS seqorder,
+          'mutation' AS source,
+          0 AS has_barcodes,
+          0 AS barcode_read_count
+        FROM Mutations
+        WHERE ${inner.join(' AND ')}
+        GROUP BY "Seq_sample"
+        ${barcodeUnion}
+      ) sample_sources
+      GROUP BY seq_sample
     ) ms
     LEFT JOIN (
       -- A handful of samples were re-sequenced under two Seqorders, so the same
@@ -382,7 +422,7 @@ function buildSamplesSql(opts: { experiment: boolean; registry: boolean }): stri
     LEFT JOIN Samples s
       ON s."Name" = ss."Sample_Name" AND s.deleted = 0
     LEFT JOIN Experiments e
-      ON e."Name" = ms.experiment AND e.deleted = 0
+      ON e."Name" = COALESCE(ms.experiment, ss."Experiment") AND e.deleted = 0
   `;
 }
 
@@ -423,12 +463,27 @@ const MUTATIONS_SQL = `
   WHERE deleted = 0
 `;
 
-const ALL_EXPERIMENTS_SQL = `
-  SELECT DISTINCT Experiment AS name
-  FROM Mutations
-  WHERE deleted = 0 AND Experiment IS NOT NULL AND Experiment != ''
-  ORDER BY Experiment
-`;
+function buildAllExperimentsSql(hasBarcodeTable: boolean): string {
+  return `
+    SELECT DISTINCT name
+    FROM (
+      SELECT Experiment AS name
+      FROM Mutations
+      WHERE deleted = 0 AND Experiment IS NOT NULL AND Experiment != ''
+      ${hasBarcodeTable ? `
+      UNION
+      SELECT ss."Experiment" AS name
+      FROM verAB_barcodes v
+      JOIN Seq_samples ss
+        ON ss."Sequencing_sample" = v."Seqsample" AND ss.deleted = 0
+      WHERE v.deleted = 0
+        AND COALESCE(v."Count", 0) > 0
+        AND ss."Experiment" IS NOT NULL
+        AND ss."Experiment" != ''` : ''}
+    ) experiments
+    ORDER BY name
+  `;
+}
 
 // Registry breakdown for the (optionally experiment-filtered) Mutations subset,
 // joined with Breseq_registry so the UI can show meaningful params alongside
@@ -530,6 +585,14 @@ export async function GET(req: NextRequest) {
   const registryParam = url.searchParams.get('registry')?.trim() || null;
 
   try {
+    let hasBarcodeTable = false;
+    try {
+      await runQuery<{ n: number }>('SELECT COUNT(*) AS n FROM verAB_barcodes WHERE 1 = 0');
+      hasBarcodeTable = true;
+    } catch {
+      hasBarcodeTable = false;
+    }
+
     // First pass: enumerate the breseq registries present for this (experiment-filtered)
     // dataset so we can validate the requested registry and pick a default when
     // the caller doesn't specify one. The Mutations table currently has up to 4
@@ -614,10 +677,12 @@ export async function GET(req: NextRequest) {
     const sampleParams: (string | number | null)[] = [];
     if (experimentFilter) sampleParams.push(experimentFilter);
     if (scopeSamplesByRegistry) sampleParams.push(selectedRegistry);
+    if (hasBarcodeTable && experimentFilter) sampleParams.push(experimentFilter);
 
     const sampleSql = buildSamplesSql({
       experiment: !!experimentFilter,
       registry: scopeSamplesByRegistry,
+      barcodeSamples: hasBarcodeTable,
     });
     const mutSql = MUTATIONS_SQL
       + (experimentFilter ? ' AND "Experiment" = ?' : '')
@@ -626,7 +691,7 @@ export async function GET(req: NextRequest) {
     const [sampleRows, mutRows, allExperiments, odRows, curveRows, cnRows] = await Promise.all([
       runQuery<SeqSampleRow>(sampleSql, sampleParams),
       runQuery<MutationRawRow>(mutSql, mutParams),
-      runQuery<{ name: string }>(ALL_EXPERIMENTS_SQL),
+      runQuery<{ name: string }>(buildAllExperimentsSql(hasBarcodeTable)),
       runQuery<{ seq_sample: string; od_type: string; od_source: string }>(OD_MEASUREMENTS_SQL),
       runQuery<{ sample_name: string; transfer: number | null; reading: string | null; od: number | null; timepoint: number | null; datetime: string | null }>(ROBOTIC_OD_SQL),
       runQuery<{ seq_sample: string; region_name: string | null; region_cn: number | null }>(COPY_NUMBERS_SQL),
@@ -705,6 +770,7 @@ export async function GET(req: NextRequest) {
         condition: r.condition ?? undefined,
         strain: r.strain ?? undefined,
         donor_dna,
+        has_barcodes: Boolean(r.has_barcodes),
         selection_note: describeSelection(popOrColony ?? undefined, r.notes),
         growth_curve: growth_curve && growth_curve.length >= 2 ? growth_curve : undefined,
         growth_curve_source,

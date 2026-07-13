@@ -6,6 +6,11 @@ export interface ReleaseNote {
 
 export const releaseNotes: readonly ReleaseNote[] = [
   {
+    version: '1.5.2',
+    date: '2026-07-13',
+    summary: 'Bug-fix release. Mutation Explorer Sample Selection now includes positive verAB barcode samples even when they are amplicon-only and have no Mutations rows, so newly uploaded barcode runs can be selected for Compare Library Variants. Added a verAB facet and sample badge to find barcode-bearing samples quickly. DB refreshes now archive before-refresh and after-refresh SQLite snapshots under data/archive so future syncs can be diffed.',
+  },
+  {
     version: '1.5.1',
     date: '2026-07-13',
     summary: 'Bug-fix release. Moved the release and data log out of the top header into the left sidebar as a Changelog button so it is easier to reach, and made the changelog open as a large readable panel on both desktop and mobile. Removed the interactive tutorial because it was hard to keep current alongside the UI; the Guide and Help buttons remain. The Changelog now tracks the viewer version and the data snapshot version separately, showing the viewer semantic version from the build, the baked data snapshot timestamp from the mirror, and the static manifest generated time, source, and file count when running a static build. Fixed the static manifest display to read the manifest files list instead of a non-existent manifest field. Database sync readiness is unchanged.',

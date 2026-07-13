@@ -28,6 +28,7 @@ interface MutationSample {
   condition?: string;
   strain?: string;
   donor_dna?: string;
+  has_barcodes?: boolean;
   selection_note?: string;
   growth_curve?: { t: number; od: number }[];
   growth_curve_source?: {
@@ -796,7 +797,7 @@ function TabButton({ active, onClick, icon, children, tour }: { active: boolean;
 
 /* ---------------- Sample Selection panel ---------------- */
 
-type ChipKey = 'experiment' | 'replicate' | 'donor_dna' | 'strain' | 'condition' | 'seqorder';
+type ChipKey = 'experiment' | 'replicate' | 'donor_dna' | 'strain' | 'condition' | 'seqorder' | 'verab';
 
 type SampleFilters = {
   chips: Record<ChipKey, string[]>;
@@ -806,7 +807,7 @@ type SampleFilters = {
 };
 
 const EMPTY_SAMPLE_FILTERS: SampleFilters = {
-  chips: { experiment: [], replicate: [], donor_dna: [], strain: [], condition: [], seqorder: [] },
+  chips: { experiment: [], replicate: [], donor_dna: [], strain: [], condition: [], seqorder: [], verab: [] },
   selectedOnly: false,
   transferMin: null,
   transferMax: null,
@@ -885,6 +886,7 @@ function SampleSelectionPanel({
             strain: f.chips?.strain ?? [],
             condition: f.chips?.condition ?? [],
             seqorder: f.chips?.seqorder ?? [],
+            verab: f.chips?.verab ?? [],
           },
           // "Selected only" is a transient view toggle, never restored on load:
           // restoring it true opens the table empty (nothing is selected yet).
@@ -923,7 +925,7 @@ function SampleSelectionPanel({
   // hides now-irrelevant choices in the others. A facet never hides its own
   // siblings, and a currently-selected value is always kept visible.
   const chipOptions = useMemo(() => {
-    const keys: ChipKey[] = ['experiment', 'replicate', 'donor_dna', 'strain', 'condition', 'seqorder'];
+    const keys: ChipKey[] = ['experiment', 'replicate', 'donor_dna', 'strain', 'condition', 'seqorder', 'verab'];
     const sel: Record<ChipKey, Set<string>> = {
       experiment: new Set(filters.chips.experiment),
       replicate: new Set(filters.chips.replicate),
@@ -931,6 +933,7 @@ function SampleSelectionPanel({
       strain: new Set(filters.chips.strain),
       condition: new Set(filters.chips.condition),
       seqorder: new Set(filters.chips.seqorder),
+      verab: new Set(filters.chips.verab),
     };
     const fieldVal = (s: MutationSample, k: ChipKey): string =>
       k === 'experiment' ? s.experiment
@@ -938,6 +941,7 @@ function SampleSelectionPanel({
       : k === 'donor_dna' ? (s.donor_dna ?? '')
       : k === 'strain' ? (s.strain ?? '')
       : k === 'seqorder' ? (s.seqorder ?? '')
+      : k === 'verab' ? (s.has_barcodes ? 'has verAB' : '')
       : (s.condition ?? '');
     // A sample matches the chip filters, OPTIONALLY ignoring one facet (so each
     // facet's own selection doesn't hide its sibling options). This is faceted
@@ -973,19 +977,21 @@ function SampleSelectionPanel({
       strain: toList('strain'),
       condition: toList('condition'),
       seqorder: toList('seqorder'),
+      verab: toList('verab'),
     };
   }, [samples, filters.chips]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     const sorted = sortSamples(samples);
-    const chipSet = {
+      const chipSet = {
       experiment: new Set(filters.chips.experiment),
       replicate: new Set(filters.chips.replicate),
       donor_dna: new Set(filters.chips.donor_dna),
       strain: new Set(filters.chips.strain),
       condition: new Set(filters.chips.condition),
       seqorder: new Set(filters.chips.seqorder),
+      verab: new Set(filters.chips.verab),
     };
     return sorted.filter(s => {
       if (filters.selectedOnly && !selected.has(s.id)) return false;
@@ -995,10 +1001,11 @@ function SampleSelectionPanel({
       if (chipSet.strain.size > 0 && !chipSet.strain.has(s.strain ?? '')) return false;
       if (chipSet.condition.size > 0 && !chipSet.condition.has(s.condition ?? '')) return false;
       if (chipSet.seqorder.size > 0 && !chipSet.seqorder.has(s.seqorder ?? '')) return false;
+      if (chipSet.verab.size > 0 && !chipSet.verab.has(s.has_barcodes ? 'has verAB' : '')) return false;
       if (filters.transferMin !== null && (s.transfer ?? -Infinity) < filters.transferMin) return false;
       if (filters.transferMax !== null && (s.transfer ?? Infinity) > filters.transferMax) return false;
       if (q) {
-        const hay = `${s.name} ${s.experiment} ${s.strain ?? ''} ${s.donor_dna ?? ''} ${s.condition ?? ''} ${s.replicate ?? ''} ${s.seqorder ?? ''}`.toLowerCase();
+        const hay = `${s.name} ${s.experiment} ${s.strain ?? ''} ${s.donor_dna ?? ''} ${s.condition ?? ''} ${s.replicate ?? ''} ${s.seqorder ?? ''} ${s.has_barcodes ? 'verAB barcode' : ''}`.toLowerCase();
         if (!hay.includes(q)) return false;
       }
       return true;
@@ -1206,6 +1213,8 @@ function SampleSelectionPanel({
                    onToggle={v => toggleChip('condition', v)} onClear={() => clearChip('condition')} />
           <ChipRow label="Seqorder" options={chipOptions.seqorder} active={new Set(filters.chips.seqorder)}
                    onToggle={v => toggleChip('seqorder', v)} onClear={() => clearChip('seqorder')} />
+          <ChipRow label="verAB" options={chipOptions.verab} active={new Set(filters.chips.verab)}
+                   onToggle={v => toggleChip('verab', v)} onClear={() => clearChip('verab')} />
           <div className="flex items-center gap-1.5 text-[11px]">
             <span className="text-slate-500 dark:text-gray-400 font-medium uppercase tracking-wider text-[10px] w-20 shrink-0">Transfer</span>
             <input
@@ -1322,6 +1331,9 @@ function SampleSelectionPanel({
                           >
                             {s.name}
                           </button>
+                          {s.has_barcodes && (
+                            <span className="ml-1 inline-flex items-center px-1 py-px rounded border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/30 text-[9.5px] font-semibold text-emerald-700 dark:text-emerald-300 align-middle">verAB</span>
+                          )}
                         </td>
                         <td className="px-2 py-1 text-[var(--text-soft)]">{s.experiment}</td>
                         <td className="px-2 py-1 text-[var(--text-soft)]">{s.replicate ?? ''}</td>

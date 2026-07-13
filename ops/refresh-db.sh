@@ -13,8 +13,23 @@ set -euo pipefail
 SOURCE_DB="${1:-/scratch1/fliu/hub_scratch/synbio/lims_mirror.backup.db}"
 DEST_DB="${2:-/scratch/vsetlur/ai-ale-lims-data-viewer/data/lims_indexed.db}"
 TMP_DB="${DEST_DB}.tmp.$$"
+DEST_DIR="$(dirname "$DEST_DB")"
+DEST_BASE="$(basename "$DEST_DB" .db)"
+ARCHIVE_DIR="$DEST_DIR/archive"
+ARCHIVE_STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 
-mkdir -p "$(dirname "$DEST_DB")"
+mkdir -p "$DEST_DIR" "$ARCHIVE_DIR"
+
+archive_db() {
+  local label="$1"
+  local src="$2"
+  if [[ ! -f "$src" ]]; then
+    return 0
+  fi
+  local dst="$ARCHIVE_DIR/${DEST_BASE}.${label}.${ARCHIVE_STAMP}.db"
+  echo "[refresh-db] archiving $label DB: $dst"
+  cp -p "$src" "$dst"
+}
 
 if [[ ! -f "$SOURCE_DB" ]]; then
   echo "ERROR: source DB not found: $SOURCE_DB" >&2
@@ -22,6 +37,7 @@ if [[ ! -f "$SOURCE_DB" ]]; then
 fi
 
 echo "[refresh-db] source: $SOURCE_DB ($(du -h "$SOURCE_DB" | cut -f1))"
+archive_db "before-refresh" "$DEST_DB"
 echo "[refresh-db] copying to temp: $TMP_DB"
 cp "$SOURCE_DB" "$TMP_DB"
 
@@ -89,5 +105,6 @@ PY
 
 echo "[refresh-db] atomic swap into place: $DEST_DB"
 mv -f "$TMP_DB" "$DEST_DB"
+archive_db "after-refresh" "$DEST_DB"
 echo "[refresh-db] OK -> $DEST_DB ($(du -h "$DEST_DB" | cut -f1))"
 echo "[refresh-db] point the app at it:  SQLITE_PATH=$DEST_DB"
