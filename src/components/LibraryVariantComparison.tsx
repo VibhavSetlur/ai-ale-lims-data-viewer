@@ -357,6 +357,25 @@ export default function LibraryVariantComparison({ samples, selected, loading: s
     if (values.length === 0) return 'n/a';
     return `${fmtValue(Math.min(...values), effectiveMetric)} to ${fmtValue(Math.max(...values), effectiveMetric)}`;
   }, [effectiveMetric, selectedSamples, valueBySampleVariant, visibleVariants]);
+  const partnerPairs = useMemo(() => {
+    const aSet = new Set<string>();
+    const bSet = new Set<string>();
+    const byPair = new Map<string, VariantWithStats>();
+    for (const variant of visibleVariants) {
+      const parsed = parseCandidate(variant.label);
+      const aMeta = metadataText(variant.metadata?.verA).trim();
+      const bMeta = metadataText(variant.metadata?.verB).trim();
+      const a = parsed?.a ?? aMeta ?? null;
+      const b = parsed?.b ?? bMeta ?? null;
+      if (!a || !b) continue;
+      aSet.add(a);
+      bSet.add(b);
+      byPair.set(`${a}|${b}`, variant);
+    }
+    const aList = [...aSet].sort((x, y) => x.localeCompare(y, undefined, { numeric: true }));
+    const bList = [...bSet].sort((x, y) => x.localeCompare(y, undefined, { numeric: true }));
+    return { aList, bList, byPair };
+  }, [visibleVariants]);
 
   const setTipFromPointer = (event: React.MouseEvent<HTMLElement | SVGElement>, text: string) => {
     const target = figureRef.current;
@@ -544,7 +563,12 @@ export default function LibraryVariantComparison({ samples, selected, loading: s
             {mode === 'bars' && <VariantLegend variants={visibleVariants} colors={colors} isolated={isolatedVariantIds} hoveredVariantId={hoveredVariantId} onHover={setHoveredVariantId} onToggle={toggleIsolated} />}
           </div>
 
-          <MetadataPanel variants={visibleVariants} colors={colors} expanded={expandedMetadata} setExpanded={setExpandedMetadata} hoveredVariantId={hoveredVariantId} onHover={setHoveredVariantId} onCopy={copyValue} sampleCount={selectedSamples.length} />
+          <div className="min-w-0 space-y-3 min-h-0 overflow-y-auto">
+            {selectedSamples.length <= 40 && partnerPairs.aList.length > 0 && (
+              <PartnerPairingTable pairs={partnerPairs} colors={colors} metric={effectiveMetric} />
+            )}
+            <MetadataPanel variants={visibleVariants} colors={colors} expanded={expandedMetadata} setExpanded={setExpandedMetadata} hoveredVariantId={hoveredVariantId} onHover={setHoveredVariantId} onCopy={copyValue} sampleCount={selectedSamples.length} />
+          </div>
         </div>
       </section>
     </div>
@@ -722,10 +746,14 @@ function BarsChart({ variants, samples, colors, metric, maxValue, valueFor, hove
                   if (value <= 0) return null;
                   const h = Math.max(0.5, (value / denom) * innerH);
                   yCursor -= h;
+                  // Relative % mode stacks each bar to 100% of its OWN visible total, so the
+                  // displayed percentage must match the drawn height (value / denom), not the
+                  // raw per-sample abundance. Count mode shows the raw count.
+                  const displayValue = metric === 'abundance' ? value / denom : value;
                   const color = colors.get(variant.variantId) ?? colorForCandidate(variant.label);
                   const dim = isDimmed(variant.variantId, hoveredVariantId, activeVariantIds);
                   return (
-                    <rect key={variant.variantId} x={x} y={yCursor} width={barW} height={h} rx={h > 4 ? 1.5 : 0} fill={color} opacity={dim ? 0.18 : 1} stroke="rgba(15,23,42,0.18)" strokeWidth={h > 6 ? 0.4 : 0} onMouseEnter={event => { onHoverVariant(variant.variantId); onTip(event, `${variant.label}\n${sampleLabel(sample)}\n${fmtValue(value, metric)}\nverA: ${variantAiA(variant) ? 'AI-generated' : 'not AI-generated'}\nverB: ${variantAiB(variant) ? 'AI-generated' : 'not AI-generated'}`); }} />
+                    <rect key={variant.variantId} x={x} y={yCursor} width={barW} height={h} rx={h > 4 ? 1.5 : 0} fill={color} opacity={dim ? 0.18 : 1} stroke="rgba(15,23,42,0.18)" strokeWidth={h > 6 ? 0.4 : 0} onMouseEnter={event => { onHoverVariant(variant.variantId); onTip(event, `${variant.label}\n${sampleLabel(sample)}\n${fmtValue(displayValue, metric)}\nverA: ${variantAiA(variant) ? 'AI-generated' : 'not AI-generated'}\nverB: ${variantAiB(variant) ? 'AI-generated' : 'not AI-generated'}`); }} />
                   );
                 })}
                 <text x={slotX + BAR_COL_W / 2} y={baseY + 18} textAnchor="end" transform={`rotate(-42 ${slotX + BAR_COL_W / 2} ${baseY + 18})`} fontSize="10" fill="var(--text-soft)">{sampleLabel(sample)}</text>
@@ -794,6 +822,53 @@ function HeatmapChart({ variants, samples, colors, metric, maxValue, valueFor, h
           })}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+function PartnerPairingTable({ pairs, colors, metric }: { pairs: { aList: string[]; bList: string[]; byPair: Map<string, VariantWithStats> }; colors: Map<string, string>; metric: MetricMode }) {
+  const { aList, bList, byPair } = pairs;
+  const cellCount = aList.length * bList.length;
+  return (
+    <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3 shadow-sm">
+      <div className="mb-2 flex flex-wrap items-center gap-2 text-[12px]">
+        <span className="font-semibold text-[var(--text)]">VerA / VerB partner pairing</span>
+        <span className="lims-chip">{byPair.size} combinations</span>
+      </div>
+      {cellCount > 400 ? (
+        <div className="text-[11px] text-[var(--text-soft)]">Too many combinations to tabulate</div>
+      ) : (
+        <div className="overflow-auto">
+          <table className="border-separate text-[10px]" style={{ borderSpacing: 2 }}>
+            <thead>
+              <tr>
+                <th className="sticky left-0 z-10 bg-[var(--surface)] px-2 py-1 text-left text-[9px] uppercase tracking-wide text-[var(--text-faint)]">VerA \ VerB</th>
+                {bList.map(b => <th key={b} className="px-1 py-1 font-mono text-[var(--text-soft)]">{b}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {aList.map(a => (
+                <tr key={a}>
+                  <th className="sticky left-0 z-10 bg-[var(--surface)] px-2 py-1 text-left font-mono text-[var(--text-soft)]">{a}</th>
+                  {bList.map(b => {
+                    const variant = byPair.get(`${a}|${b}`);
+                    if (!variant) return <td key={b} className="px-1 py-1 text-center text-[var(--text-faint)]">-</td>;
+                    const color = colors.get(variant.variantId) ?? '#888';
+                    const total = metric === 'count' ? variant.totalCount : variant.totalAbundance;
+                    return (
+                      <td key={b} className="p-0 text-center" title={`${variant.label}\n${fmtValue(total, metric)}`}>
+                        <div className="mx-auto flex h-5 w-5 items-center justify-center rounded-sm" style={{ backgroundColor: color }}>
+                          <span className="h-1.5 w-1.5 rounded-full bg-white/80" />
+                        </div>
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }

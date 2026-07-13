@@ -246,6 +246,12 @@ const HTML_STYLE_PROPS = [
   'background-color', 'color', 'opacity', 'border-color', 'border-width',
   'border-style', 'box-shadow', 'font-family', 'font-size', 'font-weight',
   'font-style', 'text-align', 'writing-mode', 'transform',
+  // Box-model / layout props so an HTML/table figure (e.g. the heatmap) renders
+  // identically WITHOUT any external stylesheet. These are resolved computed
+  // values, so var()/oklch collapse to concrete rgb()/px and survive serialization.
+  'display', 'width', 'height', 'min-width', 'max-width', 'padding', 'margin',
+  'border-radius', 'text-anchor', 'line-height', 'vertical-align', 'border-spacing',
+  'border-collapse', 'white-space', 'overflow', 'box-sizing', 'letter-spacing',
 ] as const;
 
 function inlineHtmlComputedStyles(orig: HTMLElement, clone: HTMLElement) {
@@ -300,7 +306,8 @@ async function rasterize(svgText: string, w: number, h: number, scale: number, f
     if (!blob) return false;
     downloadBlob(filename, blob);
     return true;
-  } catch {
+  } catch (e) {
+    console.warn('figure PNG rasterize failed', e);
     return false;
   } finally {
     setTimeout(() => URL.revokeObjectURL(url), 1500);
@@ -308,7 +315,8 @@ async function rasterize(svgText: string, w: number, h: number, scale: number, f
 }
 
 // Rasterize an HTML element (e.g. the barcode "Rows" view) to PNG via an SVG
-// foreignObject. We bake the document's stylesheets in so it renders correctly.
+// foreignObject. Resolved computed styles are inlined onto the clone so it
+// renders standalone without depending on the app stylesheet.
 async function htmlElementToPng(element: HTMLElement, title: string, filenameBase: string, scale = 3): Promise<boolean> {
   // Capture the FULL content (scrollWidth/Height), not just the visible viewport,
   // so a scrollable heatmap/table exports in its entirety as a publication figure.
@@ -326,7 +334,12 @@ async function htmlElementToPng(element: HTMLElement, title: string, filenameBas
   clone.style.maxHeight = 'none';
   clone.style.height = 'auto';
   clone.style.width = `${w}px`;
-  const styles = collectStyles();
+  // Rely solely on the inlined computed styles (inlineHtmlComputedStyles above)
+  // which bake resolved presentation values directly onto every cloned node.
+  // Embedding the full document stylesheet via collectStyles() broke rendering:
+  // Tailwind v4 at-rules (@layer, @property, oklch(), @font-face url()) make the
+  // standalone SVG-as-image fail to load in the browser's <img> decoder, silently
+  // downgrading PNG export to HTML.
   const xhtml = new XMLSerializer().serializeToString(clone);
   const svgText =
     `<svg xmlns="http://www.w3.org/2000/svg" width="${totalW}" height="${totalH}" viewBox="0 0 ${totalW} ${totalH}">` +
@@ -335,7 +348,7 @@ async function htmlElementToPng(element: HTMLElement, title: string, filenameBas
     `<text x="${padX}" y="${totalH - 10}" font-family="${FONT_MONO}" font-size="10.5" fill="#64748b">AI-ALE LIMS viewer · ${nowUtc()}</text>` +
     `<foreignObject x="${padX}" y="${padTop}" width="${w}" height="${innerH}">` +
     `<div xmlns="http://www.w3.org/1999/xhtml" style="width:${w}px;height:${innerH}px;background:#ffffff;color:#0f172a;overflow:hidden">` +
-    `<style>${styles}</style>${xhtml}</div></foreignObject></svg>`;
+    `${xhtml}</div></foreignObject></svg>`;
   return rasterize(svgText, totalW, totalH, scale, `${safeFilePart(filenameBase)}-${timestamp()}.png`);
 }
 
@@ -381,7 +394,7 @@ function syncFormState(source: HTMLElement, clone: HTMLElement) {
 }
 
 // Wrap an HTML element (e.g. the library-variant heatmap <table>) in a fully
-// self-contained SVG via foreignObject, with the document stylesheet baked in.
+// self-contained SVG via foreignObject, relying on the inlined computed styles.
 // This lets an "SVG" export of an HTML/table figure produce a real .svg file
 // instead of silently downgrading to .html.
 function htmlElementToSvgString(element: HTMLElement, title: string): string {
@@ -398,7 +411,6 @@ function htmlElementToSvgString(element: HTMLElement, title: string): string {
   clone.style.maxHeight = 'none';
   clone.style.height = 'auto';
   clone.style.width = `${w}px`;
-  const styles = collectStyles();
   const xhtml = new XMLSerializer().serializeToString(clone);
   return `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="${totalW}" height="${totalH}" viewBox="0 0 ${totalW} ${totalH}">` +
@@ -407,7 +419,7 @@ function htmlElementToSvgString(element: HTMLElement, title: string): string {
     `<text x="${padX}" y="${totalH - 10}" font-family="${FONT_MONO}" font-size="10.5" fill="#64748b">AI-ALE LIMS viewer \u00b7 ${nowUtc()}</text>` +
     `<foreignObject x="${padX}" y="${padTop}" width="${w}" height="${innerH}">` +
     `<div xmlns="http://www.w3.org/1999/xhtml" style="width:${w}px;height:${innerH}px;background:#ffffff;color:#0f172a;overflow:hidden">` +
-    `<style>${styles}</style>${xhtml}</div></foreignObject></svg>
+    `${xhtml}</div></foreignObject></svg>
 `;
 }
 
@@ -416,7 +428,8 @@ function exportHtmlElementSvg(element: HTMLElement, title: string, filenameBase:
     const text = htmlElementToSvgString(element, title);
     downloadText(`${safeFilePart(filenameBase)}-${timestamp()}.svg`, text, 'image/svg+xml;charset=utf-8');
     return true;
-  } catch {
+  } catch (e) {
+    console.warn('figure SVG export failed', e);
     return false;
   }
 }
