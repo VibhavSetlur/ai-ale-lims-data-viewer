@@ -12,6 +12,7 @@ import GrowthCurveComparison from './GrowthCurveComparison';
 import LibraryVariantComparison from './LibraryVariantComparison';
 import { fetchData, IS_STATIC } from '../lib/dataSource';
 import ExportFigureMenu from './ExportFigureMenu';
+import type { FigureSpec } from '../lib/figureSpec';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
@@ -239,6 +240,7 @@ function rampStyle(value: number, min: number, max: number, metric: string): Rea
   const text = light < 62 ? '#ffffff' : metric === 'copy_number' ? '#064e3b' : '#1e3a5f';
   return { backgroundColor: bg, color: text };
 }
+
 
 /* ---- Growth-curve metrics -------------------------------------------------
    Pure helper that extracts the standard parameters a microbiologist reads off
@@ -1794,8 +1796,50 @@ function ComparativePanel({
     }
   };
 
+  const buildHeatmapFigureSpec = (): FigureSpec => {
+    const rowRanges = new Map(renderedMutations.map(m => [m.id, m.metric === 'copy_number' ? rowRange(m) : frequencyRange]));
+    return {
+      kind: 'mutationHeatmap',
+      title: `AI-ALE comparative heatmap (${visibleSamples.length} samples)`,
+      subtitle: `${renderedMutations.length} rows after filters. Frequency rows use a fixed 0% to 100% scale; copy-number rows use per-row ranges.`,
+      xTitle: 'Selected samples',
+      yTitle: 'Mutation or copy-number region',
+      legendTitle: 'Cell value',
+      caption: 'AI-ALE LIMS viewer comparative export from the current filtered selection. Amber outlines mark mutations provided in donor DNA.',
+      samples: visibleSamples.map(s => ({
+        id: s.id,
+        label: s.name,
+        group: groupOrder.map(k => groupValue(s, k)).filter(Boolean).join(' / '),
+        transfer: typeof s.transfer === 'number' ? s.transfer : null,
+      })),
+      mutations: renderedMutations.map(m => {
+        const range = rowRanges.get(m.id) ?? frequencyRange;
+        return {
+          id: m.id,
+          label: `${m.gene} / ${m.variant}`,
+          subtitle: `${m.type} / ${m.metric}`,
+          metric: m.metric,
+          min: range.min,
+          max: range.max,
+          checked: selectedMutations.has(m.id),
+        };
+      }),
+      values: renderedMutations.flatMap(m => visibleSamples.map(s => {
+        const v = m.values[s.id];
+        const provided = !!m.providedIn && m.providedIn.includes(s.id);
+        return {
+          mutationId: m.id,
+          sampleId: s.id,
+          value: typeof v === 'number' && !Number.isNaN(v) ? v : undefined,
+          valueLabel: typeof v === 'number' && !Number.isNaN(v) ? formatMetric(v, m.metric) : undefined,
+          provided,
+        };
+      })),
+    };
+  };
+
   const exportCsv = () => {
-    // Export the columns the user is actually looking at — if they hid empties,
+    // Export the columns the user is actually looking at - if they hid empties,
     // those samples aren't in the CSV either.
     const cols = visibleSamples;
     const rows: string[][] = [];
@@ -1942,6 +1986,7 @@ function ComparativePanel({
           title={`AI-ALE comparative heatmap (${visibleSamples.length} samples)`}
           filenameBase={`comparative-heatmap-${visibleSamples.length}samples`}
           disabled={renderedMutations.length === 0}
+          buildSpec={buildHeatmapFigureSpec}
         />
       </div>
 
@@ -2662,6 +2707,32 @@ function GrowthCurveModal({
 
   const hoverPt = chart && hoverIndex !== null ? chart.focusPts[hoverIndex] ?? null : null;
 
+  const buildGrowthFigureSpec = (): FigureSpec | null => {
+    if (!data || data.length < 2) return null;
+    const overlay = showOverlay ? shownPeers.map((p, i) => ({
+      id: p.id,
+      label: p.name,
+      color: PEER_HUES[i % PEER_HUES.length],
+      emphasis: p.id === focusedPeerId || p.id === hoveredPeerId,
+      points: (p.growth_curve ?? []).map(point => ({ x: point.t, y: point.od })),
+    })) : [];
+    return {
+      kind: 'lineChart',
+      title: `Growth curve for ${sample.name}`,
+      subtitle: `${logScale ? 'Log-scaled' : 'Linear'} OD600 over time${overlay.length ? ` with ${overlay.length} same-group peer curve${overlay.length === 1 ? '' : 's'}` : ''}.`,
+      xTitle: 'Time (h)',
+      yTitle: logScale ? 'OD600 (log)' : 'OD600',
+      legendTitle: 'Growth curves',
+      caption: 'AI-ALE LIMS viewer growth-curve export. Metrics are descriptive estimates from observed OD600 points, not fitted kinetic-model parameters.',
+      logY: logScale,
+      showPoints: true,
+      series: [
+        { id: sample.id, label: sample.name, color: '#059669', emphasis: true, points: data.map(point => ({ x: point.t, y: point.od })) },
+        ...overlay,
+      ],
+      referenceLines: metrics.maxOD !== null ? [{ y: metrics.maxOD, label: `K = ${fmtMetric(metrics.maxOD, 3)}`, color: '#059669', dash: true }] : [],
+    };
+  };
 
   const metricCards: { label: string; value: string; caption: string }[] = [
     { label: 'Max OD600 (K)', value: fmtMetric(metrics.maxOD, 3), caption: 'observed carrying capacity (curve max)' },
@@ -2761,6 +2832,7 @@ function GrowthCurveModal({
                     getTarget={() => growthSvgRef.current}
                     title={`Growth curve for ${sample.name}`}
                     filenameBase={`growth-curve-${sample.name}`}
+                    buildSpec={buildGrowthFigureSpec}
                     compact
                   />
                   <span className="text-[10px] text-[var(--text-faint)]">
@@ -4793,6 +4865,25 @@ function CopyNumberChart({
             getTarget={() => svgRef.current}
             title={`Copy number trend for ${regionLabel}`}
             filenameBase={`copy-number-${regionLabel}`}
+            buildSpec={() => ({
+              kind: 'lineChart',
+              title: `Copy number trend for ${regionLabel}`,
+              subtitle: `${series.length} lineage${series.length === 1 ? '' : 's'}${logScale ? '; log-scaled y axis' : ''}.`,
+              xTitle: hasTransfers ? 'Transfer' : 'Sample (ordinal)',
+              yTitle: `Copy number${logScale ? ' (log)' : ''}`,
+              legendTitle: 'Lineages',
+              caption: 'AI-ALE LIMS viewer copy-number export from the selected region. Each line is one lineage across available transfers.',
+              logY: logScale,
+              showPoints,
+              series: series.map(s => ({
+                id: s.lineage,
+                label: s.lineage,
+                color: s.color,
+                points: s.points.map((p, i) => ({ x: hasTransfers && !Number.isNaN(p.transfer) ? p.transfer : i, y: p.value, label: p.name })),
+                emphasis: isolated === s.lineage || hovered === s.lineage,
+              })),
+              referenceLines: [1, 2].map(v => ({ y: v, label: `${v}x`, color: '#059669', dash: true })),
+            })}
             compact
           />
         </div>

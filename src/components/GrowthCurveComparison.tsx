@@ -6,6 +6,7 @@ import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import ExportFigureMenu from './ExportFigureMenu';
 import { fetchData } from '@/lib/dataSource';
+import type { FigureSpec } from '@/lib/figureSpec';
 
 function cn(...inputs: ClassValue[]) { return twMerge(clsx(inputs)); }
 
@@ -452,6 +453,47 @@ export default function GrowthCurveComparison(props: GrowthCurveComparisonProps)
     URL.revokeObjectURL(url);
   };
 
+  const buildWithinGrowthSpec = (): FigureSpec | null => {
+    const plotted = visibleSeries.length > 0 ? visibleSeries : series;
+    if (plotted.length === 0) return null;
+    if (viewMode === 'facet') {
+      return {
+        kind: 'multiLinePanels',
+        title: 'Selected OD600 growth curves',
+        subtitle: `${plotted.length} selected sample curves, ${logScale ? 'log' : 'linear'} Y scale`,
+        xTitle: 'Time or reading index (t)',
+        yTitle: 'OD600',
+        legendTitle: 'Samples',
+        width: Math.max(1100, Math.min(2200, 300 + Math.min(3, plotted.length) * 360)),
+        height: Math.max(760, Math.min(2400, 230 + Math.ceil(plotted.length / Math.min(3, Math.max(1, plotted.length))) * 250)),
+        logY: logScale,
+        showPoints: true,
+        sharedY: true,
+        panels: plotted.map(item => ({
+          id: item.sample.id,
+          label: item.label,
+          subtitle: item.subtitle,
+          series: [{ id: item.sample.id, label: item.label, color: item.color, points: item.points.map(point => ({ x: point.t, y: point.od })) }],
+        })),
+        caption: 'OD600 curves use the normalized Robotic_OD t field. Growth summaries are descriptive observed points, not fitted kinetic model parameters.',
+      };
+    }
+    return {
+      kind: 'lineChart',
+      title: 'Selected OD600 growth curves',
+      subtitle: `${plotted.length} selected sample curves, ${logScale ? 'log' : 'linear'} Y scale`,
+      xTitle: 'Time or reading index (t)',
+      yTitle: 'OD600',
+      legendTitle: 'Samples',
+      width: 1200,
+      height: 820,
+      logY: logScale,
+      showPoints: true,
+      series: plotted.map(item => ({ id: item.sample.id, label: item.label, color: item.color, points: item.points.map(point => ({ x: point.t, y: point.od })) })),
+      caption: 'OD600 curves use the normalized Robotic_OD t field. Growth summaries are descriptive observed points, not fitted kinetic model parameters.',
+    };
+  };
+
   const handleNearestPoint = (event: React.MouseEvent<SVGRectElement>) => {
     const svg = event.currentTarget.ownerSVGElement;
     const target = figureRef.current;
@@ -674,6 +716,37 @@ export default function GrowthCurveComparison(props: GrowthCurveComparisonProps)
   };
 
   // CSV of the per-genotype summary table (matches what the UI shows).
+  const buildGrowthSeriesSpec = (): FigureSpec | null => {
+    if (facets.length === 0) return null;
+    return {
+      kind: 'multiLinePanels',
+      title: figureTitle.trim() || 'Endpoint OD by transfer, faceted by genotype',
+      subtitle: `${facets.length} genotype panels, ${plottedLineages.length} lineages, ${seriesAgg === 'max' ? 'max OD' : 'endpoint OD'}, ${seriesLog ? 'log' : 'linear'} Y, ${sharedAxes ? 'shared axes' : 'per-panel axes'}`,
+      xTitle: 'Transfer',
+      yTitle: seriesAgg === 'max' ? 'Max OD600' : 'Endpoint OD600',
+      legendTitle: 'Replicate',
+      width: Math.max(1100, Math.min(2400, 250 + Math.min(3, facets.length) * 360)),
+      height: Math.max(760, Math.min(2600, 230 + Math.ceil(facets.length / Math.min(3, Math.max(1, facets.length))) * 260)),
+      logY: seriesLog,
+      showPoints: false,
+      sharedY: sharedAxes,
+      panels: facets.map(([genotype, lineages]) => ({
+        id: genotype,
+        label: genotype,
+        subtitle: `${lineages.length} replicate lineage${lineages.length === 1 ? '' : 's'}`,
+        series: lineages
+          .filter(lineage => repVisible(lineage.replicate))
+          .map(lineage => ({
+            id: lineage.lineageId,
+            label: lineage.replicate ? `Rep ${lineage.replicate}` : lineage.lineageId,
+            color: replicateColor(lineage.replicate),
+            points: lineage.points.map(point => ({ x: point.transfer, y: seriesPoint(point) })),
+          })),
+      })),
+      caption: 'Growth series are endpoint or maximum OD600 values read from Robotic_OD by transfer. Values are descriptive observed measurements, not fitted kinetic model parameters.',
+    };
+  };
+
   const exportSummaryCsv = () => {
     const rows: string[][] = [[
       'genotype', 'replicates', 'final_transfer',
@@ -725,6 +798,7 @@ export default function GrowthCurveComparison(props: GrowthCurveComparisonProps)
         onExportCsv={exportSeriesCsv}
         onExportSummaryCsv={exportSummaryCsv}
         onSwitchToWithin={() => setPrimaryMode('within')}
+        buildSpec={buildGrowthSeriesSpec}
         // arrangement + figure
         columns={columns}
         setColumns={setColumns}
@@ -824,7 +898,7 @@ export default function GrowthCurveComparison(props: GrowthCurveComparisonProps)
           <button type="button" onClick={exportCsv} className="lims-btn lims-btn-secondary" disabled={series.length === 0} title="Export long-format growth-curve points as CSV">
             <Download className="h-3.5 w-3.5" /> CSV
           </button>
-          <ExportFigureMenu getTarget={() => figureRef.current} title={`AI-ALE growth curves ${viewMode}`} filenameBase={`growth-curves-${viewMode}-${logScale ? 'log' : 'linear'}`} disabled={series.length === 0} compact />
+          <ExportFigureMenu getTarget={() => figureRef.current} title={`AI-ALE growth curves ${viewMode}`} filenameBase={`growth-curves-${viewMode}-${logScale ? 'log' : 'linear'}`} disabled={series.length === 0} compact buildSpec={buildWithinGrowthSpec} />
           <div className="min-w-[180px] flex-1 text-[11px] text-[var(--text-faint)]">X uses the normalized t value from the mutations data: hours when present, otherwise reading index.</div>
         </div>
 
@@ -1080,6 +1154,7 @@ interface TransferSeriesViewProps {
   onExportCsv: () => void;
   onExportSummaryCsv: () => void;
   onSwitchToWithin: () => void;
+  buildSpec: () => FigureSpec | null;
   // arrangement + figure
   columns: number;
   setColumns: (n: number) => void;
@@ -1165,7 +1240,7 @@ function TransferSeriesView(p: TransferSeriesViewProps) {
           <button type="button" onClick={p.onExportCsv} className="lims-btn lims-btn-secondary" disabled={p.plottedCount === 0} title="Export long-format growth series as CSV">
             <Download className="h-3.5 w-3.5" /> CSV
           </button>
-          <ExportFigureMenu getTarget={() => p.figureRef.current} title="AI-ALE growth series by genotype" filenameBase={`growth-series-${p.seriesAgg}-${p.seriesLog ? 'log' : 'linear'}`} disabled={p.plottedCount === 0} compact />
+          <ExportFigureMenu getTarget={() => p.figureRef.current} title="AI-ALE growth series by genotype" filenameBase={`growth-series-${p.seriesAgg}-${p.seriesLog ? 'log' : 'linear'}`} disabled={p.plottedCount === 0} compact buildSpec={p.buildSpec} />
           <button type="button" onClick={p.onSwitchToWithin} className="lims-btn lims-btn-ghost" title="Switch to the within-transfer overlay of your selected samples">
             <LineChart className="h-3.5 w-3.5" /> Within-transfer curves
           </button>

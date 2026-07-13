@@ -58,8 +58,7 @@ says so rather than guessing.
   static mode this runs SQLite in the browser (sql.js-httpvfs) so it stays fully
   queryable with no server.
 
-Every chart exports as a publication-quality figure (PNG / SVG / HTML / Print-to-PDF,
-self-contained with resolved colors, a title, and a snapshot caption), plus CSV for values.
+Every chart exports through a PNG preview/editor modal with publication-oriented labels, sizing, colors, and caption controls. Major charts render exports from data-backed figure specs rather than screen captures, and CSV remains separate for quantitative values.
 
 ## Data-driven views (one codebase, many audiences)
 

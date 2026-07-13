@@ -133,20 +133,17 @@ Workflow:
 
 ## 5. Exporting figures and data
 
-Every visualization has an **Export figure** button. Each export is a real
-publication-quality figure rendered on a white background with a title and a
-snapshot caption baked in (not a screenshot): chart colors and fonts are resolved
-to fixed values so the figure looks identical wherever you open it. Four formats:
-- **PNG** — high-resolution 3x bitmap for slides and email.
-- **SVG** — fully self-contained, infinite-resolution vector, editable in
-  Illustrator/Inkscape. Recommended for manuscript figures.
-- **HTML** — self-contained page with fixed-size labels (best for barcode Rows).
-- **Print / Save PDF** — opens the print dialog scoped to the figure.
+Every visualization has an **Export figure** button. It opens a PNG preview and
+editor modal so you can adjust the title, subtitle, axis titles, legend, size,
+colors, and caption before downloading. Major charts render from data-backed
+figure specs rather than screen captures, so labels and colors are publication
+ready in static and server modes. Any view that has not been migrated yet still
+uses the PNG modal with the current DOM exporter.
 
-Whatever is on screen is what exports, so set your filters (and Reads vs Fraction)
-first. Scrollable views such as the Comparative heatmap export in full, not just
-the visible part. Use the separate **CSV** button whenever you will make a
-quantitative claim.
+Set your filters (and Reads vs Fraction) first. Data-rendered exports summarize
+the active chart state, selected samples, selected candidates, and transfer
+filters. Use the separate **CSV** button whenever you will make a quantitative
+claim.
 
 Caption template:
 

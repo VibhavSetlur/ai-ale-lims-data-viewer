@@ -6,6 +6,11 @@ export interface ReleaseNote {
 
 export const releaseNotes: readonly ReleaseNote[] = [
   {
+    version: '1.6.0',
+    date: '2026-07-13',
+    summary: 'Added a PNG-only figure export preview workflow. Export buttons now open a modal with editable title, subtitle, axis titles, legend title, size, cell size, color, legend, values, and caption controls before downloading PNG. Major export callsites now use dedicated data-rendered figure specs instead of screenshotting the HTML table or on-screen chart, including VerA / VerB partner pairing, mutation heatmaps, growth curves, copy-number trajectories, barcode stacked bars, barcode heatmaps, and growth comparison panels. Existing figure exports that are not yet migrated use the current DOM PNG path through the same modal.',
+  },
+  {
     version: '1.5.2',
     date: '2026-07-13',
     summary: 'Bug-fix release. Mutation Explorer Sample Selection now includes positive verAB barcode samples even when they are amplicon-only and have no Mutations rows, so newly uploaded barcode runs can be selected for Compare Library Variants. Added a verAB facet and sample badge to find barcode-bearing samples quickly. DB refreshes now archive before-refresh and after-refresh SQLite snapshots under data/archive so future syncs can be diffed.',

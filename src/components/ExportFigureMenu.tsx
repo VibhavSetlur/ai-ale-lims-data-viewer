@@ -1,14 +1,14 @@
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
-import { Download, FileImage, FileCode2, FileText, Printer, Check, Loader2 } from 'lucide-react';
-import { exportFigure, printFigure, type FigureExportFormat } from '../lib/figureExport';
+import React, { useState } from 'react';
+import { Check, Download, FileImage, Loader2 } from 'lucide-react';
+import type { FigureSpec } from '../lib/figureSpec';
+import FigureExportModal from './FigureExportModal';
 
 /**
- * Shared figure-export control used by every visualization (comparative heatmap,
- * copy-number chart, barcode charts, growth curve). A single button that opens a
- * small menu offering PNG / SVG / HTML / Print, so the export experience is
- * identical everywhere and researchers learn it once.
+ * Shared figure-export control used by visualizations. Slice 1 makes the visible
+ * UI PNG-only and routes exports through a preview modal. Callers can provide a
+ * FigureSpec for a dedicated renderer, or fall back to the existing DOM PNG path.
  *
  * `getTarget` is called at click time (not render time) so the caller can return
  * the currently-rendered chart node (refs may be null on first paint).
@@ -19,7 +19,8 @@ export default function ExportFigureMenu({
   filenameBase,
   disabled,
   compact,
-  label = 'Export figure',
+  label = 'Export PNG',
+  buildSpec,
   onBeforeExport,
   onAfterExport,
 }: {
@@ -29,113 +30,62 @@ export default function ExportFigureMenu({
   disabled?: boolean;
   compact?: boolean;
   label?: string;
-  // Optional hooks so a caller can neutralize transient UI state (e.g. legend
-  // isolate/dim) before the figure is captured, then restore it after. This is
-  // what keeps exported colors un-muted regardless of on-screen highlighting.
+  buildSpec?: () => FigureSpec | null;
+  // Optional hooks so a caller can neutralize transient UI state before the
+  // figure is captured, then restore it after.
   onBeforeExport?: () => void;
   onAfterExport?: () => void;
 }) {
-  const [open, setOpen] = useState(false);
-  const [busy, setBusy] = useState<FigureExportFormat | 'print' | null>(null);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [spec, setSpec] = useState<FigureSpec | null>(null);
+  const [busy, setBusy] = useState(false);
   const [done, setDone] = useState<string | null>(null);
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const onDoc = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
-    document.addEventListener('mousedown', onDoc);
-    document.addEventListener('keydown', onKey);
-    return () => { document.removeEventListener('mousedown', onDoc); document.removeEventListener('keydown', onKey); };
-  }, [open]);
 
   const flash = (msg: string) => {
     setDone(msg);
     setTimeout(() => setDone(null), 2200);
   };
 
-  // Let a caller-supplied onBeforeExport() (e.g. clearing legend isolate/dim)
-  // commit to the DOM before we serialize. Two rAFs = one React commit + paint.
-  const nextFrame = () => new Promise<void>(r => requestAnimationFrame(() => requestAnimationFrame(() => r())));
-
-  const run = async (format: FigureExportFormat) => {
-    const target = getTarget();
-    if (!target) { flash('Nothing to export yet'); setOpen(false); return; }
-    setBusy(format);
-    setOpen(false);
+  const openPreview = () => {
+    setBusy(true);
     try {
-      if (onBeforeExport) { onBeforeExport(); await nextFrame(); }
-      const res = await exportFigure(getTarget(), format, title, filenameBase);
-      flash(res ? `Saved ${res.toUpperCase()}` : 'Export failed');
+      const nextSpec = buildSpec?.() ?? null;
+      if (!nextSpec && !getTarget()) {
+        flash('Nothing to export yet');
+        return;
+      }
+      setSpec(nextSpec);
+      setModalOpen(true);
     } finally {
-      onAfterExport?.();
-      setBusy(null);
+      setBusy(false);
     }
   };
-
-  const doPrint = async () => {
-    const target = getTarget();
-    if (!target) { flash('Nothing to print yet'); setOpen(false); return; }
-    setBusy('print');
-    setOpen(false);
-    try {
-      if (onBeforeExport) { onBeforeExport(); await nextFrame(); }
-      const ok = printFigure(getTarget(), title);
-      flash(ok ? 'Opened print dialog' : 'Print blocked by browser');
-    } finally {
-      onAfterExport?.();
-      setBusy(null);
-    }
-  };
-
-  const items: { key: FigureExportFormat | 'print'; icon: React.ReactNode; label: string; hint: string; onClick: () => void }[] = [
-    { key: 'png', icon: <FileImage className="w-3.5 h-3.5" />, label: 'PNG image', hint: 'bitmap for slides & email (2x)', onClick: () => run('png') },
-    { key: 'svg', icon: <FileCode2 className="w-3.5 h-3.5" />, label: 'SVG vector', hint: 'scales crisply for manuscripts', onClick: () => run('svg') },
-    { key: 'html', icon: <FileText className="w-3.5 h-3.5" />, label: 'HTML page', hint: 'self-contained, fixed-size labels', onClick: () => run('html') },
-    { key: 'print', icon: <Printer className="w-3.5 h-3.5" />, label: 'Print / Save PDF', hint: 'opens the print dialog', onClick: doPrint },
-  ];
 
   return (
-    <div className="relative" ref={ref} data-figure-omit>
+    <div className="relative" data-figure-omit>
       <button
-        onClick={() => setOpen(o => !o)}
-        disabled={disabled}
+        onClick={openPreview}
+        disabled={disabled || busy}
         className={compact
           ? 'flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded border border-[var(--border)] text-[var(--text-soft)] hover:bg-[var(--surface-3)] disabled:opacity-40'
           : 'flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded border border-slate-300 dark:border-gray-600 text-slate-600 dark:text-gray-300 hover:bg-slate-50 dark:hover:bg-gray-700 disabled:opacity-40'}
-        title="Export this visualization as PNG, SVG, HTML, or print to PDF"
-        aria-haspopup="menu"
-        aria-expanded={open}
+        title="Preview and export this visualization as a PNG image"
       >
-        {busy ? <Loader2 className="w-3 h-3 animate-spin" /> : <Download className="w-3 h-3" />}
-        {done ? <span className="text-[var(--data-grow)] inline-flex items-center gap-1"><Check className="w-3 h-3" />{done}</span> : label}
+        {busy ? <Loader2 className="w-3 h-3 animate-spin" /> : done ? <Check className="w-3 h-3 text-[var(--data-grow)]" /> : <Download className="w-3 h-3" />}
+        {done ? <span className="text-[var(--data-grow)]">{done}</span> : label}
       </button>
-      {open && (
-        <div
-          role="menu"
-          className="absolute right-0 top-full mt-1 w-56 z-50 rounded-lg border border-[var(--border)] bg-[var(--surface)] py-1"
-          style={{ boxShadow: 'var(--shadow-md)' }}
-        >
-          <div className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--text-faint)]">Export this figure</div>
-          {items.map(it => (
-            <button
-              key={it.key}
-              role="menuitem"
-              onClick={it.onClick}
-              disabled={busy !== null}
-              className="w-full flex items-start gap-2.5 px-3 py-1.5 text-left hover:bg-[var(--surface-3)] disabled:opacity-40"
-            >
-              <span className="mt-0.5 text-[var(--accent-600)]">{it.icon}</span>
-              <span className="min-w-0">
-                <span className="block text-[12px] font-medium text-[var(--text)]">{it.label}</span>
-                <span className="block text-[10.5px] text-[var(--text-soft)] leading-snug">{it.hint}</span>
-              </span>
-            </button>
-          ))}
-        </div>
-      )}
+      <FigureExportModal
+        open={modalOpen}
+        onClose={() => setModalOpen(false)}
+        spec={spec}
+        getTarget={getTarget}
+        title={title}
+        filenameBase={filenameBase}
+        onBeforeExport={onBeforeExport}
+        onAfterExport={onAfterExport}
+        onDone={flash}
+      />
+      <span className="sr-only"><FileImage className="w-3 h-3" />PNG image export</span>
     </div>
   );
 }

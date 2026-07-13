@@ -8,6 +8,7 @@ import {
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { fetchData } from '../lib/dataSource';
+import type { FigureSpec } from '../lib/figureSpec';
 import ExportFigureMenu from './ExportFigureMenu';
 
 function cn(...inputs: ClassValue[]) { return twMerge(clsx(inputs)); }
@@ -395,6 +396,54 @@ export default function LibraryVariantComparison({ samples, selected, loading: s
     return effectiveMetric === 'count' ? cell?.count ?? 0 : cell?.abundance ?? 0;
   };
 
+  const buildMainFigureSpec = (): FigureSpec => {
+    const normalizedBars = mode === 'bars' && effectiveMetric === 'abundance';
+    const sampleTotals = new Map(selectedSamples.map(sample => [
+      sample.id,
+      visibleVariants.reduce((sum, variant) => sum + valueFor(sample.id, variant.variantId), 0),
+    ]));
+    const sampleGroups = new Map<string, string>();
+    const primaryBand = columnBands[0];
+    if (primaryBand) {
+      primaryBand.cells.forEach(cell => cell.rows.forEach(sample => sampleGroups.set(sample.id, cell.label)));
+    }
+    const values = selectedSamples.flatMap(sample => visibleVariants.map(variant => {
+      const value = valueFor(sample.id, variant.variantId);
+      const denom = sampleTotals.get(sample.id) ?? 0;
+      const normalizedValue = normalizedBars && denom > 0 ? value / denom : value;
+      return {
+        sampleId: sample.id,
+        variantId: variant.variantId,
+        value,
+        valueLabel: fmtValue(normalizedValue, effectiveMetric),
+        normalizedValue,
+      };
+    }));
+    return {
+      kind: mode === 'bars' ? 'libraryBars' : 'libraryHeatmap',
+      title: mode === 'bars' ? 'Library variant composition across selected samples' : 'Library variant abundance heatmap',
+      subtitle: `${visibleVariants.length.toLocaleString()} variants across ${selectedSamples.length.toLocaleString()} selected samples. Metric: ${effectiveMetric === 'count' ? 'barcode count' : 'relative abundance'}.`,
+      xTitle: 'Selected samples',
+      yTitle: mode === 'bars' ? (normalizedBars ? 'Share of visible variants' : 'Barcode count') : 'Library variant',
+      legendTitle: 'Library variants',
+      caption: normalizedBars
+        ? 'Stacked bars are normalized within each sample across the visible variant set. AI markers in the legend indicate Library_candidates metadata for verA or verB partners.'
+        : 'Cell intensity and bar height use the selected metric for the visible variant set. AI markers in the legend indicate Library_candidates metadata for verA or verB partners.',
+      metric: effectiveMetric,
+      normalizedBars,
+      maxValue: mode === 'heatmap' ? maxValue : undefined,
+      samples: selectedSamples.map(sample => ({ id: sample.id, label: sampleLabel(sample), subtitle: sampleSubtitle(sample), group: sampleGroups.get(sample.id) })),
+      variants: visibleVariants.map(variant => ({
+        id: variant.variantId,
+        label: variant.label,
+        color: colors.get(variant.variantId) ?? colorForCandidate(variant.label),
+        aiA: variantAiA(variant),
+        aiB: variantAiB(variant),
+      })),
+      values,
+    };
+  };
+
   const exportCsv = () => {
     const header = ['variant', 'library', 'ai_generated', 'verA_ai_generated', 'verB_ai_generated', 'metric', ...selectedSamples.map(sampleLabel)];
     const rows = visibleVariants.map(variant => [
@@ -533,6 +582,7 @@ export default function LibraryVariantComparison({ samples, selected, loading: s
             filenameBase={`library-variants-${mode}-${effectiveMetric}`}
             disabled={visibleVariants.length === 0}
             compact
+            buildSpec={buildMainFigureSpec}
             onBeforeExport={() => { exportRestore.current = { hovered: hoveredVariantId, isolated: isolatedVariantIds }; setHoveredVariantId(null); setIsolatedVariantIds(new Set()); }}
             onAfterExport={() => { const r = exportRestore.current; if (r) { setHoveredVariantId(r.hovered); setIsolatedVariantIds(r.isolated); exportRestore.current = null; } }}
           />
@@ -835,6 +885,32 @@ function PartnerPairingTable({ pairs, colors, metric }: { pairs: { aList: string
   const cellCount = aList.length * bList.length;
   const exportRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState<'s' | 'm' | 'l'>('m');
+  const buildPairingSpec = (): FigureSpec => ({
+    kind: 'pairing',
+    title: 'VerA / VerB partner pairing',
+    subtitle: `${byPair.size.toLocaleString()} observed combinations across ${aList.length.toLocaleString()} VerA partners and ${bList.length.toLocaleString()} VerB partners.`,
+    xTitle: 'VerB partner',
+    yTitle: 'VerA partner',
+    legendTitle: metric === 'count' ? 'Observed count' : 'Relative abundance',
+    caption: 'AI markers identify cells where the VerA or VerB partner is AI-generated in Library_candidates metadata.',
+    rows: aList.map(a => ({ id: a, label: a, ai: aAiSet.has(a) })),
+    columns: bList.map(b => ({ id: b, label: b, ai: bAiSet.has(b) })),
+    metricLabel: metric === 'count' ? 'Cell values show total barcode counts for the visible variant set.' : 'Cell values show total relative abundance for the visible variant set.',
+    cells: aList.flatMap(a => bList.flatMap(b => {
+      const variant = byPair.get(`${a}|${b}`);
+      if (!variant) return [];
+      const value = metric === 'count' ? variant.totalCount : variant.totalAbundance;
+      return [{
+        a,
+        b,
+        label: variant.label,
+        value,
+        valueLabel: fmtValue(value, metric),
+        color: colors.get(variant.variantId) ?? colorForCandidate(variant.label),
+        ai: aAiSet.has(a) || bAiSet.has(b),
+      }];
+    })),
+  });
   const SIZE = {
     s: { cell: 'h-4 w-4', dot: 'h-1 w-1', font: 'text-[9px]', hdr: 'text-[8px]' },
     m: { cell: 'h-5 w-5', dot: 'h-1.5 w-1.5', font: 'text-[10px]', hdr: 'text-[9px]' },
@@ -859,6 +935,7 @@ function PartnerPairingTable({ pairs, colors, metric }: { pairs: { aList: string
             getTarget={() => exportRef.current}
             title="VerA / VerB partner pairing"
             filenameBase="partner-pairing"
+            buildSpec={buildPairingSpec}
             compact
           />
         </span>

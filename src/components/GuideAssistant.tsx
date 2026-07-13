@@ -126,7 +126,7 @@ const ANSWERS: Answer[] = [
     icon: <DownloadIcon className="w-4 h-4" />,
     steps: [
       'Every visualization has an Export figure button (top right of the chart toolbar).',
-      'Choose PNG (slides/email), SVG (manuscripts, editable vector), HTML (fixed-size labels), or Print/Save PDF.',
+      'Use the preview/editor modal to adjust labels, size, colors, and caption, then download PNG.',
       'Use the separate CSV button whenever you will make a quantitative claim.',
       'Record the snapshot date and your filters in the figure caption.',
     ],

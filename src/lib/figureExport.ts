@@ -1,11 +1,8 @@
 // Figure export utilities for the AI-ALE LIMS viewer.
 //
-// GOAL: every visualization exports as a clean, publication-quality figure with
-// no server round-trip and no extra dependencies. Formats:
-//   - PNG : high-resolution bitmap (3x) for slides/email
-//   - SVG : self-contained vector for manuscripts (fully editable, scales crisply)
-//   - HTML: standalone page for HTML/flex charts whose labels must stay fixed-px
-//   - Print: opens the print dialog scoped to the figure (-> Save as PDF)
+// GOAL: provide the legacy DOM PNG fallback used by the PNG preview modal when a
+// visualization does not yet provide a data-backed FigureSpec. Historical SVG,
+// HTML, and print helpers remain here for compatibility with older code paths.
 //
 // THE KEY FIX (why exports used to come out as "madness"): the on-screen charts
 // style themselves with CSS custom properties (var(--data-cn), var(--text-faint))

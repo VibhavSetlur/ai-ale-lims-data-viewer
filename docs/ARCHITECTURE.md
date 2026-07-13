@@ -173,12 +173,13 @@ src/components/
   DataTable.tsx         Raw Database-Tables browser (server API or sql.js-httpvfs)
   HelpCenter.tsx        Deep searchable in-app documentation
   GuideAssistant.tsx    "How do I..." helper that navigates the user + external-prompt builder
-  ExportFigureMenu.tsx  Shared PNG / SVG / HTML / Print export control
+  ExportFigureMenu.tsx  Shared PNG preview/export control
 src/lib/
   db.ts                 SQLite/MySQL access + query building (server mode)
   dataSource.ts         fetchData() server/static switch + IS_STATIC
   sqlClient.ts          sql.js-httpvfs client (static raw-table browser)
-  figureExport.ts       Browser-side PNG/SVG/HTML/print figure export (no dependencies)
+  figureSpec.ts         Data-backed SVG-to-PNG figure renderers
+  figureExport.ts       Legacy browser-side DOM PNG fallback exporter
 scripts/                prebake.mjs, build-static.sh, prepare-httpvfs-db.sh
 ops/                    serve.sh, stop.sh, refresh-db.sh (server lifecycle on poplar)
 next.config.ts          Dual-mode config (server vs output:export + basePath)

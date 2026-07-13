@@ -11,6 +11,7 @@ import {
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { fetchData } from '../lib/dataSource';
+import type { FigureSpec } from '../lib/figureSpec';
 import ExportFigureMenu from './ExportFigureMenu';
 
 function cn(...inputs: ClassValue[]) { return twMerge(clsx(inputs)); }
@@ -171,6 +172,14 @@ function colorForCandidate(label: string): string {
 
 function chartKey(c: BarcodeChart): string {
   return `${c.experiment}/${c.library}/${c.sampleName || c.strain}/${c.well || 'no-well'}/r${c.replicate}`;
+}
+
+function chartIdentityLabel(c: BarcodeChart): string {
+  return c.sampleName || c.well || `${c.strain} r${c.replicate}`;
+}
+
+function chartIdentitySubtitle(c: BarcodeChart): string {
+  return [c.experiment, c.library, c.well ? `well ${c.well}` : null, `rep ${c.replicate}`].filter(Boolean).join(' · ');
 }
 
 function chartIdentityTitle(c: BarcodeChart): string {
@@ -2602,6 +2611,66 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
     setSelectionFiltersCharts(true);
   }, []);
 
+  const buildBarcodeFigureSpec = (): FigureSpec | null => {
+    if (!data || visibleCharts.length === 0) return null;
+    const chartsForExport = view === 'focus'
+      ? (focusedChart ? [focusedChart] : [])
+      : view === 'compare'
+        ? comparing.map(key => visibleCharts.find(c => chartKey(c) === key) ?? data.charts.find(c => chartKey(c) === key)).filter((c): c is BarcodeChart => !!c).slice(0, 6)
+        : visibleCharts.slice(0, 12);
+    if (chartsForExport.length === 0) return null;
+    const colorOf = (cand: string): string => {
+      if (colorMode === 'partner-a') { const p = parseCandidate(cand); return p ? aColors[p.a] : '#888888'; }
+      if (colorMode === 'partner-b') { const p = parseCandidate(cand); return p ? bColors[p.b] : '#888888'; }
+      return candColors[cand] || '#888888';
+    };
+    const panelSpecs = chartsForExport.map(chart => {
+      const stats = statsByKey.get(chartKey(chart)) ?? statsFor(chart);
+      let candidates = stats.candidateTotals.map(row => row.cand);
+      if (isolateSelected && selectedCands.size > 0) candidates = candidates.filter(cand => selectedCands.has(cand));
+      const capped = topN > 0 ? candidates.slice(0, topN) : candidates;
+      const values = capped.flatMap(candidate => {
+        const counts = chart.candidates[candidate] ?? [];
+        return chart.transfers.map((transfer, idx) => {
+          const value = counts[idx] || 0;
+          const total = Object.values(chart.candidates).reduce((sum, arr) => sum + (arr[idx] || 0), 0);
+          const fraction = total > 0 ? value / total : 0;
+          return { candidateId: candidate, transfer, value, fraction, valueLabel: normalize === 'fraction' ? `${Math.round(fraction * 100)}%` : value.toLocaleString() };
+        });
+      });
+      return {
+        id: chartKey(chart),
+        label: chartIdentityLabel(chart),
+        subtitle: chartIdentitySubtitle(chart),
+        transfers: chart.transfers,
+        candidates: capped.map(candidate => ({ id: candidate, label: candidate, color: colorOf(candidate) })),
+        values,
+      };
+    }).filter(panel => panel.candidates.length > 0 && panel.transfers.length > 0);
+    if (panelSpecs.length === 0) return null;
+    const exportKind = view === 'focus' && focusChart === 'heatmap' ? 'barcodeHeatmap' : 'barcodeBars';
+    const subtitleParts = [
+      view === 'focus' ? `Focus view, ${focusChart}` : view === 'compare' ? `${panelSpecs.length} compared charts` : `${panelSpecs.length} visible charts`,
+      normalize === 'fraction' ? 'fraction of reads' : 'read count',
+      colorMode === 'partner-a' ? 'VerA colors' : colorMode === 'partner-b' ? 'VerB colors' : 'A-B candidate colors',
+      topN > 0 ? `top ${topN}` : 'all candidates',
+    ];
+    return {
+      kind: exportKind,
+      title: view === 'focus' ? 'Barcode composition for focused sample' : view === 'compare' ? 'Barcode composition comparison' : 'Barcode composition overview',
+      subtitle: subtitleParts.join(', '),
+      xTitle: 'Transfer',
+      yTitle: normalize === 'fraction' ? 'Fraction of reads' : 'Read count',
+      legendTitle: colorMode === 'partner-a' ? 'VerA subunits' : colorMode === 'partner-b' ? 'VerB subunits' : 'A-B candidates',
+      width: Math.max(1100, Math.min(2200, 300 + Math.min(2, panelSpecs.length) * 440)),
+      height: Math.max(820, Math.min(2600, 250 + Math.ceil(panelSpecs.length / Math.min(2, Math.max(1, panelSpecs.length))) * 310)),
+      normalize,
+      colorMode,
+      panels: panelSpecs,
+      caption: 'Barcode panels are rendered from verAB_barcodes counts after the active filters, transfer range, candidate selection, color mode, normalization, and top-N rollup settings. Fractions use per-transfer total reads.',
+    };
+  };
+
   const resetFilters = () => {
     setSelectedLibs(new Set(data?.libraries ?? []));
     setSelectedWells(new Set(data?.wells ?? []));
@@ -2998,6 +3067,7 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
             title={`AI-ALE barcode chart (${view} view)`}
             filenameBase={`barcode-${view}-${focusKey || comparing.length || visibleCharts.length}`}
             disabled={!data || visibleCharts.length === 0}
+            buildSpec={buildBarcodeFigureSpec}
           />
           <button onClick={reload} className="p-1 rounded text-slate-500 dark:text-gray-400 hover:bg-slate-100 dark:hover:bg-gray-700" title="Reload">
             <RefreshCw className={cn('w-3.5 h-3.5', loading && 'animate-spin')} />
