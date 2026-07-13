@@ -6,6 +6,7 @@ export interface MutationSample {
   name: string;
   experiment: string;
   experiment_type?: string;
+  seqorder?: string;
   replicate?: string;
   transfer?: number;
   condition?: string;
@@ -113,6 +114,7 @@ interface SeqSampleRow {
   strain: string | null;
   transforming_dna: string | null;
   notes: string | null;
+  seqorder: string | null;
 }
 
 interface MutationRawRow {
@@ -323,6 +325,7 @@ function buildSamplesSql(opts: { experiment: boolean; registry: boolean }): stri
     SELECT
       ms.seq_sample                              AS seq_sample,
       ms.experiment                              AS experiment_from_mutations,
+      ms.seqorder                                AS seqorder,
       ss."Experiment"                            AS experiment_from_seq,
       ss."Sample_Name"                           AS sample_name,
       ss."Population_or_Single_colony?"          AS pop_or_colony_raw,
@@ -332,7 +335,7 @@ function buildSamplesSql(opts: { experiment: boolean; registry: boolean }): stri
       s."Transforming_DNA"                       AS transforming_dna,
       s."Notes"                                  AS notes
     FROM (
-      SELECT "Seq_sample" AS seq_sample, MIN("Experiment") AS experiment
+      SELECT "Seq_sample" AS seq_sample, MIN("Experiment") AS experiment, MIN("Seqorder") AS seqorder
       FROM Mutations
       WHERE ${inner.join(' AND ')}
       GROUP BY "Seq_sample"
@@ -696,6 +699,7 @@ export async function GET(req: NextRequest) {
         name: r.seq_sample,
         experiment: r.experiment_from_mutations ?? r.experiment_from_seq ?? '',
         experiment_type: r.experiment_type ?? undefined,
+        seqorder: (r.seqorder && String(r.seqorder).trim()) || undefined,
         replicate,
         transfer,
         condition: r.condition ?? undefined,

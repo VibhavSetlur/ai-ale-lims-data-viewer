@@ -22,6 +22,7 @@ interface MutationSample {
   name: string;
   experiment: string;
   experiment_type?: string;
+  seqorder?: string;
   replicate?: string;
   transfer?: number;
   condition?: string;
@@ -795,7 +796,7 @@ function TabButton({ active, onClick, icon, children, tour }: { active: boolean;
 
 /* ---------------- Sample Selection panel ---------------- */
 
-type ChipKey = 'experiment' | 'replicate' | 'donor_dna' | 'strain' | 'condition';
+type ChipKey = 'experiment' | 'replicate' | 'donor_dna' | 'strain' | 'condition' | 'seqorder';
 
 type SampleFilters = {
   chips: Record<ChipKey, string[]>;
@@ -805,7 +806,7 @@ type SampleFilters = {
 };
 
 const EMPTY_SAMPLE_FILTERS: SampleFilters = {
-  chips: { experiment: [], replicate: [], donor_dna: [], strain: [], condition: [] },
+  chips: { experiment: [], replicate: [], donor_dna: [], strain: [], condition: [], seqorder: [] },
   selectedOnly: false,
   transferMin: null,
   transferMax: null,
@@ -883,6 +884,7 @@ function SampleSelectionPanel({
             donor_dna: f.chips?.donor_dna ?? [],
             strain: f.chips?.strain ?? [],
             condition: f.chips?.condition ?? [],
+            seqorder: f.chips?.seqorder ?? [],
           },
           // "Selected only" is a transient view toggle, never restored on load:
           // restoring it true opens the table empty (nothing is selected yet).
@@ -921,19 +923,21 @@ function SampleSelectionPanel({
   // hides now-irrelevant choices in the others. A facet never hides its own
   // siblings, and a currently-selected value is always kept visible.
   const chipOptions = useMemo(() => {
-    const keys: ChipKey[] = ['experiment', 'replicate', 'donor_dna', 'strain', 'condition'];
+    const keys: ChipKey[] = ['experiment', 'replicate', 'donor_dna', 'strain', 'condition', 'seqorder'];
     const sel: Record<ChipKey, Set<string>> = {
       experiment: new Set(filters.chips.experiment),
       replicate: new Set(filters.chips.replicate),
       donor_dna: new Set(filters.chips.donor_dna),
       strain: new Set(filters.chips.strain),
       condition: new Set(filters.chips.condition),
+      seqorder: new Set(filters.chips.seqorder),
     };
     const fieldVal = (s: MutationSample, k: ChipKey): string =>
       k === 'experiment' ? s.experiment
       : k === 'replicate' ? (s.replicate ?? '')
       : k === 'donor_dna' ? (s.donor_dna ?? '')
       : k === 'strain' ? (s.strain ?? '')
+      : k === 'seqorder' ? (s.seqorder ?? '')
       : (s.condition ?? '');
     // A sample matches the chip filters, OPTIONALLY ignoring one facet (so each
     // facet's own selection doesn't hide its sibling options). This is faceted
@@ -968,6 +972,7 @@ function SampleSelectionPanel({
       donor_dna: toList('donor_dna'),
       strain: toList('strain'),
       condition: toList('condition'),
+      seqorder: toList('seqorder'),
     };
   }, [samples, filters.chips]);
 
@@ -980,6 +985,7 @@ function SampleSelectionPanel({
       donor_dna: new Set(filters.chips.donor_dna),
       strain: new Set(filters.chips.strain),
       condition: new Set(filters.chips.condition),
+      seqorder: new Set(filters.chips.seqorder),
     };
     return sorted.filter(s => {
       if (filters.selectedOnly && !selected.has(s.id)) return false;
@@ -988,10 +994,11 @@ function SampleSelectionPanel({
       if (chipSet.donor_dna.size > 0 && !chipSet.donor_dna.has(s.donor_dna ?? '')) return false;
       if (chipSet.strain.size > 0 && !chipSet.strain.has(s.strain ?? '')) return false;
       if (chipSet.condition.size > 0 && !chipSet.condition.has(s.condition ?? '')) return false;
+      if (chipSet.seqorder.size > 0 && !chipSet.seqorder.has(s.seqorder ?? '')) return false;
       if (filters.transferMin !== null && (s.transfer ?? -Infinity) < filters.transferMin) return false;
       if (filters.transferMax !== null && (s.transfer ?? Infinity) > filters.transferMax) return false;
       if (q) {
-        const hay = `${s.name} ${s.experiment} ${s.strain ?? ''} ${s.donor_dna ?? ''} ${s.condition ?? ''} ${s.replicate ?? ''}`.toLowerCase();
+        const hay = `${s.name} ${s.experiment} ${s.strain ?? ''} ${s.donor_dna ?? ''} ${s.condition ?? ''} ${s.replicate ?? ''} ${s.seqorder ?? ''}`.toLowerCase();
         if (!hay.includes(q)) return false;
       }
       return true;
@@ -1197,6 +1204,8 @@ function SampleSelectionPanel({
                    onToggle={v => toggleChip('strain', v)} onClear={() => clearChip('strain')} />
           <ChipRow label="Condition" options={chipOptions.condition} active={new Set(filters.chips.condition)}
                    onToggle={v => toggleChip('condition', v)} onClear={() => clearChip('condition')} />
+          <ChipRow label="Seqorder" options={chipOptions.seqorder} active={new Set(filters.chips.seqorder)}
+                   onToggle={v => toggleChip('seqorder', v)} onClear={() => clearChip('seqorder')} />
           <div className="flex items-center gap-1.5 text-[11px]">
             <span className="text-slate-500 dark:text-gray-400 font-medium uppercase tracking-wider text-[10px] w-20 shrink-0">Transfer</span>
             <input
