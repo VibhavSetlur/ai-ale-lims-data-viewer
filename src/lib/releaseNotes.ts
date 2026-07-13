@@ -6,6 +6,11 @@ export interface ReleaseNote {
 
 export const releaseNotes: readonly ReleaseNote[] = [
   {
+    version: '1.6.1',
+    date: '2026-07-13',
+    summary: 'Fixed the figure export preview and PNG download in Compare Library Variants. The preview was blank and PNG export failed because the generated SVG did not decode: variant colors used space-separated hsl() and the font stack carried embedded quotes. Colors are now normalized to hex and the font names are quote-free, so the live preview renders, stays editable while you adjust the title, size, and labels, and PNG download works for both the vertical bars and the heatmap. The preview also shows a clear message if it ever fails to render.',
+  },
+  {
     version: '1.6.0',
     date: '2026-07-13',
     summary: 'Added a PNG-only figure export preview workflow. Export buttons now open a modal with editable title, subtitle, axis titles, legend title, size, cell size, color, legend, values, and caption controls before downloading PNG. Major export callsites now use dedicated data-rendered figure specs instead of screenshotting the HTML table or on-screen chart, including VerA / VerB partner pairing, mutation heatmaps, growth curves, copy-number trajectories, barcode stacked bars, barcode heatmaps, and growth comparison panels. Existing figure exports that are not yet migrated use the current DOM PNG path through the same modal.',
