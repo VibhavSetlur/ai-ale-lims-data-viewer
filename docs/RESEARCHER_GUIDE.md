@@ -52,9 +52,7 @@ Switch workspaces from the left sidebar.
   - **Barcode Charts** — VerA/VerB barcode composition (only when the snapshot
     contains barcode data; the public TFMN1 snapshot hides it).
 
-The Help, Guide, and Interactive Tutorial buttons live in the left sidebar under
-**Help & Learning**. The Guide answers "how do I..." and walks you to the right
-view; the Tutorial spotlights each control in turn.
+The Guide, Changelog, and Help buttons live in the left sidebar under **Help & Learning**. The Guide answers "how do I..." and walks you to the right view. The Changelog shows viewer release history and the current data snapshot provenance.
 
 ---
 

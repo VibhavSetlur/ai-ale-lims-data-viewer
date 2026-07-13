@@ -18,16 +18,18 @@ pointers that say which code revision belongs to each static URL.
 
 ## Viewer Display
 
-The viewer header shows a version badge plus a release/data log button. Opening either surface shows:
+The viewer header shows a compact version badge. The left sidebar has a Changelog button that opens a large release and data provenance panel. Together these surfaces show:
 
-- viewer semantic version, starting at `1.0.0`;
+- viewer semantic version, starting at `1.0.0`, from `package.json` or the build override;
 - deployment channel labels `dev`, `public`, `private`, or `server` with truthful display names `Dev`, `Public`, `Private`, and `Server`;
 - deployment branch;
 - build commit;
 - server/static mode;
 - expected database for that channel;
 - barcode capability policy for that channel;
-- viewer release notes and the current data snapshot manifest when static.
+- data version as the mirror snapshot timestamp, with file mtime fallback;
+- static manifest generated time, source, and file count when static;
+- viewer release notes.
 
 This makes screenshots and live URLs self-describing.
 
@@ -54,24 +56,24 @@ Static builds set these environment variables at build time:
 1. Land feature and fix work on `main`.
 2. Bump `package.json` and `package-lock.json` when the viewer release version changes.
 3. Fast-forward `deploy/aiale-dev` to the chosen `main` commit.
-4. Bake and deploy the staging URL with the full DB:
+4. Bake and deploy the dev URL with the full DB:
    `SRC=data/lims_indexed.db`, `BASE_PATH=/annotation/projects/aiale-dev`.
-5. Verify the staging URL over HTTPS, including static JSON and SQLite range requests.
-6. At this point `main` and staging should align on version and commit.
-7. Only after acceptance, fast-forward the production deploy branch or branches.
-8. Bake each production URL with its own DB and base path.
-9. Move a production deploy branch only after that exact URL is rebuilt,
+5. Verify the dev URL over HTTPS, including static JSON and SQLite range requests.
+6. At this point `main` and dev should align on version and commit.
+7. Only after acceptance, fast-forward the public or private deploy branch or branches.
+8. Bake each public or private URL with its own DB and base path.
+9. Move a public or private deploy branch only after that exact URL is rebuilt,
    permission-fixed, and verified.
 
 ## Version Alignment
 
-During active work, `main` can be ahead of every deployed URL. After staging is
+During active work, `main` can be ahead of every deployed URL. After dev is
 rebuilt and verified, `main` and `deploy/aiale-dev` should point to the same
-commit and show the same viewer version. Public and private production branches
-remain at their prior version until each production URL is rebuilt and verified.
-After promotion, the promoted production branch should align with the accepted
-staging commit, while any unpromoted production branch remains intentionally
-different.
+viewer version. Public and private branches remain at their prior version until
+each URL is rebuilt and verified. After promotion, the promoted public or private
+branch should align with the accepted dev commit, while any unpromoted branch
+remains intentionally different.
+
 
 ## Channel Differences
 
@@ -79,7 +81,7 @@ The codebase is shared. Differences are data and deployment metadata:
 
 - Public uses the TFMN1 trimmed database. It omits `verAB_barcodes`, so the
   Barcode Charts tab is hidden by the `hasBarcodes` capability flag.
-- Private and staging use the full database. They show Barcode Charts when
+- Private and dev use the full database. They show Barcode Charts when
   `verAB_barcodes` exists and has rows.
 - Server/local mode follows the active runtime database, so capabilities can vary.
 - The dashboard now checks barcode capability through a lightweight
@@ -88,6 +90,6 @@ The codebase is shared. Differences are data and deployment metadata:
 
 ## Manuscript and Publication Notes
 
-Use the version badge, deployment branch, commit, URL, and LIMS snapshot date in
-figure provenance. Do not put manuscript drafts or private paper text in the
-repository unless explicitly requested.
+Use the version badge or Changelog for viewer version, deployment branch, commit,
+URL, and LIMS snapshot date in figure provenance. Do not put manuscript drafts or
+private paper text in the repository unless explicitly requested.

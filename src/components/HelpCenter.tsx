@@ -2,8 +2,8 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  X, Search, BookOpen, PlayCircle, Compass, ChevronRight,
-  MousePointerClick, Layers, Dna, TrendingUp, BarChart3, Download,
+  X, Search, BookOpen, Compass, ChevronRight,
+  MousePointerClick, Layers, TrendingUp, BarChart3, Download,
   Info, FlaskConical, FileText, ShieldCheck,
 } from 'lucide-react';
 
@@ -14,8 +14,7 @@ import {
    engineers) and intentionally explicit so the same text can be pasted into an
    institutional AI assistant. Every section is plain prose + concrete steps;
    the search box filters sections live so it reads like a small semantic index
-   over the docs. Two cross-links jump the user into the interactive Tutorial
-   or the Ask-your-AI prompt builder.
+   over the docs. A cross-link opens the Guide and Ask-your-AI prompt builder.
 --------------------------------------------------------------------------- */
 
 type Block =
@@ -234,11 +233,10 @@ const SECTIONS: Section[] = [
     summary: 'Small things that make the viewer faster to use.',
     blocks: [
       { kind: 'bullets', items: [
-        'Press Esc to close any popup, modal, or the tutorial.',
-        'In the interactive tutorial, use the Left/Right arrow keys to move between steps.',
+        'Press Esc to close any popup or modal.',
         'In the Copy Number and Barcode legends, use the search box to jump to a lineage or candidate instead of scrolling.',
         'Click a legend entry to isolate it; click again to release.',
-        'Collapse the left sidebar (chevron at the top) to give charts more width; the Help, Guide, and Tutorial buttons stay reachable as icons.',
+        'Collapse the left sidebar (chevron at the top) to give charts more width; the Help, Guide, and Changelog buttons stay reachable as icons.',
         'Every chart toolbar has both an Export figure menu (PNG / SVG / HTML / Print) and a CSV button.',
       ] },
     ],
@@ -321,10 +319,9 @@ function sectionMatches(s: Section, q: string): boolean {
 }
 
 export default function HelpCenter({
-  onClose, onStartTutorial, onGuide, guideUrl,
+  onClose, onGuide, guideUrl,
 }: {
   onClose: () => void;
-  onStartTutorial: () => void;
   onGuide: () => void;
   guideUrl?: string;
 }) {
@@ -359,9 +356,6 @@ export default function HelpCenter({
             <h2 className="text-[17px] font-semibold leading-none">Help & Researcher Guide</h2>
             <p className="text-[11.5px] text-[var(--text-soft)] mt-1">Practical, biologist-friendly documentation for every view, with color rules, data provenance, export, and manuscript wording.</p>
           </div>
-          <button onClick={onStartTutorial} className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[12px] font-medium bg-[var(--accent-600)] text-white hover:opacity-90">
-            <PlayCircle className="w-4 h-4" /> Interactive tutorial
-          </button>
           <button onClick={onGuide} className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[12px] font-medium border border-[var(--border)] hover:bg-[var(--surface-3)]">
             <Compass className="w-4 h-4 text-[var(--accent-600)]" /> Open Guide
           </button>
@@ -429,9 +423,6 @@ export default function HelpCenter({
               <div className="text-[var(--text-soft)]">Nothing matches your search. Clear it to see the full guide.</div>
             )}
             <div className="pt-4 border-t border-[var(--border)] flex flex-wrap gap-2">
-              <button onClick={onStartTutorial} className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[12px] font-medium bg-[var(--accent-600)] text-white hover:opacity-90">
-                <PlayCircle className="w-4 h-4" /> Launch the interactive tutorial
-              </button>
               <button onClick={onGuide} className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[12px] font-medium border border-[var(--border)] hover:bg-[var(--surface-3)]">
                 <Compass className="w-4 h-4 text-[var(--accent-600)]" /> Open the Guide (how-do-I + prompt builder)
               </button>

@@ -28,9 +28,9 @@ absent (see "Data-driven views" below).
 | `CLAUDE.md` | Operating conventions for AI-assisted work in this repo |
 
 In-app help is built into the viewer itself: the left sidebar has a **Guide**
-(answers "how do I..." and walks you to the right view), an **Interactive
-tutorial** (on-screen highlighted walkthrough), and a deep searchable **Help**
-center. The Help center mirrors `docs/RESEARCHER_GUIDE.md`.
+(answers "how do I..." and walks you to the right view), a **Changelog**
+(viewer release history plus data snapshot provenance), and a deep searchable
+**Help** center. The Help center mirrors `docs/RESEARCHER_GUIDE.md`.
 
 ## What this is (and is not)
 
@@ -122,7 +122,9 @@ it runs real SQLite in the browser via sql.js-httpvfs over HTTP range requests;
 the host must serve the `.db` with `Accept-Ranges: bytes`.
 
 Static deployments are tracked by branch and displayed in the viewer version
-badge. Versioning starts at `1.0.0`; see
+badge and Changelog. Viewer version is the semantic release in `package.json`;
+data version is the active mirror snapshot timestamp, with file mtime and static
+manifest metadata shown separately. Versioning starts at `1.0.0`; see
 [`docs/DEPLOYMENT_VERSIONING.md`](docs/DEPLOYMENT_VERSIONING.md) for the
 `deploy/aiale-dev`, `deploy/aiale-public`, and `deploy/aiale-private` workflow.
 
@@ -148,7 +150,7 @@ refreshes. Database files live under `data/` and are not committed.
 | `STATIC_EXPORT` | - | `1` switches the build to static `output: export` |
 | `BASE_PATH` | - | URL base path for a static build (e.g. `/annotation/projects/aiale`) |
 | `VIEWER_VERSION` | `package.json` version | Static build viewer version override |
-| `DEPLOYMENT_CHANNEL` | inferred from `BASE_PATH` | Static channel: `dev` (displayed as Staging), `public`, or `private` |
+| `DEPLOYMENT_CHANNEL` | inferred from `BASE_PATH` | Static channel: `dev`, `public`, or `private` |
 | `DEPLOYMENT_BRANCH` | inferred from `BASE_PATH` | Static deploy branch pointer shown in the viewer |
 | `GIT_COMMIT` | current git commit | Static build commit override |
 

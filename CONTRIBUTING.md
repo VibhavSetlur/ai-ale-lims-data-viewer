@@ -41,7 +41,7 @@ not add new ones. The build is the real gate.
   computed from it. Mark every derived value with an info affordance. Absent data
   is shown as absent (NG / NS / "not found"), never as zero or an inferred number.
 - Do not call a non-LLM feature "AI". The in-app helper is a Guide.
-- Keep the docs and the in-app Help/Tutorial in sync with the code when a
+- Keep the docs and the in-app Help and Guide in sync with the code when a
   user-visible feature changes.
 
 ## Project layout

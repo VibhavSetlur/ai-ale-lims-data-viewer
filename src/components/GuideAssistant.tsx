@@ -4,7 +4,6 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   X, Search, Compass, ArrowRight, Copy, Check, Download, ExternalLink,
   MousePointerClick, Layers, TrendingUp, BarChart3, FlaskConical, Download as DownloadIcon,
-  PlayCircle,
 } from 'lucide-react';
 
 /* ---------------------------------------------------------------------------
@@ -12,17 +11,14 @@ import {
 
    This is NOT an AI chatbot (the static deployment has no backend / LLM). It is
    a practical "how do I..." guide that actually DOES things: each answer can
-   navigate the user to the right view, highlight where to click, or launch the
-   relevant interactive tutorial flow. Think of it as a smart table of contents
+   navigate the user to the right view. Think of it as a smart table of contents
    that drives the app for you.
 
    A secondary tab builds a copy-paste prompt for the user's OWN institution
    approved assistant (clearly labelled as an external tool, not "the app's AI").
 --------------------------------------------------------------------------- */
 
-export type GuideAction =
-  | { kind: 'navigate'; view?: 'mutations' | 'tables'; tab?: 'samples' | 'compare' | 'copynumber' | 'barcodes'; tour?: string }
-  | { kind: 'tutorial'; flow: string };
+export type GuideAction = { kind: 'navigate'; view?: 'mutations' | 'tables'; tab?: 'samples' | 'compare' | 'copynumber' | 'barcodes'; tour?: string };
 
 export type GuideContext = {
   view: string;
@@ -40,7 +36,6 @@ type Answer = {
   icon: React.ReactNode;
   steps: string[];
   takeMeThere?: { label: string; action: GuideAction };
-  showMe?: string;      // a tutorial flow id to launch a guided walkthrough
   keywords?: string;
 };
 
@@ -57,7 +52,6 @@ const ANSWERS: Answer[] = [
       'Use the legend search to jump to a specific lineage or background.',
     ],
     takeMeThere: { label: 'Open Copy Number', action: { kind: 'navigate', view: 'mutations', tab: 'copynumber', tour: 'tab-copynumber' } },
-    showMe: 'copynumber',
     keywords: 'dgoa amplification copy number gene dosage convergent',
   },
   {
@@ -84,7 +78,6 @@ const ANSWERS: Answer[] = [
       'Click a mutation name for genome context; click the mutation-class pills to focus on missense, nonsense, indel, or deletion.',
     ],
     takeMeThere: { label: 'Open Comparative View', action: { kind: 'navigate', view: 'mutations', tab: 'compare', tour: 'tab-compare' } },
-    showMe: 'comparative',
     keywords: 'heatmap frequency mutation comparative grid color scale',
   },
   {
@@ -125,7 +118,6 @@ const ANSWERS: Answer[] = [
       'Add charts to Compare for a shared-axis, shared-legend side-by-side view.',
     ],
     takeMeThere: { label: 'Open Barcode Charts', action: { kind: 'navigate', view: 'mutations', tab: 'barcodes', tour: 'tab-barcodes' } },
-    showMe: 'barcodes',
     keywords: 'barcode vera verb subunit candidate composition substrate split compare',
   },
   {
@@ -281,15 +273,6 @@ export default function GuideAssistant({
                       className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[12px] font-medium bg-[var(--accent-600)] text-white hover:opacity-90"
                     >
                       {a.takeMeThere.label} <ArrowRight className="w-3.5 h-3.5" />
-                    </button>
-                  )}
-                  {a.showMe && (
-                    <button
-                      onClick={() => { onAction({ kind: 'tutorial', flow: a.showMe! }); onClose(); }}
-                      className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[12px] font-medium border border-[var(--accent-300)] text-[var(--accent-700)] hover:bg-[var(--accent-50)]"
-                      title="Walk through this with on-screen highlights"
-                    >
-                      <PlayCircle className="w-3.5 h-3.5" /> Show me
                     </button>
                   )}
                 </div>

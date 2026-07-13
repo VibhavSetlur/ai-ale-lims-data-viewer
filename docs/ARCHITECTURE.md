@@ -165,15 +165,14 @@ src/app/api/            Server-mode API route handlers (stashed during static ex
   barcode-counts/route.ts  verAB barcode charts (mock fallback when table absent)
   data/[tableName]/     Raw table browser (server mode)
 src/components/
-  Dashboard.tsx         App shell: workspace switcher, left sidebar, and the in-app
-                        Help / Guide / Interactive-tutorial system + navigation events
+  Dashboard.tsx         App shell: workspace switcher, left sidebar, Changelog,
+                        Help / Guide system + navigation events
   MutationExplorer.tsx  Sample Selection, Comparative view, Copy Number, growth curves,
                         the mutation + sample detail popups, and the data-driven tab gating
   BarcodeCharts.tsx     VerA/VerB barcode grid / focus / compare views
   DataTable.tsx         Raw Database-Tables browser (server API or sql.js-httpvfs)
   HelpCenter.tsx        Deep searchable in-app documentation
   GuideAssistant.tsx    "How do I..." helper that navigates the user + external-prompt builder
-  Tutorial.tsx          Interactive on-screen highlighted walkthrough
   ExportFigureMenu.tsx  Shared PNG / SVG / HTML / Print export control
 src/lib/
   db.ts                 SQLite/MySQL access + query building (server mode)

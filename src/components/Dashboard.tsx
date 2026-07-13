@@ -9,12 +9,11 @@ import {
   Database, Search, Sun, Moon, Table2, Dna,
   Server, HardDrive, RefreshCw, AlertCircle,
   ChevronLeft, ChevronRight, X, Clock, GitBranch,
-  BookOpen, Compass, PlayCircle, PanelRightOpen,
+  BookOpen, Compass, ScrollText,
 } from 'lucide-react';
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
 import HelpCenter from './HelpCenter';
-import Tutorial, { type TourStep } from './Tutorial';
 import GuideAssistant, { type GuideAction } from './GuideAssistant';
 
 function cn(...inputs: ClassValue[]) {
@@ -64,7 +63,7 @@ interface MirrorInfo {
 interface ManifestInfo {
   generatedAt?: string;
   source?: string;
-  artifacts?: Record<string, unknown>;
+  files?: Record<string, { file?: string; gz?: string; bytes?: number; gzBytes?: number; hash?: string }>;
 }
 
 function formatSnapshot(iso?: string): string {
@@ -124,11 +123,10 @@ export default function Dashboard({ initialTables, buildInfo }: DashboardProps) 
   const manifestUrl = useMemo(() => `${BASE_PATH}/data/manifest.json`, []);
 
   // Help system: Guide (how-do-I + prompt builder), full Help center, and the
-  // interactive click-through Tutorial. All live at the Dashboard level so they
-  // can navigate across both workspaces.
+  // Changelog. All live at the Dashboard level so they can navigate across both
+  // workspaces and report provenance consistently.
   const [showHelp, setShowHelp] = useState(false);
   const [showGuide, setShowGuide] = useState(false);
-  const [tourFlow, setTourFlow] = useState<TourStep[] | null>(null);
   const [hasBarcodes, setHasBarcodes] = useState(false);
 
   // Detect whether the active snapshot exposes the Barcode tab, so the Guide can
@@ -146,198 +144,11 @@ export default function Dashboard({ initialTables, buildInfo }: DashboardProps) 
   // a tab change that MutationExplorer listens for. A small delay lets the view
   // mount before the tab event arrives.
   const navigate = (a: GuideAction) => {
-    if (a.kind === 'navigate') {
-      if (a.view) setActiveView(a.view);
-      if (a.tab) {
-        setTimeout(() => window.dispatchEvent(new CustomEvent('aiale:navigate', { detail: { tab: a.tab } })), 80);
-      }
-    } else if (a.kind === 'tutorial') {
-      startTour(a.flow);
+    if (a.view) setActiveView(a.view);
+    if (a.tab) {
+      setTimeout(() => window.dispatchEvent(new CustomEvent('aiale:navigate', { detail: { tab: a.tab } })), 80);
     }
   };
-
-  // Interactive tour flows. Each step spotlights a live element by its data-tour
-  // attribute (the highlighted area stays clickable so the user can try it), can
-  // run a setup before it shows, and carries structured what-it-is / what-to-look
-  // -for / try-it content so a first-time user gets a complete understanding.
-  function startTour(flow: string) {
-    setShowHelp(false);
-    setShowGuide(false);
-    const go = (view: ActiveView, tab?: string) => {
-      setActiveView(view);
-      if (tab) setTimeout(() => window.dispatchEvent(new CustomEvent('aiale:navigate', { detail: { tab } })), 60);
-    };
-
-    // ---- the complete A-to-Z walkthrough (meeting-ready) ----
-    const fullTour: TourStep[] = [
-      {
-        title: 'Welcome to the AI-ALE LIMS viewer',
-        body: 'This is a read-only window onto the adaptive-laboratory-evolution data for Acinetobacter baylyi ADP1 (strain ACN2586) evolving on pyruvate. In the next few minutes you will see exactly where everything is and how to use it. The highlighted area in each step is live, so you can click and try things as we go.',
-        look: 'A left sidebar (navigation + help), a top bar (database status), and a main panel that changes with what you pick.',
-      },
-      {
-        target: 'nav-mutations',
-        title: 'Two workspaces live in the left sidebar',
-        body: 'Database Tables shows the raw LIMS tables. Mutation Explorer is the curated science: samples, mutations, copy number, growth, and barcodes. We will spend the tour in Mutation Explorer.',
-        tryIt: 'Click "Mutation Explorer" to open it (we just opened it for you).',
-        before: () => setActiveView('mutations'),
-      },
-      {
-        target: 'experiment-controls',
-        title: 'Scope the data: Experiment and Registry',
-        body: 'Experiment narrows everything to one genotype background (e.g. fba, tpiA, or a pairwise combination) for faster, focused analysis. Registry picks which breseq variant-calling run you are viewing when more than one exists.',
-        look: 'A dropdown of experiments with sample counts. "all" loads every experiment together.',
-        tryIt: 'Open the Experiment dropdown to see the available backgrounds.',
-        before: () => go('mutations', 'samples'),
-      },
-      {
-        target: 'stats-strip',
-        title: 'The dataset at a glance',
-        body: 'This thin strip always shows what the current dataset contains: how many samples, mutations, OD growth curves, and copy-number regions. It is the fastest way to confirm the data loaded and what is available.',
-        look: 'Counts for samples, mutations, OD curves, and CN regions. If a count is 0, that view will be empty for this selection.',
-        before: () => go('mutations', 'samples'),
-      },
-      {
-        target: 'tab-samples',
-        title: 'Step 1 — Sample Selection',
-        body: 'This is where every analysis starts. You filter the lineages you care about and tick them; everything downstream (Comparative, Copy Number, Barcode) then acts on exactly that selection.',
-        look: 'A filterable table of samples. Each row has metadata chips and a small OD600 growth sparkline on the right.',
-        tryIt: 'Tick a few sample checkboxes, then watch the count badge on the Comparative View tab go up.',
-        before: () => go('mutations', 'samples'),
-      },
-      {
-        target: 'tab-samples',
-        title: 'Filters cross-narrow each other',
-        body: 'The experiment / strain / condition / donor DNA / replicate / transfer filters are faceted: picking one factor hides the now-impossible options in the others, so you cannot build an empty combination by accident.',
-        look: 'As you pick a value in one filter, the choices in the other filters shrink to what is still possible.',
-        tryIt: 'Pick a strain or condition and notice the other filters update.',
-        before: () => go('mutations', 'samples'),
-      },
-      {
-        target: 'tab-samples',
-        title: 'Growth curves start here',
-        body: 'Every sample row has an OD600 sparkline. Click it to open the full growth-curve popup with a log/linear toggle, a peer-overlay sidebar, and descriptive metrics (max OD, growth rate mu, doubling time, lag, AUC). Those metrics are honest point-to-point estimates, never model fits, and the popup says so if a numeric series is missing.',
-        tryIt: 'Click a sparkline in a sample row to open the growth popup, then click "How is each value computed?" inside it.',
-        before: () => go('mutations', 'samples'),
-      },
-      {
-        target: 'tab-compare',
-        title: 'Step 2 — Comparative View (the heatmap)',
-        body: 'Your selected samples become columns; mutations and copy-number regions become rows; each cell is colored by its value. This is the figure most people put in a paper.',
-        look: 'A grid of colored cells. Click it to open the view if it has not opened yet.',
-        before: () => go('mutations', 'compare'),
-      },
-      {
-        target: 'compare-controls',
-        title: 'Comparative controls + the color rule',
-        body: 'Filter mutations by text, restrict to frequency-only or copy-number-only, and focus on a mutation class (missense, nonsense, indel, deletion). The key rule: frequency cells use a FIXED 0%-100% color scale, while copy-number rows use a row-local min/max scale. That difference is intentional.',
-        look: 'A filter box, a metric dropdown, mutation-class pills, and Export figure + CSV buttons.',
-        tryIt: 'Switch the metric dropdown to "copy number" to isolate the CN rows.',
-        before: () => go('mutations', 'compare'),
-      },
-      {
-        target: 'tab-compare',
-        title: 'Provided vs spontaneous mutations',
-        body: 'A mutation supplied as donor DNA is drawn with an amber outline over its frequency color. An amber outline with no fill and a 0% marker means it was provided but never observed (e.g. pgi/sohB that did not integrate). No outline means it arose spontaneously, like the secondary fba alleles. Click a mutation name for a genome-context popup.',
-        look: 'Amber outlines on donor-DNA mutation cells; plain cells are spontaneous.',
-        before: () => go('mutations', 'compare'),
-      },
-      {
-        target: 'tab-copynumber',
-        title: 'Step 3 — Copy Number (the headline result)',
-        body: 'dgoA* copy-number amplification is the convergent, genotype-independent signal that correlates with improved growth in this study. This tab plots it per lineage across transfers.',
-        look: 'One line per lineage; Y is copy number, X is transfer. A dashed CN = 1x line marks the pre-evolution baseline.',
-        tryIt: 'Click the Copy Number tab to open it; look for lines climbing above 1x toward 2-3x.',
-        before: () => go('mutations', 'copynumber'),
-      },
-      {
-        target: 'tab-copynumber',
-        title: 'Tame many lines: isolate and search',
-        body: 'With dozens of lineages the chart can look busy. Click a legend entry to isolate one trajectory (the rest are removed, not just dimmed). Use the legend search to jump to a background, toggle Log/Linear Y, and hover for a tooltip that snaps to the nearest point.',
-        tryIt: 'Click one lineage in the legend to isolate its trajectory, then click it again to bring the others back.',
-        before: () => go('mutations', 'copynumber'),
-      },
-      ...(hasBarcodes ? [
-        {
-          target: 'tab-barcodes',
-          title: 'Step 4 — Barcode Charts (VerA / VerB)',
-          body: 'These charts show how the population is composed of VerA/VerB barcode combinations across transfers. A label A#-B# is one VerA subunit paired with one VerB subunit. VerB is required for VerA activity and the pairing governs substrate specificity, so following which combinations rise and fall is following the evolution of substrate specificity.',
-          look: 'Stacked bars per transfer; the same A-B combination always has the same color so you can track it by eye.',
-          tryIt: 'Click the Barcode Charts tab to open it.',
-          before: () => go('mutations', 'barcodes'),
-        } as TourStep,
-        {
-          target: 'barcode-toolbar',
-          title: 'Barcode controls: color, split, chart type',
-          body: 'Color by A-B, VerA, or VerB to ask different questions. Split A|B shows the same reads three ways (full combo, VerA-grouped, VerB-grouped). The info (i) button explains the biology on the spot. In Focus you can switch chart type: Rows (most readable), Bars, Lines (trajectory over time), or Heatmap.',
-          look: 'A row of toggles: color mode, Split A|B, an info button, and (in Focus) the chart-type selector.',
-          tryIt: 'Click the info (i) button to read the VerA/VerB explanation, then try the VerA color mode.',
-          before: () => go('mutations', 'barcodes'),
-        } as TourStep,
-        {
-          target: 'barcode-sidebar',
-          title: 'The Candidates sidebar drives everything',
-          body: 'Hover a candidate to highlight it across all charts; click to select it (the chart set filters to charts that contain it and emphasizes it everywhere). Group by VerA or VerB and click a group header to act on a whole subunit at once. The always-visible info pills open a cross-chart detail popup.',
-          look: 'A searchable, groupable list of candidates with read counts and info pills.',
-          tryIt: 'Click a candidate to filter the charts to just the ones containing it.',
-          before: () => go('mutations', 'barcodes'),
-        } as TourStep,
-        {
-          target: 'tab-barcodes',
-          title: 'Compare conditions honestly',
-          body: 'Add charts to Compare for a side-by-side view with a shared Y-axis (so equal bar heights mean equal reads), a Reads/Fraction toggle, and a panel Sort (by dominant combination, final richness, or reads) so the layout reads like a result. Each panel shows a Final line with its dominant A-B combination and percentage. The shared legend syncs selection and hover across every panel, grouped by subunit when you color by VerA/VerB.',
-          look: 'A common-Y badge, Reads/Fraction + Sort controls, a per-panel "Final:" outcome line, and a shared legend above the panels.',
-          before: () => go('mutations', 'barcodes'),
-        } as TourStep,
-      ] : []),
-      {
-        title: 'Exporting figures and data',
-        body: 'Every visualization has an Export figure button (top of its toolbar). Each export is a real publication-quality figure rendered on a white background with a title and snapshot caption baked in (not a screenshot): PNG (high-res, for slides/email), SVG (editable vector for manuscripts, recommended), HTML, or Print/Save PDF. Use the separate CSV button whenever you will make a quantitative claim. Whatever is on screen is what exports, so set your filters first.',
-        look: 'An "Export figure" button and a "CSV" button on each chart toolbar.',
-        tryIt: 'Open an Export figure menu and pick SVG to download a clean vector of the current chart.',
-      },
-      {
-        target: 'help-guide',
-        title: 'You are set — and help is always here',
-        body: 'The Guide answers "how do I..." and walks you straight to the right view (and can build a prompt for your own AI assistant). The Interactive tutorial re-runs this walkthrough. Help opens the full searchable documentation, including a glossary and troubleshooting. Click Finish and explore freely.',
-        look: 'The Help & Learning section at the bottom of the left sidebar: Guide, Interactive tutorial, Help & guide.',
-        before: () => setActiveView('mutations'),
-      },
-    ];
-
-    // ---- focused per-view flows (also launchable from the Guide's "Show me") ----
-    const flows: Record<string, TourStep[]> = {
-      full: fullTour,
-      samples: [
-        { target: 'tab-samples', title: 'Sample Selection', body: 'Where you pick which lineages flow into every other view. Open it to begin.', before: () => go('mutations', 'samples') },
-        { target: 'experiment-controls', title: 'Scope first', body: 'Use Experiment to focus on one genotype background before filtering, which keeps the table small and fast.', tryIt: 'Open the Experiment dropdown.', before: () => go('mutations', 'samples') },
-        { target: 'tab-samples', title: 'Filter, then select', body: 'The filters cross-narrow so impossible combinations disappear. Tick the rows you want.', tryIt: 'Pick a condition, then tick a couple of samples.', before: () => go('mutations', 'samples') },
-        { target: 'tab-compare', title: 'Carry the selection forward', body: 'Every other tab acts on exactly your selection; the badge shows the count.', before: () => go('mutations', 'samples') },
-      ],
-      comparative: [
-        { target: 'tab-compare', title: 'Comparative View', body: 'A heatmap of mutation frequency + copy-number rows across your selected samples.', before: () => go('mutations', 'compare') },
-        { target: 'compare-controls', title: 'Controls + the color rule', body: 'Frequency cells use a fixed 0-100% scale; copy-number rows use a row-local scale. Filter by class or metric here.', tryIt: 'Switch the metric dropdown to "copy number".', before: () => go('mutations', 'compare') },
-        { target: 'tab-compare', title: 'Provided vs spontaneous', body: 'Amber outline = donor DNA; outline + 0% = provided but unobserved; no outline = spontaneous. Click a mutation name for genome context.', before: () => go('mutations', 'compare') },
-        { target: 'compare-controls', title: 'Export', body: 'Export figure (PNG/SVG/HTML/Print) for the heatmap; CSV for the values.', before: () => go('mutations', 'compare') },
-      ],
-      copynumber: [
-        { target: 'tab-copynumber', title: 'Copy Number = the main result', body: 'dgoA* amplification is the convergent adaptive signal. Each line is a lineage over transfers.', before: () => go('mutations', 'copynumber') },
-        { target: 'tab-copynumber', title: 'Read the trajectories', body: 'Look for lines rising above the CN = 1x baseline toward 2-3x (outliers go higher). Hover for a snapping tooltip.', before: () => go('mutations', 'copynumber') },
-        { target: 'tab-copynumber', title: 'Isolate one lineage', body: 'Click a legend entry to isolate a single trajectory; search the legend to jump to a background; toggle Log/Linear Y.', tryIt: 'Click a lineage in the legend to isolate it.', before: () => go('mutations', 'copynumber') },
-      ],
-      growth: [
-        { target: 'tab-samples', title: 'Find a growth curve', body: 'Every sample row (and Comparative column) has an OD600 sparkline. Click one to open the full growth popup.', tryIt: 'Click a sparkline in a sample row.', before: () => go('mutations', 'samples') },
-        { target: 'tab-samples', title: 'Honest, derived metrics', body: 'Max OD/K, mu, doubling, lag, AUC are descriptive point-to-point estimates (click "How is each value computed?"), never model fits. Missing series are reported as not found.', before: () => go('mutations', 'samples') },
-      ],
-      barcodes: hasBarcodes ? [
-        { target: 'tab-barcodes', title: 'Barcode Charts (VerA/VerB)', body: 'Each A#-B# is one VerA + one VerB subunit, stable color. VerB modulates VerA so the pairing governs substrate specificity.', before: () => go('mutations', 'barcodes') },
-        { target: 'barcode-toolbar', title: 'Color, split, chart type', body: 'Color by A-B/VerA/VerB; Split A|B shows the same reads three ways; the info button explains the biology; Focus has Rows/Bars/Lines/Heatmap.', tryIt: 'Click the info (i) button.', before: () => go('mutations', 'barcodes') },
-        { target: 'barcode-sidebar', title: 'Select to filter', body: 'Click a candidate (or a VerA/VerB group header) to filter charts to those containing it and emphasize it everywhere.', tryIt: 'Click a candidate row.', before: () => go('mutations', 'barcodes') },
-        { target: 'tab-barcodes', title: 'Compare honestly', body: 'Add charts to Compare for a shared-Y, shared-legend side-by-side that syncs selection across panels.', before: () => go('mutations', 'barcodes') },
-      ] : fullTour,
-    };
-    setTourFlow(flows[flow] || fullTour);
-  }
 
   // Restore persisted UI state
   useEffect(() => {
@@ -535,6 +346,8 @@ export default function Dashboard({ initialTables, buildInfo }: DashboardProps) 
   }, [tables, searchQuery]);
 
   const totalRows = useMemo(() => tables.reduce((acc, t) => acc + (t.rowCount || 0), 0), [tables]);
+  const manifestFiles = manifestInfo?.files ?? {};
+  const dataVersion = mirrorInfo?.snapshot_at || mirrorInfo?.mtime;
 
   return (
     <div className="flex flex-col h-full w-full">
@@ -589,77 +402,6 @@ export default function Dashboard({ initialTables, buildInfo }: DashboardProps) 
                   </div>
                 )}
               </div>
-              <div className="relative" ref={changesRef}>
-                <button
-                  onClick={() => setShowChangesPanel(s => !s)}
-                  className="flex items-center gap-1.5 px-2 py-1 rounded-md border border-[var(--border)] bg-[var(--surface-2)] hover:bg-[var(--surface-3)] transition-colors"
-                  title="Release and data log"
-                >
-                  <PanelRightOpen className="w-3.5 h-3.5 text-[var(--text-faint)]" />
-                  <span className="text-[11px] font-semibold text-[var(--text)]">Changes</span>
-                </button>
-                {showChangesPanel && (
-                  <div className="absolute right-0 top-full mt-1 w-[26rem] max-w-[calc(100vw-1.5rem)] bg-[var(--surface)] rounded-lg border border-[var(--border)] z-50 p-3 text-[11.5px] text-[var(--text)]" style={{ boxShadow: 'var(--shadow-md)' }}>
-                    <div className="flex items-start justify-between gap-3 mb-3">
-                      <div>
-                        <h3 className="text-xs font-semibold text-[var(--text)]">Release and data log</h3>
-                        <p className="text-[10.5px] text-[var(--text-soft)] mt-0.5">Viewer changes and baked data snapshot for this build.</p>
-                      </div>
-                      <span className="lims-id text-[11px] tabular-nums">v{buildInfo.version}</span>
-                    </div>
-                    <div className="space-y-3 max-h-[32rem] overflow-y-auto pr-1">
-                      <section>
-                        <div className="lims-label mb-1">Current deployment</div>
-                        <div className="grid grid-cols-[5.5rem_1fr] gap-x-2 gap-y-1 lims-id">
-                          <span className="text-[var(--text-soft)]">Channel</span><span>{channelInfo.label} <span className="text-[var(--text-faint)]">({buildInfo.channel})</span></span>
-                          <span className="text-[var(--text-soft)]">Branch</span><span>{buildInfo.branch}</span>
-                          <span className="text-[var(--text-soft)]">Commit</span><span>{buildInfo.commit.slice(0, 12)}</span>
-                          <span className="text-[var(--text-soft)]">Mode</span><span>{buildInfo.mode}</span>
-                          {buildInfo.basePath && <><span className="text-[var(--text-soft)]">Base path</span><span>{buildInfo.basePath}</span></>}
-                          <span className="text-[var(--text-soft)]">Expected DB</span><span>{channelInfo.database}</span>
-                          <span className="text-[var(--text-soft)]">Barcodes</span><span>{channelInfo.barcodePolicy}</span>
-                        </div>
-                      </section>
-                      <section>
-                        <div className="lims-label mb-1">Viewer changes</div>
-                        <div className="space-y-2">
-                          {releaseNotes.map((note: { version: string; date: string; summary: string }) => (
-                            <div key={`${note.version}-${note.date}`} className="rounded-md border border-[var(--border)] bg-[var(--surface-2)] px-2.5 py-2">
-                              <div className="flex items-center justify-between gap-2 mb-1">
-                                <div className="font-semibold text-[var(--text)]">v{note.version}</div>
-                                <div className="text-[10.5px] text-[var(--text-faint)] tabular-nums">{note.date}</div>
-                              </div>
-                              <p className="text-[11px] leading-snug text-[var(--text-soft)]">{note.summary}</p>
-                            </div>
-                          ))}
-                        </div>
-                      </section>
-                      <section>
-                        <div className="lims-label mb-1">Data snapshot</div>
-                        {IS_STATIC ? (
-                          <div className="space-y-2">
-                            {manifestError && <div className="rounded-md border border-amber-200 bg-amber-50 px-2.5 py-2 text-[11px] text-amber-800">Data manifest unavailable</div>}
-                            {manifestInfo ? (
-                              <div className="grid grid-cols-[5.5rem_1fr] gap-x-2 gap-y-1 lims-id">
-                                <span className="text-[var(--text-soft)]">Generated</span><span>{manifestInfo.generatedAt || '—'}</span>
-                                <span className="text-[var(--text-soft)]">Source</span><span className="break-all">{manifestInfo.source || '—'}</span>
-                                <span className="text-[var(--text-soft)]">Artifacts</span><span>{manifestInfo.artifacts ? Object.keys(manifestInfo.artifacts).length : 0}</span>
-                                <span className="text-[var(--text-soft)]">mutations__all</span><span>{typeof manifestInfo.artifacts?.mutations__all === 'string' ? String(manifestInfo.artifacts.mutations__all) : '—'}</span>
-                                <span className="text-[var(--text-soft)]">barcode-counts</span><span>{typeof manifestInfo.artifacts?.['barcode-counts'] === 'string' ? String(manifestInfo.artifacts['barcode-counts']) : '—'}</span>
-                              </div>
-                            ) : !manifestError ? (
-                              <div className="text-[11px] text-[var(--text-soft)]">Loading static manifest…</div>
-                            ) : null}
-                          </div>
-                        ) : (
-                          <div className="text-[11px] text-[var(--text-soft)]">Live runtime data is served from the API and active database, so a baked static manifest does not apply here.</div>
-                        )}
-                      </section>
-                    </div>
-                  </div>
-                )}
-              </div>
-
         </div>
 
         <div className="flex items-center gap-2">
@@ -869,13 +611,13 @@ export default function Dashboard({ initialTables, buildInfo }: DashboardProps) 
                   <Compass className="w-4 h-4 shrink-0 text-[var(--accent-600)]" />
                   <span className="flex-1 text-left">Guide</span>
                 </button>
-                <button onClick={() => startTour('full')} className="lims-nav mb-0.5" title="Interactive click-through tour of every view">
-                  <PlayCircle className="w-4 h-4 shrink-0 text-[var(--accent-600)]" />
-                  <span className="flex-1 text-left">Interactive tutorial</span>
+                <button onClick={() => setShowChangesPanel(true)} className="lims-nav mb-0.5" title="Viewer changelog and data snapshot details">
+                  <ScrollText className="w-4 h-4 shrink-0 text-[var(--accent-600)]" />
+                  <span className="flex-1 text-left">Changelog</span>
                 </button>
                 <button onClick={() => setShowHelp(true)} className="lims-nav" title="Full searchable documentation">
                   <BookOpen className="w-4 h-4 shrink-0 text-[var(--accent-600)]" />
-                  <span className="flex-1 text-left">Help &amp; guide</span>
+                  <span className="flex-1 text-left">Help</span>
                 </button>
               </div>
             </>
@@ -896,7 +638,7 @@ export default function Dashboard({ initialTables, buildInfo }: DashboardProps) 
               </button>
               <div className="mt-auto flex flex-col items-center gap-1 pb-2">
                 <button onClick={() => setShowGuide(true)} className="p-1.5 rounded-md text-[var(--text-faint)] hover:bg-[var(--surface-3)]" title="Guide"><Compass className="w-4 h-4" /></button>
-                <button onClick={() => startTour('full')} className="p-1.5 rounded-md text-[var(--text-faint)] hover:bg-[var(--surface-3)]" title="Interactive tutorial"><PlayCircle className="w-4 h-4" /></button>
+                <button onClick={() => setShowChangesPanel(true)} className="p-1.5 rounded-md text-[var(--text-faint)] hover:bg-[var(--surface-3)]" title="Changelog"><ScrollText className="w-4 h-4" /></button>
                 <button onClick={() => setShowHelp(true)} className="p-1.5 rounded-md text-[var(--text-faint)] hover:bg-[var(--surface-3)]" title="Help"><BookOpen className="w-4 h-4" /></button>
               </div>
             </div>
@@ -923,10 +665,88 @@ export default function Dashboard({ initialTables, buildInfo }: DashboardProps) 
         </div>
       </div>
 
+      {showChangesPanel && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-black/45 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="Changelog">
+          <div ref={changesRef} className="w-full max-w-5xl max-h-[90vh] bg-[var(--surface)] rounded-xl border border-[var(--border)] text-[12px] text-[var(--text)] flex flex-col overflow-hidden" style={{ boxShadow: 'var(--shadow-md)' }}>
+            <div className="px-4 sm:px-5 py-3 border-b border-[var(--border)] flex items-start justify-between gap-3 shrink-0">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <ScrollText className="w-4 h-4 text-[var(--accent-600)] shrink-0" />
+                  <h2 className="text-[16px] font-semibold text-[var(--text)]">Changelog</h2>
+                </div>
+                <p className="text-[11px] text-[var(--text-soft)] mt-1">Viewer releases and data snapshot provenance are tracked separately.</p>
+              </div>
+              <button onClick={() => setShowChangesPanel(false)} className="p-1 rounded hover:bg-[var(--surface-3)]" title="Close"><X className="w-5 h-5" /></button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-5">
+              <section className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-2)] p-3">
+                  <div className="lims-label mb-1">Viewer version</div>
+                  <div className="text-2xl font-semibold tabular-nums text-[var(--text)]">v{buildInfo.version}</div>
+                  <div className="mt-2 grid grid-cols-[5.5rem_1fr] gap-x-2 gap-y-1 lims-id text-[11.5px]">
+                    <span className="text-[var(--text-soft)]">Channel</span><span>{channelInfo.label} <span className="text-[var(--text-faint)]">({buildInfo.channel})</span></span>
+                    <span className="text-[var(--text-soft)]">Branch</span><span>{buildInfo.branch}</span>
+                    <span className="text-[var(--text-soft)]">Commit</span><span>{buildInfo.commit.slice(0, 12)}</span>
+                    <span className="text-[var(--text-soft)]">Mode</span><span>{buildInfo.mode}</span>
+                    {buildInfo.basePath && <><span className="text-[var(--text-soft)]">Base path</span><span className="break-all">{buildInfo.basePath}</span></>}
+                  </div>
+                </div>
+                <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-2)] p-3">
+                  <div className="lims-label mb-1">Data version</div>
+                  <div className="text-2xl font-semibold tabular-nums text-[var(--text)]">{dataVersion ? formatSnapshot(dataVersion) : 'not loaded'}</div>
+                  <div className="mt-2 grid grid-cols-[5.5rem_1fr] gap-x-2 gap-y-1 lims-id text-[11.5px]">
+                    <span className="text-[var(--text-soft)]">Expected DB</span><span>{channelInfo.database}</span>
+                    <span className="text-[var(--text-soft)]">Snapshot</span><span>{mirrorInfo?.snapshot_at ? formatSnapshot(mirrorInfo.snapshot_at) : 'not available'}</span>
+                    <span className="text-[var(--text-soft)]">File mtime</span><span>{mirrorInfo?.mtime ? formatSnapshot(mirrorInfo.mtime) : 'not available'}</span>
+                    <span className="text-[var(--text-soft)]">Barcodes</span><span>{channelInfo.barcodePolicy}</span>
+                  </div>
+                </div>
+              </section>
+
+              <section>
+                <div className="lims-label mb-2">Static data manifest</div>
+                {IS_STATIC ? (
+                  <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-2)] p-3">
+                    {manifestError && <div className="rounded-md border border-amber-200 bg-amber-50 px-2.5 py-2 text-[11px] text-amber-800">Data manifest unavailable</div>}
+                    {manifestInfo ? (
+                      <div className="grid grid-cols-[7rem_1fr] gap-x-2 gap-y-1 lims-id text-[11.5px]">
+                        <span className="text-[var(--text-soft)]">Generated</span><span>{manifestInfo.generatedAt || 'not recorded'}</span>
+                        <span className="text-[var(--text-soft)]">Source</span><span className="break-all">{manifestInfo.source || 'not recorded'}</span>
+                        <span className="text-[var(--text-soft)]">Files</span><span>{Object.keys(manifestFiles).length}</span>
+                        <span className="text-[var(--text-soft)]">mutations__all</span><span className="break-all">{manifestFiles.mutations__all?.gz || manifestFiles.mutations__all?.file || 'not present'}</span>
+                        <span className="text-[var(--text-soft)]">barcode-counts</span><span className="break-all">{manifestFiles['barcode-counts']?.gz || manifestFiles['barcode-counts']?.file || 'not present'}</span>
+                      </div>
+                    ) : !manifestError ? (
+                      <div className="text-[11px] text-[var(--text-soft)]">Loading static manifest...</div>
+                    ) : null}
+                  </div>
+                ) : (
+                  <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-2)] p-3 text-[11.5px] text-[var(--text-soft)]">Server mode serves live runtime data from the API and active database. A baked static manifest does not apply.</div>
+                )}
+              </section>
+
+              <section>
+                <div className="lims-label mb-2">Viewer release notes</div>
+                <div className="space-y-2">
+                  {releaseNotes.map((note: { version: string; date: string; summary: string }) => (
+                    <div key={`${note.version}-${note.date}`} className="rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2.5">
+                      <div className="flex items-center justify-between gap-2 mb-1">
+                        <div className="font-semibold text-[var(--text)]">v{note.version}</div>
+                        <div className="text-[11px] text-[var(--text-faint)] tabular-nums">{note.date}</div>
+                      </div>
+                      <p className="text-[12px] leading-relaxed text-[var(--text-soft)]">{note.summary}</p>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showHelp && (
         <HelpCenter
           onClose={() => setShowHelp(false)}
-          onStartTutorial={() => { setShowHelp(false); startTour('full'); }}
           onGuide={() => { setShowHelp(false); setShowGuide(true); }}
           guideUrl={`${BASE_PATH}/help/researcher-guide.md`}
         />
@@ -937,9 +757,6 @@ export default function Dashboard({ initialTables, buildInfo }: DashboardProps) 
           onClose={() => setShowGuide(false)}
           onAction={navigate}
         />
-      )}
-      {tourFlow && tourFlow.length > 0 && (
-        <Tutorial steps={tourFlow} onClose={() => setTourFlow(null)} title="AI-ALE viewer tour" />
       )}
     </div>
   );

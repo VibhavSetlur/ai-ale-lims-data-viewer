@@ -6,6 +6,11 @@ export interface ReleaseNote {
 
 export const releaseNotes: readonly ReleaseNote[] = [
   {
+    version: '1.5.1',
+    date: '2026-07-13',
+    summary: 'Bug-fix release. Moved the release and data log out of the top header into the left sidebar as a Changelog button so it is easier to reach, and made the changelog open as a large readable panel on both desktop and mobile. Removed the interactive tutorial because it was hard to keep current alongside the UI; the Guide and Help buttons remain. The Changelog now tracks the viewer version and the data snapshot version separately, showing the viewer semantic version from the build, the baked data snapshot timestamp from the mirror, and the static manifest generated time, source, and file count when running a static build. Fixed the static manifest display to read the manifest files list instead of a non-existent manifest field. Database sync readiness is unchanged.',
+  },
+  {
     version: '1.5.0',
     date: '2026-07-13',
     summary: 'Improved the VerA / VerB partner pairing table for presentations. AI-generated partners are now marked with an AI pill on the matching verA row and verB column headers, and any cell that includes an AI partner shows a small ringed corner marker so it reads clearly in a screenshot, with a short legend built into the table. Added a size control to enlarge the swatches and text for slides, and added a figure export menu on the table itself so it can be saved as a PNG or SVG image or printed directly.',

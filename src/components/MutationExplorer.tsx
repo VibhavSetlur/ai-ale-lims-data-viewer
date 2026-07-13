@@ -478,7 +478,7 @@ export default function MutationExplorer() {
   const [forceMetric, setForceMetric] = useState<{ metric: 'copy_number'; nonce: number } | null>(null);
   const [showNotes, setShowNotes] = useState(false);
 
-  // Cross-component navigation: the Guide/Tutorial dispatch `aiale:navigate`
+  // Cross-component navigation: the Guide dispatches `aiale:navigate`
   // CustomEvents to jump straight to a tab (and optionally a sub-mode). This
   // keeps the help system decoupled from this component's internal tab state.
   useEffect(() => {
