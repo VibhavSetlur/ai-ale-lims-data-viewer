@@ -59,6 +59,8 @@ interface BarcodeChart {
   sampleName?: string;
   sampleNameSource?: 'Seq_samples.Sample_Name' | 'verAB_barcodes.Seqsample' | 'mock';
   seqsamples?: string[];
+  seqorder?: string;
+  seqorders?: string[];
   transformationLibrary?: string;
   barcodeSourceTable?: 'verAB_barcodes' | 'mock';
   strain: string;
@@ -77,6 +79,7 @@ type OtherRollupRequest = {
 };
 
 interface BarcodeDataset {
+  seqorders?: string[];
   source: 'mock' | 'lims';
   reason?: string;
   charts: BarcodeChart[];
@@ -171,7 +174,8 @@ function colorForCandidate(label: string): string {
 }
 
 function chartKey(c: BarcodeChart): string {
-  return `${c.experiment}/${c.library}/${c.sampleName || c.strain}/${c.well || 'no-well'}/r${c.replicate}`;
+  const seq = c.seqorder ?? (c.seqorders?.length ? c.seqorders.join(',') : 'no-seqorder');
+  return `${c.experiment}/${c.library}/${c.sampleName || c.strain}/${c.well || 'no-well'}/${seq}/r${c.replicate}`;
 }
 
 function chartIdentityLabel(c: BarcodeChart): string {
@@ -179,11 +183,14 @@ function chartIdentityLabel(c: BarcodeChart): string {
 }
 
 function chartIdentitySubtitle(c: BarcodeChart): string {
-  return [c.experiment, c.library, c.well ? `well ${c.well}` : null, `rep ${c.replicate}`].filter(Boolean).join(' · ');
+  const seq = c.seqorder ? `seqorder ${c.seqorder}` : c.seqorders?.length ? `seqorders ${c.seqorders.join(', ')}` : null;
+  return [c.experiment, c.library, c.well ? `well ${c.well}` : null, `rep ${c.replicate}`, seq].filter(Boolean).join(' · ');
 }
 
 function chartIdentityTitle(c: BarcodeChart): string {
+  const seqLine = c.seqorder ? `Seqorder: ${c.seqorder}` : c.seqorders?.length ? `Seqorders: ${c.seqorders.join(', ')}` : null;
   const lines = [
+    seqLine,
     c.sampleName ? `Sample_Name: ${c.sampleName}` : null,
     c.seqsamples?.length ? `Seqsample${c.seqsamples.length === 1 ? '' : 's'}: ${c.seqsamples.join(', ')}` : null,
     c.barcodeSourceTable ? `Counts: ${c.barcodeSourceTable}` : null,
@@ -914,7 +921,7 @@ function downloadBlob(name: string, content: string, mime = 'text/csv') {
 }
 
 function toCsv(charts: BarcodeChart[]): string {
-  const header = ['experiment','well','sample_name','seqsamples','barcode_source_table','strain','library','transformation_library','replicate','transfer','candidate','varA','varB','count'];
+  const header = ['experiment','well','sample_name','seqsamples','seqorder','seqorders','barcode_source_table','strain','library','transformation_library','replicate','transfer','candidate','varA','varB','count'];
   const lines = [header.join(',')];
   for (const c of charts) {
     for (const [cand, counts] of Object.entries(c.candidates)) {
@@ -922,7 +929,7 @@ function toCsv(charts: BarcodeChart[]): string {
       c.transfers.forEach((t, i) => {
         if (!counts[i]) return;
         lines.push([
-          c.experiment, c.well, c.sampleName ?? '', (c.seqsamples ?? []).join(';'), c.barcodeSourceTable ?? '',
+          c.experiment, c.well, c.sampleName ?? '', (c.seqsamples ?? []).join(';'), c.seqorder ?? '', (c.seqorders ?? []).join(';'), c.barcodeSourceTable ?? '',
           c.strain, c.library, c.transformationLibrary ?? '', String(c.replicate), String(t),
           cand, partner?.a ?? '', partner?.b ?? '', String(counts[i]),
         ].map(v => `"${String(v).replace(/"/g, '""')}"`).join(','));
@@ -2508,7 +2515,7 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
     const filtered = data.charts
       .filter(c => !hasLibs || selectedLibs.has(c.library))
       .filter(c => !hasWells || !c.well || selectedWells.has(c.well))
-      .filter(c => !q || `${c.well} ${c.sampleName ?? ''} ${(c.seqsamples ?? []).join(' ')} ${c.strain} ${c.library} ${c.transformationLibrary ?? ''} ${c.experiment} rep${c.replicate}`.toLowerCase().includes(q))
+      .filter(c => !q || `${c.well} ${c.sampleName ?? ''} ${(c.seqsamples ?? []).join(' ')} ${c.seqorder ?? ''} ${(c.seqorders ?? []).join(' ')} ${c.strain} ${c.library} ${c.transformationLibrary ?? ''} ${c.experiment} rep${c.replicate}`.toLowerCase().includes(q))
       .map(c => {
         if (!transferRange) return c;
         const [lo, hi] = transferRange;
@@ -3197,6 +3204,7 @@ export default function BarcodeCharts(_props: BarcodeChartsProps) {
                           {stats.flipped && <span className="ml-auto text-[8.5px] font-bold uppercase text-amber-600" title="Flip: dominant candidate changed from first to last transfer">flip</span>}
                         </div>
                         {c.sampleName && <div className="mt-0.5 font-mono text-[8.5px] text-slate-400 dark:text-gray-500 truncate" title={chartIdentityTitle(c)}>{c.sampleName}</div>}
+                        {c.seqorder && <div className="mt-0.5 font-mono text-[8.5px] text-slate-500 dark:text-gray-400 truncate" title={chartIdentityTitle(c)}>seqorder {c.seqorder}</div>}
                       </div>
                       <ThumbChart chart={c} stats={stats} candColors={candColors} selectedCands={selectedCands} isolateSelected={isolateSelected} hoverCand={hoveredCand} />
                       <div className="px-1.5 py-0.5 text-[9.5px] text-slate-500 dark:text-gray-400 tabular-nums flex justify-between border-t border-slate-200/50 dark:border-gray-700/50">

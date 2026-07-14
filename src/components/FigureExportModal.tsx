@@ -6,11 +6,13 @@ import { exportFigure } from '../lib/figureExport';
 import {
   defaultOptionsForSpec,
   downloadBlob,
+  FIGURE_THEME_PRESETS,
   figureFilename,
   figureSpecToPngBlob,
   renderFigureSpecSvg,
   type FigureRenderOptions,
   type FigureSpec,
+  type FigureThemeId,
 } from '../lib/figureSpec';
 
 function nextFrame() {
@@ -65,26 +67,37 @@ export default function FigureExportModal({
     setOptions(prev => prev ? { ...prev, [key]: value } : prev);
   };
 
-  const download = async () => {
+  const applyTheme = (themeId: FigureThemeId) => {
+    const preset = FIGURE_THEME_PRESETS[themeId];
+    setOptions(prev => prev ? { ...prev, ...preset, themeId } : prev);
+  };
+
+  const download = async (format: 'png' | 'svg') => {
     setBusy(true);
     setError(null);
     try {
       if (onBeforeExport) { onBeforeExport(); await nextFrame(); }
       if (spec && options) {
-        const blob = await figureSpecToPngBlob(spec, options, 3);
-        downloadBlob(figureFilename(filenameBase), blob);
-        onDone?.('Saved PNG');
+        if (format === 'svg') {
+          const blob = new Blob([renderFigureSpecSvg(spec, options)], { type: 'image/svg+xml;charset=utf-8' });
+          downloadBlob(figureFilename(filenameBase, 'svg'), blob);
+          onDone?.('Saved SVG');
+        } else {
+          const blob = await figureSpecToPngBlob(spec, options, 3);
+          downloadBlob(figureFilename(filenameBase), blob);
+          onDone?.('Saved PNG');
+        }
         onClose();
       } else {
         const target = getTarget();
         if (!target) throw new Error('Nothing to export yet');
-        const result = await exportFigure(target, 'png', title, filenameBase);
-        if (result !== 'png') throw new Error('PNG export failed');
-        onDone?.('Saved PNG');
+        const result = await exportFigure(target, format, title, filenameBase);
+        if (result !== format) throw new Error(`${format.toUpperCase()} export failed`);
+        onDone?.(`Saved ${format.toUpperCase()}`);
         onClose();
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'PNG export failed');
+      setError(err instanceof Error ? err.message : `${format.toUpperCase()} export failed`);
     } finally {
       onAfterExport?.();
       setBusy(false);
@@ -92,12 +105,12 @@ export default function FigureExportModal({
   };
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/55 p-3" role="dialog" aria-modal="true" aria-label="Export PNG figure" data-figure-omit>
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/55 p-3" role="dialog" aria-modal="true" aria-label="Export figure" data-figure-omit>
       <div className="flex max-h-[92vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-2xl">
         <div className="flex items-center gap-3 border-b border-[var(--border)] bg-[var(--surface-2)] px-4 py-3">
           <div className="min-w-0 flex-1">
-            <div className="text-[14px] font-semibold text-[var(--text)]">Export PNG figure</div>
-            <div className="text-[11px] text-[var(--text-soft)]">Preview, edit labels and design, then download a PNG.</div>
+            <div className="text-[14px] font-semibold text-[var(--text)]">Export figure</div>
+            <div className="text-[11px] text-[var(--text-soft)]">Preview, edit labels and design, then download PNG or SVG.</div>
           </div>
           <button type="button" onClick={onClose} className="rounded p-1.5 text-[var(--text-soft)] hover:bg-[var(--surface-3)]" aria-label="Close export preview"><X className="h-4 w-4" /></button>
         </div>
@@ -135,8 +148,16 @@ export default function FigureExportModal({
                   <NumberField label="Font scale" value={options.fontScale} min={0.7} max={1.6} step={0.05} onChange={value => patch('fontScale', value)} />
                   <NumberField label="Cell size" value={options.cellSize} min={12} max={80} step={1} onChange={value => patch('cellSize', value)} />
                 </div>
+                <Field label="Theme preset">
+                  <select className="lims-input w-full" value={options.themeId ?? ''} onChange={event => event.target.value && applyTheme(event.target.value as FigureThemeId)}>
+                    <option value="">Custom</option>
+                    {Object.entries(FIGURE_THEME_PRESETS).map(([id, preset]) => <option key={id} value={id}>{preset.label}</option>)}
+                  </select>
+                </Field>
                 <div className="grid grid-cols-2 gap-2">
                   <ColorField label="Background" value={options.background} onChange={value => patch('background', value)} />
+                  <ColorField label="Plot background" value={options.plotBackground ?? options.background} onChange={value => patch('plotBackground', value)} />
+                  <ColorField label="Grid" value={options.gridColor ?? options.borderColor} onChange={value => patch('gridColor', value)} />
                   <ColorField label="Empty cells" value={options.emptyColor} onChange={value => patch('emptyColor', value)} />
                   <ColorField label="AI marker" value={options.aiMarkerColor} onChange={value => patch('aiMarkerColor', value)} />
                   <ColorField label="Border" value={options.borderColor} onChange={value => patch('borderColor', value)} />
@@ -149,7 +170,7 @@ export default function FigureExportModal({
               </div>
             ) : (
               <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-2)] p-3 text-[12px] leading-relaxed text-[var(--text-soft)]">
-                PNG-only fallback mode. This view has not been migrated to FigureSpec yet, so it will use the existing client-side DOM exporter.
+                Fallback mode. This view has not been migrated to FigureSpec yet, so it will use the existing client-side DOM exporter for PNG or SVG.
               </div>
             )}
             {error && <div className="mt-4 rounded border border-red-200 bg-red-50 p-2 text-[12px] text-red-700 dark:border-red-800 dark:bg-red-950/30 dark:text-red-200">{error}</div>}
@@ -158,7 +179,10 @@ export default function FigureExportModal({
 
         <div className="flex items-center justify-end gap-2 border-t border-[var(--border)] bg-[var(--surface-2)] px-4 py-3">
           <button type="button" className="lims-btn lims-btn-ghost" onClick={onClose} disabled={busy}>Cancel</button>
-          <button type="button" className="lims-btn lims-btn-primary" onClick={download} disabled={busy}>
+          <button type="button" className="lims-btn lims-btn-ghost" onClick={() => download('svg')} disabled={busy}>
+            {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />} Download SVG
+          </button>
+          <button type="button" className="lims-btn lims-btn-primary" onClick={() => download('png')} disabled={busy}>
             {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />} Download PNG
           </button>
         </div>
@@ -172,9 +196,44 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 }
 
 function NumberField({ label, value, min, max, step, onChange }: { label: string; value: number; min: number; max: number; step: number; onChange: (value: number) => void }) {
+  const [draft, setDraft] = useState(String(value));
+
+  React.useEffect(() => {
+    setDraft(String(value));
+  }, [value]);
+
+  const commit = () => {
+    if (draft.trim() === '') {
+      setDraft(String(value));
+      return;
+    }
+    const next = Number(draft);
+    if (!Number.isFinite(next)) {
+      setDraft(String(value));
+      return;
+    }
+    const clamped = Math.min(max, Math.max(min, next));
+    setDraft(String(clamped));
+    onChange(clamped);
+  };
+
   return (
     <Field label={label}>
-      <input type="number" className="lims-input w-full" value={value} min={min} max={max} step={step} onChange={event => onChange(Number(event.target.value) || min)} />
+      <input
+        type="number"
+        className="lims-input w-full"
+        value={draft}
+        min={min}
+        max={max}
+        step={step}
+        onChange={event => setDraft(event.target.value)}
+        onBlur={commit}
+        onKeyDown={event => {
+          if (event.key === 'Enter') {
+            event.currentTarget.blur();
+          }
+        }}
+      />
     </Field>
   );
 }

@@ -6,9 +6,9 @@ import type { FigureSpec } from '../lib/figureSpec';
 import FigureExportModal from './FigureExportModal';
 
 /**
- * Shared figure-export control used by visualizations. Slice 1 makes the visible
- * UI PNG-only and routes exports through a preview modal. Callers can provide a
- * FigureSpec for a dedicated renderer, or fall back to the existing DOM PNG path.
+ * Shared figure-export control used by visualizations. The visible UI routes
+ * exports through a preview modal. Callers can provide a FigureSpec for a
+ * dedicated renderer, or fall back to the existing DOM export path.
  *
  * `getTarget` is called at click time (not render time) so the caller can return
  * the currently-rendered chart node (refs may be null on first paint).
@@ -19,7 +19,7 @@ export default function ExportFigureMenu({
   filenameBase,
   disabled,
   compact,
-  label = 'Export PNG',
+  label = 'Export image',
   buildSpec,
   onBeforeExport,
   onAfterExport,
@@ -69,7 +69,7 @@ export default function ExportFigureMenu({
         className={compact
           ? 'flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded border border-[var(--border)] text-[var(--text-soft)] hover:bg-[var(--surface-3)] disabled:opacity-40'
           : 'flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded border border-slate-300 dark:border-gray-600 text-slate-600 dark:text-gray-300 hover:bg-slate-50 dark:hover:bg-gray-700 disabled:opacity-40'}
-        title="Preview and export this visualization as a PNG image"
+        title="Preview and export this visualization as PNG or SVG"
       >
         {busy ? <Loader2 className="w-3 h-3 animate-spin" /> : done ? <Check className="w-3 h-3 text-[var(--data-grow)]" /> : <Download className="w-3 h-3" />}
         {done ? <span className="text-[var(--data-grow)]">{done}</span> : label}
@@ -85,7 +85,7 @@ export default function ExportFigureMenu({
         onAfterExport={onAfterExport}
         onDone={flash}
       />
-      <span className="sr-only"><FileImage className="w-3 h-3" />PNG image export</span>
+      <span className="sr-only"><FileImage className="w-3 h-3" />Figure image export</span>
     </div>
   );
 }

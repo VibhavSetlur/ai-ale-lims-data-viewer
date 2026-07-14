@@ -11,6 +11,7 @@ export interface BarcodeDataset {
   libraries: string[];
   wells: string[];
   experiments: string[];
+  seqorders: string[];
   uniqueA: string[];
   uniqueB: string[];
   warnings: string[];
@@ -20,6 +21,7 @@ export interface BarcodeDataset {
 // Natasha after the 2026-06-03 group meeting). One row per
 // (Seqsample, candidate) with the read count for the bar-chart cell.
 interface VerABRow {
+  Seqorder: string | null;
   Seqsample: string;
   Transformation_library: string | null;
   verA: string | null;
@@ -30,6 +32,7 @@ interface VerABRow {
 
 interface SeqsamplesJoinRow {
   Sequencing_sample: string;
+  Seqorder: string | null;
   well: string | null;
   Sample_Name: string | null;
 }
@@ -37,6 +40,7 @@ interface SeqsamplesJoinRow {
 interface SeqsampleMeta {
   well: string;
   sampleName: string;
+  seqorder: string;
   sampleNameSource: 'Seq_samples.Sample_Name' | 'verAB_barcodes.Seqsample';
   joined: boolean;
 }
@@ -106,7 +110,7 @@ async function tryLimsBarcodes(): Promise<{ charts: BarcodeChart[]; warnings: st
   let rows: VerABRow[];
   try {
     rows = await runQuery<VerABRow>(
-      `SELECT "Seqsample", "Transformation_library", "verA", "verB", "Candidate", "Count"
+      `SELECT "Seqorder", "Seqsample", "Transformation_library", "verA", "verB", "Candidate", "Count"
        FROM verAB_barcodes
        WHERE deleted = 0 AND "Count" > 0`
     );
@@ -127,7 +131,7 @@ async function tryLimsBarcodes(): Promise<{ charts: BarcodeChart[]; warnings: st
     const ph = seqsamples.map(() => '?').join(',');
     try {
       const joined = await runQuery<SeqsamplesJoinRow>(
-        `SELECT ss."Sequencing_sample", ss."Sequencing_plate_well" AS well, ss."Sample_Name"
+        `SELECT ss."Sequencing_sample", ss."Seqorder", ss."Sequencing_plate_well" AS well, ss."Sample_Name"
          FROM Seq_samples ss
          WHERE ss.deleted = 0 AND ss."Sequencing_sample" IN (${ph})`,
         seqsamples,
@@ -137,6 +141,7 @@ async function tryLimsBarcodes(): Promise<{ charts: BarcodeChart[]; warnings: st
         metaMap.set(j.Sequencing_sample, {
           well: j.well ?? '',
           sampleName: j.Sample_Name || j.Sequencing_sample,
+          seqorder: j.Seqorder ?? '',
           sampleNameSource: j.Sample_Name ? 'Seq_samples.Sample_Name' : 'verAB_barcodes.Seqsample',
           joined: true,
         });
@@ -156,9 +161,11 @@ async function tryLimsBarcodes(): Promise<{ charts: BarcodeChart[]; warnings: st
     const meta = metaMap.get(r.Seqsample) ?? {
       well: '',
       sampleName: r.Seqsample,
+      seqorder: r.Seqorder ?? '',
       sampleNameSource: 'verAB_barcodes.Seqsample' as const,
       joined: false,
     };
+    const seqorder = meta.seqorder || r.Seqorder || '';
     if (!meta.joined) missingSeqSampleLinks.add(r.Seqsample);
     if (meta.sampleNameSource !== 'Seq_samples.Sample_Name') fallbackSampleNames.add(r.Seqsample);
 
@@ -173,12 +180,14 @@ async function tryLimsBarcodes(): Promise<{ charts: BarcodeChart[]; warnings: st
     if (!parsedIdentity || !parsedTransfer) { skipped++; continue; }
     const { experiment, strain, library, replicate } = parsedIdentity;
     const transfer = parsedTransfer.transfer;
-    const key = `${experiment}|${strain}|${library}|${replicate}|${meta.sampleName}`;
+    const key = `${experiment}|${strain}|${library}|${replicate}|${meta.sampleName}|${seqorder || 'no-seqorder'}`;
     let chart = charts.get(key);
     if (!chart) {
       chart = {
         well: meta.well,
         sampleName: meta.sampleName,
+        seqorder: seqorder || undefined,
+        seqorders: seqorder ? [seqorder] : [],
         sampleNameSource: meta.sampleNameSource,
         seqsamples: [],
         transformationLibrary: r.Transformation_library ?? undefined,
@@ -188,6 +197,8 @@ async function tryLimsBarcodes(): Promise<{ charts: BarcodeChart[]; warnings: st
       };
       charts.set(key, chart);
     }
+    if (seqorder && !chart.seqorders?.includes(seqorder)) chart.seqorders = [...(chart.seqorders ?? []), seqorder].sort();
+    if (!chart.seqorder && seqorder) chart.seqorder = seqorder;
     if (!chart.seqsamples?.includes(r.Seqsample)) chart.seqsamples = [...(chart.seqsamples ?? []), r.Seqsample];
     let ti = chart.transfers.indexOf(transfer);
     if (ti === -1) {
@@ -216,6 +227,8 @@ async function tryLimsBarcodes(): Promise<{ charts: BarcodeChart[]; warnings: st
     finalCharts.push(chart);
   }
   finalCharts.sort((a, b) =>
+    (a.sampleName || a.strain).localeCompare(b.sampleName || b.strain) ||
+    (a.seqorder || '').localeCompare(b.seqorder || '') ||
     a.experiment.localeCompare(b.experiment) ||
     a.library.localeCompare(b.library) ||
     (a.well || '~').localeCompare(b.well || '~') ||
@@ -234,16 +247,19 @@ async function tryLimsBarcodes(): Promise<{ charts: BarcodeChart[]; warnings: st
   return { charts: finalCharts, warnings };
 }
 
-function summarize(charts: BarcodeChart[]): Pick<BarcodeDataset, 'libraries'|'wells'|'experiments'|'uniqueA'|'uniqueB'> {
+function summarize(charts: BarcodeChart[]): Pick<BarcodeDataset, 'libraries'|'wells'|'experiments'|'seqorders'|'uniqueA'|'uniqueB'> {
   const libraries = new Set<string>();
   const wells = new Set<string>();
   const experiments = new Set<string>();
+  const seqorders = new Set<string>();
   const aSet = new Set<string>();
   const bSet = new Set<string>();
   for (const c of charts) {
     libraries.add(c.library);
     if (c.well) wells.add(c.well);
     experiments.add(c.experiment);
+    if (c.seqorder) seqorders.add(c.seqorder);
+    for (const seqorder of c.seqorders ?? []) seqorders.add(seqorder);
     for (const cand of Object.keys(c.candidates)) {
       const m = cand.match(/^(A\d+)-(B\d+)$/);
       if (m) { aSet.add(m[1]); bSet.add(m[2]); }
@@ -254,6 +270,7 @@ function summarize(charts: BarcodeChart[]): Pick<BarcodeDataset, 'libraries'|'we
     libraries: [...libraries].sort(),
     wells: [...wells].sort(),
     experiments: [...experiments].sort(),
+    seqorders: [...seqorders].sort(),
     uniqueA: [...aSet].sort(numSort),
     uniqueB: [...bSet].sort(numSort),
   };

@@ -6,6 +6,11 @@ export interface ReleaseNote {
 
 export const releaseNotes: readonly ReleaseNote[] = [
   {
+    version: '1.6.2',
+    date: '2026-07-14',
+    summary: 'Improved figure export for publication workflows. Export buttons now offer PNG and SVG from the preview modal, width and height fields can be cleared and retyped without snapping to the minimum, and theme presets make it easier to switch between journal, minimal, presentation, dark, and colorblind-safe styling. Library-variant bar exports now reserve dynamic space for rotated sample labels so axis text and titles do not collide. Barcode Charts now keep seqorder as part of chart identity, labels, search, CSV export, and API summaries so same-named samples from different sequencing orders display together instead of being merged.',
+  },
+  {
     version: '1.6.1',
     date: '2026-07-13',
     summary: 'Fixed the figure export preview and PNG download in Compare Library Variants. The preview was blank and PNG export failed because the generated SVG did not decode: variant colors used space-separated hsl() and the font stack carried embedded quotes. Colors are now normalized to hex and the font names are quote-free, so the live preview renders, stays editable while you adjust the title, size, and labels, and PNG download works for both the vertical bars and the heatmap. The preview also shows a clear message if it ever fails to render.',

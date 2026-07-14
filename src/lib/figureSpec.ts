@@ -10,6 +10,10 @@ export interface FigureTextOptions {
 }
 
 export interface FigureRenderOptions extends FigureTextOptions {
+  themeId?: FigureThemeId;
+  plotBackground?: string;
+  gridColor?: string;
+  accentColor?: string;
   width: number;
   height: number;
   fontScale: number;
@@ -170,6 +174,72 @@ export type FigureSpec = PairingFigureSpec | LibraryBarsFigureSpec | LibraryHeat
 const FONT_SANS = 'Inter, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, Arial, sans-serif';
 const FONT_MONO = 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, monospace';
 
+export type FigureThemeId = 'journal' | 'minimal' | 'presentation' | 'darkInk' | 'colorblind';
+
+export const FIGURE_THEME_PRESETS: Record<FigureThemeId, Partial<FigureRenderOptions> & { label: string }> = {
+  journal: {
+    label: 'Journal',
+    background: '#ffffff',
+    plotBackground: '#ffffff',
+    textColor: '#111827',
+    mutedTextColor: '#4b5563',
+    borderColor: '#cbd5e1',
+    gridColor: '#dbe3ec',
+    emptyColor: '#f1f5f9',
+    aiMarkerColor: '#111827',
+    accentColor: '#111827',
+  },
+  minimal: {
+    label: 'Minimal',
+    background: '#ffffff',
+    plotBackground: '#ffffff',
+    textColor: '#0f172a',
+    mutedTextColor: '#64748b',
+    borderColor: '#e2e8f0',
+    gridColor: '#e5e7eb',
+    emptyColor: '#f8fafc',
+    aiMarkerColor: '#334155',
+    accentColor: '#334155',
+  },
+  presentation: {
+    label: 'Presentation',
+    background: '#fbfdff',
+    plotBackground: '#ffffff',
+    textColor: '#0b1120',
+    mutedTextColor: '#334155',
+    borderColor: '#94a3b8',
+    gridColor: '#cbd5e1',
+    emptyColor: '#eef2ff',
+    aiMarkerColor: '#1d4ed8',
+    accentColor: '#1d4ed8',
+    fontScale: 1.1,
+  },
+  darkInk: {
+    label: 'Dark ink',
+    background: '#111827',
+    plotBackground: '#172033',
+    textColor: '#f8fafc',
+    mutedTextColor: '#cbd5e1',
+    borderColor: '#475569',
+    gridColor: '#334155',
+    emptyColor: '#1f2937',
+    aiMarkerColor: '#facc15',
+    accentColor: '#facc15',
+  },
+  colorblind: {
+    label: 'Colorblind safe',
+    background: '#ffffff',
+    plotBackground: '#ffffff',
+    textColor: '#111827',
+    mutedTextColor: '#374151',
+    borderColor: '#b6c2cf',
+    gridColor: '#d6dee8',
+    emptyColor: '#f1f5f9',
+    aiMarkerColor: '#0072b2',
+    accentColor: '#0072b2',
+  },
+};
+
 export const DEFAULT_FIGURE_OPTIONS: FigureRenderOptions = {
   title: '',
   subtitle: '',
@@ -255,11 +325,11 @@ export function downloadBlob(filename: string, blob: Blob) {
   setTimeout(() => URL.revokeObjectURL(url), 1500);
 }
 
-export function figureFilename(base: string): string {
+export function figureFilename(base: string, ext: 'png' | 'svg' = 'png'): string {
   const safe = base.trim().toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80) || 'figure';
   const d = new Date();
   const p = (n: number) => String(n).padStart(2, '0');
-  return `${safe}-${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}.png`;
+  return `${safe}-${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}.${ext}`;
 }
 
 function inferFigureSize(spec: FigureSpec): { width: number; height: number } {
@@ -339,12 +409,17 @@ function renderLibraryBarsSvg(spec: LibraryBarsFigureSpec, options: FigureRender
   const tickSize = 10.5 * fs;
   const valueSize = 9 * fs;
   const captionSize = 10.5 * fs;
-  const padLeft = 92;
+  const padLeft = 96;
   const padRight = options.showLegend ? 250 : 42;
   const padTop = 132;
-  const padBottom = options.caption ? 150 : 126;
-  const plotW = Math.max(160, width - padLeft - padRight);
-  const plotH = Math.max(160, height - padTop - padBottom);
+  const initialPlotW = Math.max(180, width - padLeft - padRight);
+  const initialSlot = initialPlotW / Math.max(1, spec.samples.length);
+  const xPlan = rotatedAxisPlan(spec.samples.map(sample => sample.label), initialSlot, tickSize, -45);
+  const labelGap = 20;
+  const xTitleGap = 28;
+  const padBottom = Math.max(options.caption ? 150 : 118, labelGap + xPlan.labelHeight + xTitleGap + (options.caption ? 72 : 28));
+  const plotW = Math.max(180, width - padLeft - padRight);
+  const plotH = Math.max(170, height - padTop - padBottom);
   const plotX = padLeft;
   const plotY = padTop;
   const baseY = plotY + plotH;
@@ -356,11 +431,12 @@ function renderLibraryBarsSvg(spec: LibraryBarsFigureSpec, options: FigureRender
   const ticks = [0, 0.25, 0.5, 0.75, 1];
   const parts = svgStart(width, height, options, options.title || spec.title);
   drawTitle(parts, spec, options, width, padRight, titleSize, subtitleSize);
+  parts.push(`<rect x="${plotX}" y="${plotY}" width="${plotW}" height="${plotH}" fill="${escapeAttr(plotBackground(options))}"/>`);
 
   ticks.forEach(tick => {
     const y = baseY - tick * plotH;
     const tickValue = spec.normalizedBars || spec.metric === 'abundance' ? tick : yMax * tick;
-    parts.push(`<line x1="${plotX}" x2="${plotX + plotW}" y1="${y}" y2="${y}" stroke="${escapeAttr(options.borderColor)}" stroke-opacity="0.62"/>`);
+    parts.push(`<line x1="${plotX}" x2="${plotX + plotW}" y1="${y}" y2="${y}" stroke="${escapeAttr(gridColor(options))}" stroke-opacity="0.62"/>`);
     parts.push(`<text x="${plotX - 10}" y="${y + tickSize * 0.34}" text-anchor="end" font-family="${FONT_SANS}" font-size="${tickSize}" fill="${escapeAttr(options.mutedTextColor)}">${escapeXml(formatMetric(tickValue, spec.metric))}</text>`);
   });
   parts.push(`<line x1="${plotX}" x2="${plotX}" y1="${plotY}" y2="${baseY}" stroke="${escapeAttr(options.textColor)}" stroke-opacity="0.55"/>`);
@@ -393,12 +469,19 @@ function renderLibraryBarsSvg(spec: LibraryBarsFigureSpec, options: FigureRender
         parts.push(`<text x="${x + barW / 2}" y="${yCursor + h / 2 + valueSize * 0.34}" text-anchor="middle" font-family="${FONT_SANS}" font-size="${valueSize}" font-weight="750" fill="${escapeAttr(readableTextForFill(variant.color))}">${escapeXml(formatMetric(shown, spec.metric))}</text>`);
       }
     });
+    if (sampleIdx % xPlan.tickEvery !== 0) return;
     const labelX = slotX + slot / 2;
-    parts.push(`<g transform="translate(${labelX} ${baseY + 18}) rotate(-45)">`);
-    parts.push(`<text text-anchor="end" font-family="${FONT_MONO}" font-size="${tickSize}" fill="${escapeAttr(options.textColor)}">${escapeXml(truncateLabel(sample.label, 34))}</text>`);
-    parts.push(`</g>`);
+    const label = truncateToWidth(sample.label, xPlan.maxLabelWidth, tickSize, 'mono');
+    if (xPlan.angle === 0) {
+      parts.push(`<text x="${labelX}" y="${baseY + 22}" text-anchor="middle" font-family="${FONT_MONO}" font-size="${tickSize}" fill="${escapeAttr(options.textColor)}">${escapeXml(label)}</text>`);
+    } else {
+      parts.push(`<g transform="translate(${labelX} ${baseY + 18}) rotate(${xPlan.angle})">`);
+      parts.push(`<text text-anchor="end" font-family="${FONT_MONO}" font-size="${tickSize}" fill="${escapeAttr(options.textColor)}">${escapeXml(label)}</text>`);
+      parts.push(`</g>`);
+    }
   });
-  parts.push(`<text x="${plotX + plotW / 2}" y="${height - (options.caption ? 82 : 34)}" text-anchor="middle" font-family="${FONT_SANS}" font-size="${labelSize}" font-weight="700" fill="${escapeAttr(options.textColor)}">${escapeXml(options.xTitle || 'Selected samples')}</text>`);
+  const xTitleY = Math.min(height - (options.caption ? 82 : 28), baseY + labelGap + xPlan.labelHeight + 22);
+  parts.push(`<text x="${plotX + plotW / 2}" y="${xTitleY}" text-anchor="middle" font-family="${FONT_SANS}" font-size="${labelSize}" font-weight="700" fill="${escapeAttr(options.textColor)}">${escapeXml(options.xTitle || 'Selected samples')}</text>`);
   if (options.showLegend) drawVariantLegend(parts, spec, options, width - padRight + 34, padTop, padRight - 58, fs);
   drawCaption(parts, options, width, height, captionSize);
   parts.push(`</svg>`);
@@ -433,6 +516,7 @@ function renderLibraryHeatmapSvg(spec: LibraryHeatmapFigureSpec, options: Figure
   const maxValue = Math.max(0.000001, spec.maxValue ?? Math.max(...spec.values.map(v => v.normalizedValue ?? v.value), 0));
   const parts = svgStart(width, height, options, options.title || spec.title);
   drawTitle(parts, spec, options, width, padRight, titleSize, subtitleSize);
+  parts.push(`<rect x="${gridX}" y="${gridY}" width="${gridW}" height="${gridH}" fill="${escapeAttr(plotBackground(options))}"/>`);
   parts.push(`<text x="${gridX + gridW / 2}" y="${gridY - 64}" text-anchor="middle" font-family="${FONT_SANS}" font-size="${labelSize}" font-weight="700" fill="${escapeAttr(options.textColor)}">${escapeXml(options.xTitle || 'Selected samples')}</text>`);
   parts.push(`<text x="${gridX - 130}" y="${gridY + gridH / 2}" text-anchor="middle" font-family="${FONT_SANS}" font-size="${labelSize}" font-weight="700" fill="${escapeAttr(options.textColor)}" transform="rotate(-90 ${gridX - 130} ${gridY + gridH / 2})">${escapeXml(options.yTitle || 'Library variant')}</text>`);
 
@@ -447,7 +531,7 @@ function renderLibraryHeatmapSvg(spec: LibraryHeatmapFigureSpec, options: Figure
     const y = gridY + rowIdx * cell;
     const parsed = splitVariantLabel(variant.label);
     const label = parsed ? `${parsed[0]} / ${parsed[1]}` : variant.label;
-    parts.push(`<rect x="${gridX - 154}" y="${y + 1}" width="${142}" height="${Math.max(1, cell - 2)}" rx="3" fill="${rowIdx % 2 ? '#f8fafc' : '#ffffff'}" stroke="${escapeAttr(options.borderColor)}" stroke-opacity="0.45"/>`);
+    parts.push(`<rect x="${gridX - 154}" y="${y + 1}" width="${142}" height="${Math.max(1, cell - 2)}" rx="3" fill="${rowIdx % 2 ? options.emptyColor : plotBackground(options)}" stroke="${escapeAttr(gridColor(options))}" stroke-opacity="0.45"/>`);
     parts.push(`<circle cx="${gridX - 142}" cy="${y + cell / 2}" r="${Math.max(3, Math.min(5, cell * 0.18))}" fill="${escapeAttr(normalizeColorForSvg(variant.color))}"/>`);
     parts.push(`<text x="${gridX - 132}" y="${y + cell / 2 + tickSize * 0.34}" font-family="${FONT_MONO}" font-size="${tickSize}" font-weight="650" fill="${escapeAttr(options.textColor)}">${escapeXml(truncateLabel(label, 18))}</text>`);
     if (variant.aiA || variant.aiB) parts.push(`<text x="${gridX - 40}" y="${y + cell / 2 + tickSize * 0.34}" font-family="${FONT_SANS}" font-size="${8.5 * fs}" font-weight="800" fill="#7c2d12">${escapeXml(variant.aiA && variant.aiB ? 'A/B AI' : variant.aiA ? 'A AI' : 'B AI')}</text>`);
@@ -458,7 +542,7 @@ function renderLibraryHeatmapSvg(spec: LibraryHeatmapFigureSpec, options: Figure
       const normalized = entry?.normalizedValue ?? value;
       const alpha = value > 0 ? Math.max(0.14, Math.min(1, normalized / maxValue)) : 1;
       const fill = value > 0 ? normalizeColorForSvg(variant.color) : options.emptyColor;
-      parts.push(`<rect x="${x + 1}" y="${y + 1}" width="${Math.max(1, cell - 2)}" height="${Math.max(1, cell - 2)}" rx="${Math.max(1.5, cell * 0.09)}" fill="${escapeAttr(fill)}" fill-opacity="${value > 0 ? alpha.toFixed(3) : '0.7'}" stroke="${escapeAttr(options.borderColor)}" stroke-opacity="0.55" stroke-width="0.65"/>`);
+      parts.push(`<rect x="${x + 1}" y="${y + 1}" width="${Math.max(1, cell - 2)}" height="${Math.max(1, cell - 2)}" rx="${Math.max(1.5, cell * 0.09)}" fill="${escapeAttr(fill)}" fill-opacity="${value > 0 ? alpha.toFixed(3) : '0.7'}" stroke="${escapeAttr(gridColor(options))}" stroke-opacity="0.55" stroke-width="0.65"/>`);
       if (options.showValues && value > 0 && cell > 19) {
         parts.push(`<text x="${x + cell / 2}" y="${y + cell / 2 + valueSize * 0.35}" text-anchor="middle" font-family="${FONT_SANS}" font-size="${Math.min(valueSize, cell * 0.26)}" font-weight="750" fill="${escapeAttr(alpha > 0.58 ? readableTextForFill(variant.color) : options.textColor)}">${escapeXml(entry?.valueLabel ?? formatMetric(value, spec.metric))}</text>`);
       }
@@ -1058,6 +1142,41 @@ function logTicks(min: number, max: number): number[] {
     if (v >= min * 0.999 && v <= max * 1.001) ticks.push(v);
   }
   return ticks.length >= 2 ? ticks : [min, max];
+}
+
+function approxTextWidth(text: string, fontSize: number, kind: 'sans' | 'mono' = 'sans'): number {
+  return text.length * fontSize * (kind === 'mono' ? 0.62 : 0.58);
+}
+
+function rotatedBounds(width: number, height: number, degrees: number): { width: number; height: number } {
+  const radians = Math.abs(degrees) * Math.PI / 180;
+  const cos = Math.cos(radians);
+  const sin = Math.sin(radians);
+  return {
+    width: Math.abs(width * cos) + Math.abs(height * sin),
+    height: Math.abs(width * sin) + Math.abs(height * cos),
+  };
+}
+
+function truncateToWidth(label: string, maxWidth: number, fontSize: number, kind: 'sans' | 'mono' = 'sans'): string {
+  const maxChars = Math.max(4, Math.floor(maxWidth / (fontSize * (kind === 'mono' ? 0.62 : 0.58))));
+  return truncateLabel(label, maxChars);
+}
+
+function rotatedAxisPlan(labels: string[], slot: number, fontSize: number, desiredAngle = -45): { angle: number; labelHeight: number; maxLabelWidth: number; tickEvery: number } {
+  const longest = labels.reduce((best, label) => Math.max(best, approxTextWidth(label, fontSize, 'mono')), 0);
+  const angle = longest <= slot * 0.9 ? 0 : desiredAngle;
+  const bounds = rotatedBounds(longest, fontSize, angle);
+  const tickEvery = Math.max(1, Math.ceil((angle === 0 ? longest : bounds.width) / Math.max(1, slot * 0.92)));
+  return { angle, labelHeight: bounds.height, maxLabelWidth: Math.max(slot * 0.88, angle === 0 ? slot * 0.9 : Math.min(longest, 190)), tickEvery };
+}
+
+function plotBackground(options: FigureRenderOptions): string {
+  return options.plotBackground || options.background;
+}
+
+function gridColor(options: FigureRenderOptions): string {
+  return options.gridColor || options.borderColor;
 }
 
 function truncateLabel(label: string, max: number): string {
