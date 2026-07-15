@@ -6,6 +6,11 @@ export interface ReleaseNote {
 
 export const releaseNotes: readonly ReleaseNote[] = [
   {
+    version: '1.6.3',
+    date: '2026-07-14',
+    summary: 'Fixed pairing-table hover percentages and export values that could exceed 100% when multiple samples or transfers were selected. The VerA / VerB partner pairing table now reports mean per-sample abundance instead of the summed per-sample fraction, so hover percentages stay interpretable. Each tooltip also shows total reads across all selected samples and the count of samples where the variant is present, giving users the full context behind the mean value. Export images and CSV reflect the same mean-based figures.',
+  },
+  {
     version: '1.6.2',
     date: '2026-07-14',
     summary: 'Improved figure export for publication workflows. Export buttons now offer PNG and SVG from the preview modal, width and height fields can be cleared and retyped without snapping to the minimum, and theme presets make it easier to switch between journal, minimal, presentation, dark, and colorblind-safe styling. Library-variant bar exports now reserve dynamic space for rotated sample labels so axis text and titles do not collide. Barcode Charts now keep seqorder as part of chart identity, labels, search, CSV export, and API summaries so same-named samples from different sequencing orders display together instead of being merged.',

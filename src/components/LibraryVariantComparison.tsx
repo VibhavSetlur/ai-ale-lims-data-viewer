@@ -379,7 +379,7 @@ export default function LibraryVariantComparison({ samples, selected, loading: s
     }
     const aList = [...aSet].sort((x, y) => x.localeCompare(y, undefined, { numeric: true }));
     const bList = [...bSet].sort((x, y) => x.localeCompare(y, undefined, { numeric: true }));
-    return { aList, bList, byPair, aAiSet, bAiSet };
+    return { aList, bList, byPair, aAiSet, bAiSet, sampleCount: selectedSamples.length };
   }, [visibleVariants]);
 
   const setTipFromPointer = (event: React.MouseEvent<HTMLElement | SVGElement>, text: string) => {
@@ -880,8 +880,8 @@ function HeatmapChart({ variants, samples, colors, metric, maxValue, valueFor, h
   );
 }
 
-function PartnerPairingTable({ pairs, colors, metric }: { pairs: { aList: string[]; bList: string[]; byPair: Map<string, VariantWithStats>; aAiSet: Set<string>; bAiSet: Set<string> }; colors: Map<string, string>; metric: MetricMode }) {
-  const { aList, bList, byPair, aAiSet, bAiSet } = pairs;
+function PartnerPairingTable({ pairs, colors, metric }: { pairs: { aList: string[]; bList: string[]; byPair: Map<string, VariantWithStats>; aAiSet: Set<string>; bAiSet: Set<string>; sampleCount: number }; colors: Map<string, string>; metric: MetricMode }) {
+  const { aList, bList, byPair, aAiSet, bAiSet, sampleCount } = pairs;
   const cellCount = aList.length * bList.length;
   const exportRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState<'s' | 'm' | 'l'>('m');
@@ -895,11 +895,11 @@ function PartnerPairingTable({ pairs, colors, metric }: { pairs: { aList: string
     caption: 'AI markers identify cells where the VerA or VerB partner is AI-generated in Library_candidates metadata.',
     rows: aList.map(a => ({ id: a, label: a, ai: aAiSet.has(a) })),
     columns: bList.map(b => ({ id: b, label: b, ai: bAiSet.has(b) })),
-    metricLabel: metric === 'count' ? 'Cell values show total barcode counts for the visible variant set.' : 'Cell values show total relative abundance for the visible variant set.',
+    metricLabel: metric === 'count' ? 'Cell values show total barcode counts for the visible variant set.' : 'Cell values show mean per-sample abundance across selected samples.',
     cells: aList.flatMap(a => bList.flatMap(b => {
       const variant = byPair.get(`${a}|${b}`);
       if (!variant) return [];
-      const value = metric === 'count' ? variant.totalCount : variant.totalAbundance;
+      const value = metric === 'count' ? variant.totalCount : (variant.totalAbundance / Math.max(1, sampleCount));
       return [{
         a,
         b,
@@ -977,10 +977,18 @@ function PartnerPairingTable({ pairs, colors, metric }: { pairs: { aList: string
                     const variant = byPair.get(`${a}|${b}`);
                     if (!variant) return <td key={b} className="px-1 py-1 text-center text-[var(--text-faint)]">-</td>;
                     const color = colors.get(variant.variantId) ?? '#888';
-                    const total = metric === 'count' ? variant.totalCount : variant.totalAbundance;
+                    const meanAbundance = metric === 'count' ? 0 : (variant.totalAbundance / Math.max(1, sampleCount));
                     const aiCell = aAiSet.has(a) || bAiSet.has(b);
+                    const tooltipLines = [`${variant.label}${aiCell ? ' (AI partner)' : ''}`];
+                    if (metric === 'abundance') {
+                      tooltipLines.push(`Mean per-sample abundance: ${fmtValue(meanAbundance, 'abundance')}`);
+                      tooltipLines.push(`Total reads: ${Math.round(variant.totalCount).toLocaleString()}`);
+                    } else {
+                      tooltipLines.push(`Total reads: ${Math.round(variant.totalCount).toLocaleString()}`);
+                    }
+                    tooltipLines.push(`Present in ${variant.present} of ${sampleCount} selected samples`);
                     return (
-                      <td key={b} className="p-0 text-center" title={`${variant.label}${aiCell ? ' (AI partner)' : ''}\n${fmtValue(total, metric)}`}>
+                      <td key={b} className="p-0 text-center" title={tooltipLines.join('\n')}>
                         <div className={cn('relative mx-auto flex items-center justify-center rounded-sm', SIZE.cell)} style={{ backgroundColor: color }}>
                           <span className={cn('rounded-full bg-white/80', SIZE.dot)} />
                           {aiCell && <span className="absolute right-0 top-0 h-1.5 w-1.5 rounded-full border border-white bg-black/70" title="AI-generated partner" />}
