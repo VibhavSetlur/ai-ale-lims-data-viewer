@@ -456,12 +456,16 @@ function renderLibraryBarsSvg(spec: LibraryBarsFigureSpec, options: FigureRender
     const sampleTotal = sampleTotals[sampleIdx] ?? 0;
     const denom = spec.normalizedBars ? (sampleTotal > 0 ? sampleTotal : 1) : yMax;
     let yCursor = baseY;
+    // Running budget so exported stacked bars never exceed plotH (the 100% gridline),
+    // matching the live renderer fix. Replaces the per-segment Math.max(0.5, ...) floor.
+    let remaining = plotH;
     spec.variants.forEach(variant => {
       const entry = valueMap.get(`${sample.id}|${variant.id}`);
       const value = entry?.value ?? 0;
       if (value <= 0) return;
       const drawn = spec.normalizedBars ? value / denom : value;
-      const h = Math.max(0.5, drawn / Math.max(0.000001, yMax) * plotH);
+      const h = Math.min(remaining, drawn / Math.max(0.000001, yMax) * plotH);
+      remaining -= h;
       yCursor -= h;
       parts.push(`<rect x="${x}" y="${yCursor}" width="${barW}" height="${h}" rx="${h > 4 ? 1.6 : 0}" fill="${escapeAttr(normalizeColorForSvg(variant.color))}" stroke="rgba(15,23,42,0.2)" stroke-width="${h > 7 ? 0.45 : 0}"/>`);
       if (options.showValues && h > valueSize * 1.45 && barW > 18) {
