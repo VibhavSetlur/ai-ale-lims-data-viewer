@@ -1377,7 +1377,8 @@ function SampleSelectionPanel({
                            <td className="px-2 py-1 text-right tabular-nums">
                              {s.has_barcodes && (s.verab_combinations ?? 0) > 0
                                ? <span className="tabular-nums text-[var(--text)]">{(s.verab_combinations ?? 0).toLocaleString()}</span>
-                               : <span className="text-[var(--text-faint)]">&#8212;</span>}
+                                : <span className="text-[var(--text-faint)]">—</span>}
+
                            </td>
                          )}
                          <td className="px-2 py-1 text-right tabular-nums">
