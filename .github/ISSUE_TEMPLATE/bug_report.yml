@@ -1,0 +1,100 @@
+name: Bug report
+description: Something looks wrong or broken in the viewer? Tell us here.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a problem! This form helps us understand what went wrong. You do not need any technical knowledge to fill it out - just describe what you saw in your own words.
+
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: Which version of the viewer were you using?
+      options:
+        - "Public (modelseed.org/annotation/projects/aiale/)"
+        - "Dev (modelseed.org/annotation/projects/aiale-dev/)"
+        - "Not sure"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: tab
+    attributes:
+      label: Which tab or view were you on?
+      options:
+        - Database Tables
+        - Mutation Explorer
+        - Sample Selection
+        - Compare Mutations
+        - Compare Growth Curves
+        - Compare Library Variants
+        - Copy Number
+        - Barcode Charts
+        - "Not sure / somewhere else"
+    validations:
+      required: true
+
+  - type: input
+    id: location
+    attributes:
+      label: What were you looking at?
+      description: "For example a sample name, table name, gene, or chart."
+
+  - type: dropdown
+    id: problem_type
+    attributes:
+      label: What kind of problem is it?
+      options:
+        - Wrong or missing data
+        - Something looks broken
+        - A chart or figure looks wrong
+        - Export or download did not work
+        - The page was slow or froze
+        - Something else
+    validations:
+      required: true
+
+  - type: textarea
+    id: what_happened
+    attributes:
+      label: What happened?
+      description: Tell us what you saw, in your own words.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect to happen instead?
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: How can we see the problem ourselves?
+      description: "List the steps you took, if you can. For example: opened Barcode Charts, searched for sample X, clicked export."
+
+  - type: markdown
+    attributes:
+      value: |
+        A screenshot helps a lot. You can drag an image straight into the box below.
+
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots
+      description: Drag and drop or paste any screenshots here.
+
+  - type: input
+    id: browser
+    attributes:
+      label: Which web browser were you using?
+      description: "For example Chrome, Safari, Firefox."
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before you submit
+      options:
+        - label: I looked to see if someone already reported this.

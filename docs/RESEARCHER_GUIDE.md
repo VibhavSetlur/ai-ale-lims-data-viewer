@@ -4,7 +4,7 @@ A practical guide for lab members who use the viewer to explore adaptive
 laboratory evolution (ALE) data, find results, build figures, and write them up.
 It is written for biologists, and it is deliberately explicit so the same text
 can be pasted into an institution-approved AI assistant when planning an
-analysis (do not paste credentials or private database paths).
+analysis (do not paste credentials or internal database paths).
 
 The viewer is read-only over a snapshot of the lab LIMS. Every value shown is
 either stored in the database or computed transparently from stored values, and

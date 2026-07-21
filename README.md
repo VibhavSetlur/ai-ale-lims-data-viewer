@@ -7,7 +7,7 @@ composition charts for engineered *Acinetobacter baylyi* ADP1 strains evolved on
 the automated robotic ALE platform.
 
 - LIVE (public, publication snapshot): https://modelseed.org/annotation/projects/aiale/
-- LIVE (internal, unlisted): https://modelseed.org/annotation/projects/aiale-06-25-2026/
+- DEV (internal test): https://modelseed.org/annotation/projects/aiale-dev/
 
 Both sites are built from THIS single codebase. They differ only in which
 database snapshot is baked in, and the UI automatically hides views whose data is
@@ -69,7 +69,7 @@ the UI gates views on them:
 
 - The TFMN1 publication snapshot DB omits `verAB_barcodes` -> `hasBarcodes` is
   false -> the Barcode Charts tab is hidden on the public site.
-- The full internal DB has barcodes -> the tab is shown on the private site.
+- The full DB has barcodes -> the tab is shown on the dev site.
 
 Same code, different database, different visible surface. See
 `docs/ARCHITECTURE.md`.
@@ -125,7 +125,7 @@ badge and Changelog. Viewer version is the semantic release in `package.json`;
 data version is the active mirror snapshot timestamp, with file mtime and static
 manifest metadata shown separately. Versioning starts at `1.0.0`; see
 [`docs/DEPLOYMENT_VERSIONING.md`](docs/DEPLOYMENT_VERSIONING.md) for the
-`deploy/aiale-dev`, `deploy/aiale-public`, and `deploy/aiale-private` workflow.
+`deploy/aiale-dev` and `deploy/aiale-public` workflow.
 
 ## Database performance
 
@@ -149,7 +149,7 @@ refreshes. Database files live under `data/` and are not committed.
 | `STATIC_EXPORT` | - | `1` switches the build to static `output: export` |
 | `BASE_PATH` | - | URL base path for a static build (e.g. `/annotation/projects/aiale`) |
 | `VIEWER_VERSION` | `package.json` version | Static build viewer version override |
-| `DEPLOYMENT_CHANNEL` | inferred from `BASE_PATH` | Static channel: `dev`, `public`, or `private` |
+| `DEPLOYMENT_CHANNEL` | inferred from `BASE_PATH` | Static channel: `dev` or `public` |
 | `DEPLOYMENT_BRANCH` | inferred from `BASE_PATH` | Static deploy branch pointer shown in the viewer |
 | `GIT_COMMIT` | current git commit | Static build commit override |
 

@@ -58,7 +58,7 @@ static artifacts at build time.
 | Instance | URL | Database baked in | Barcode tab | Audience |
 |---|---|---|---|---|
 | PUBLIC (publication snapshot) | https://modelseed.org/annotation/projects/aiale/ | TFMN1-only trimmed mirror (no `verAB_barcodes`) | HIDDEN (data absent) | Public, launches with the robotic-experiment paper |
-| PRIVATE (internal, unlisted) | https://modelseed.org/annotation/projects/aiale-06-25-2026/ | Full mirror (all experiments + barcodes) | SHOWN | Internal; share by URL only |
+| DEV (internal test) | https://modelseed.org/annotation/projects/aiale-dev/ | Full mirror (all experiments + barcodes) | SHOWN | Internal test deployment before promotion |
 
 The TFMN1 trimmed database is produced upstream by N. Spahr
 (`lims_mirror_TFMN1.db`: TFMN1 experiment only, `verAB_barcodes` omitted). The full
@@ -67,7 +67,7 @@ mirror is the standard nightly LIMS mirror.
 The two webroots live under fliu's space (group `cels`, group-writable; we can write
 FILES but do not own the directories):
 - `/scratch1/fliu/html/modelseed_annotation/projects/aiale/`
-- `/scratch1/fliu/html/modelseed_annotation/projects/aiale-06-25-2026/`
+- `/scratch1/fliu/html/modelseed_annotation/projects/aiale-dev/`
 
 ## 5. Static data pipeline
 
@@ -106,7 +106,7 @@ The upstream mirror has zero indexes, so cold joins on the 223k-row `Mutations` 
 - Result: `/api/mutations` (the heavy joined endpoint) drops from ~19s to ~0.8s.
 
 For the dual deploy we maintain two indexed copies:
-- `data/lims_indexed.db` - full mirror (private instance)
+- `data/lims_indexed.db` - full mirror (dev instance)
 - `data/lims_TFMN1_indexed.db` - TFMN1 trimmed mirror (public instance)
 
 ## 7. Pitfalls baked into the tooling
@@ -133,8 +133,8 @@ cd /scratch/vsetlur/ai-ale-lims-data-viewer
 conda activate ai-ale-dev
 
 # --- choose ONE instance ---
-# PUBLIC (TFMN1 trimmed): DB=data/lims_TFMN1_indexed.db; BP=/annotation/projects/aiale;            DST=/scratch1/fliu/html/modelseed_annotation/projects/aiale
-# PRIVATE (full):         DB=data/lims_indexed.db;        BP=/annotation/projects/aiale-06-25-2026; DST=/scratch1/fliu/html/modelseed_annotation/projects/aiale-06-25-2026
+# PUBLIC (TFMN1 trimmed): DB=data/lims_TFMN1_indexed.db; BP=/annotation/projects/aiale;     DST=/scratch1/fliu/html/modelseed_annotation/projects/aiale
+# DEV (full):             DB=data/lims_indexed.db;        BP=/annotation/projects/aiale-dev; DST=/scratch1/fliu/html/modelseed_annotation/projects/aiale-dev
 
 # 1. point a server at this instance's DB so prebake snapshots the right capability flags
 SQLITE_PATH="$PWD/$DB" PORT=3457 npm start &   # or ops/serve.sh on poplar
@@ -152,7 +152,7 @@ curl -s -o /dev/null -w "root %{http_code}\n" "https://modelseed.org$BP/"
 curl -s -D - -o /dev/null -H "Range: bytes=0-99" "https://modelseed.org$BP/db/lims.db" | grep -i 206
 ```
 
-Expect `hasBarcodes` false for the public/TFMN1 instance and true for the private/full
+Expect `hasBarcodes` false for the public/TFMN1 instance and true for the dev/full
 instance, from the identical code. Repeat the block for the other instance. Because
 `build:static` wipes `.next`, run a fresh `npm run build` before restarting any long-lived
 server afterward (see Pitfalls).

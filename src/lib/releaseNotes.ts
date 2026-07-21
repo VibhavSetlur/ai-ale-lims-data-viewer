@@ -6,6 +6,11 @@ export interface ReleaseNote {
 
 export const releaseNotes: readonly ReleaseNote[] = [
   {
+    version: '1.7.0',
+    date: '2026-07-21',
+    summary: 'Added a "Report an issue" link in the sidebar that opens guided GitHub issue forms for bug reports and feature requests. Added structured issue forms so feedback captures the deployment, tab, and details. Removed the private deployment channel; the viewer now documents only the Dev and Public deployments plus Server mode.',
+  },
+  {
     version: '1.6.3',
     date: '2026-07-14',
     summary: 'Fixed pairing-table hover percentages and export values that could exceed 100% when multiple samples or transfers were selected. The VerA / VerB partner pairing table now reports mean per-sample abundance instead of the summed per-sample fraction, so hover percentages stay interpretable. Each tooltip also shows total reads across all selected samples and the count of samples where the variant is present, giving users the full context behind the mean value. Export images and CSV reflect the same mean-based figures.',

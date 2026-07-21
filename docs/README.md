@@ -7,7 +7,7 @@ deeper.
 | Document | Read it for | Audience |
 |---|---|---|
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | System design, the dual server/static run modes, the data-driven dual-deployment model, the full re-deploy procedure, and pitfalls | Developers, maintainers |
-| [`DEPLOYMENT_VERSIONING.md`](DEPLOYMENT_VERSIONING.md) | Version badge, Changelog, deploy branch pointers, dev/public/private differences, and promotion workflow | Developers, maintainers, reviewers |
+| [`DEPLOYMENT_VERSIONING.md`](DEPLOYMENT_VERSIONING.md) | Version badge, Changelog, deploy branch pointers, dev/public differences, and promotion workflow | Developers, maintainers, reviewers |
 | [`DATA_MODEL.md`](DATA_MODEL.md) | The LIMS tables the views depend on and how the viewer maps them; the provenance rule | Reviewers, anyone reproducing a value |
 | [`RESEARCHER_GUIDE.md`](RESEARCHER_GUIDE.md) | How a biologist actually uses the viewer: selecting samples, reading the heatmap and copy-number trajectories, growth curves, barcode charts, and exporting publication figures | Researchers, reviewers |
 

@@ -20,7 +20,6 @@ VIEWER_VERSION="${VIEWER_VERSION:-$(node -p 'require("./package.json").version')
 GIT_COMMIT="${GIT_COMMIT:-$(git rev-parse --short=12 HEAD 2>/dev/null || printf 'unknown')}"
 case "$BASE_PATH" in
   */aiale-dev) DEPLOYMENT_CHANNEL="${DEPLOYMENT_CHANNEL:-dev}"; DEPLOYMENT_BRANCH="${DEPLOYMENT_BRANCH:-deploy/aiale-dev}" ;;
-  */aiale-06-25-2026) DEPLOYMENT_CHANNEL="${DEPLOYMENT_CHANNEL:-private}"; DEPLOYMENT_BRANCH="${DEPLOYMENT_BRANCH:-deploy/aiale-private}" ;;
   */aiale) DEPLOYMENT_CHANNEL="${DEPLOYMENT_CHANNEL:-public}"; DEPLOYMENT_BRANCH="${DEPLOYMENT_BRANCH:-deploy/aiale-public}" ;;
   *) DEPLOYMENT_CHANNEL="${DEPLOYMENT_CHANNEL:-dev}"; DEPLOYMENT_BRANCH="${DEPLOYMENT_BRANCH:-main}" ;;
 esac

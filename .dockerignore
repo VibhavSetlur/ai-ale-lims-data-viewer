@@ -1,7 +1,13 @@
 node_modules
 .next
+out
 .git
 data
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
 *.md
 .env*
 !.env.example

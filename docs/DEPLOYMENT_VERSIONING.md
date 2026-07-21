@@ -1,7 +1,7 @@
 # Deployment Versioning
 
 Versioning starts at `1.0.0` for publication tracking. The same source code can be
-built into three different static deployments, and each deployment records its own
+built into two different static deployments, and each deployment records its own
 branch pointer, base path, database, and visible capabilities.
 
 ## Branch Roles
@@ -11,7 +11,6 @@ branch pointer, base path, database, and visible capabilities.
 | `main` | server/local | runtime DB | follows active DB | Integration branch for feature and fix work |
 | `deploy/aiale-dev` | `https://modelseed.org/annotation/projects/aiale-dev/` | `data/lims_indexed.db` | shown when `verAB_barcodes` exists | Dev deployment before promotion |
 | `deploy/aiale-public` | `https://modelseed.org/annotation/projects/aiale/` | `data/lims_TFMN1_indexed.db` | hidden | Public publication snapshot |
-| `deploy/aiale-private` | `https://modelseed.org/annotation/projects/aiale-06-25-2026/` | `data/lims_indexed.db` | shown when `verAB_barcodes` exists | Private internal full-data snapshot |
 
 `main` is not the deployment record. The `deploy/*` branches are the branch
 pointers that say which code revision belongs to each static URL.
@@ -21,7 +20,7 @@ pointers that say which code revision belongs to each static URL.
 The viewer header shows a compact version badge. The left sidebar has a Changelog button that opens a large release and data provenance panel. Together these surfaces show:
 
 - viewer semantic version, starting at `1.0.0`, from `package.json` or the build override;
-- deployment channel labels `dev`, `public`, `private`, or `server` with truthful display names `Dev`, `Public`, `Private`, and `Server`;
+- deployment channel labels `dev`, `public`, or `server` with truthful display names `Dev`, `Public`, and `Server`;
 - deployment branch;
 - build commit;
 - server/static mode;
@@ -40,7 +39,7 @@ Static builds set these environment variables at build time:
 | Variable | Meaning |
 |---|---|
 | `NEXT_PUBLIC_VIEWER_VERSION` | Viewer semantic version, normally from `package.json` |
-| `NEXT_PUBLIC_DEPLOYMENT_CHANNEL` | `dev`, `public`, `private`, or `server` |
+| `NEXT_PUBLIC_DEPLOYMENT_CHANNEL` | `dev`, `public`, or `server` |
 | `NEXT_PUBLIC_DEPLOYMENT_BRANCH` | Branch pointer that should match the deployed URL |
 | `NEXT_PUBLIC_GIT_COMMIT` | Commit baked into the static bundle |
 | `NEXT_PUBLIC_BASE_PATH` | Static URL base path |
@@ -49,7 +48,6 @@ Static builds set these environment variables at build time:
 
 - `/annotation/projects/aiale-dev` -> `dev` channel displayed as Dev, `deploy/aiale-dev`
 - `/annotation/projects/aiale` -> `public`, `deploy/aiale-public`
-- `/annotation/projects/aiale-06-25-2026` -> `private`, `deploy/aiale-private`
 
 ## Release Flow
 
@@ -60,19 +58,18 @@ Static builds set these environment variables at build time:
    `SRC=data/lims_indexed.db`, `BASE_PATH=/annotation/projects/aiale-dev`.
 5. Verify the dev URL over HTTPS, including static JSON and SQLite range requests.
 6. At this point `main` and dev should align on version and commit.
-7. Only after acceptance, fast-forward the public or private deploy branch or branches.
-8. Bake each public or private URL with its own DB and base path.
-9. Move a public or private deploy branch only after that exact URL is rebuilt,
+7. Only after acceptance, fast-forward the public deploy branch.
+8. Bake the public URL with its own DB and base path.
+9. Move the public deploy branch only after that exact URL is rebuilt,
    permission-fixed, and verified.
 
 ## Version Alignment
 
 During active work, `main` can be ahead of every deployed URL. After dev is
 rebuilt and verified, `main` and `deploy/aiale-dev` should point to the same
-viewer version. Public and private branches remain at their prior version until
-each URL is rebuilt and verified. After promotion, the promoted public or private
-branch should align with the accepted dev commit, while any unpromoted branch
-remains intentionally different.
+viewer version. The public branch remains at its prior version until the URL is
+rebuilt and verified. After promotion, the public branch should align with the
+accepted dev commit.
 
 
 ## Channel Differences
@@ -81,7 +78,7 @@ The codebase is shared. Differences are data and deployment metadata:
 
 - Public uses the TFMN1 trimmed database. It omits `verAB_barcodes`, so the
   Barcode Charts tab is hidden by the `hasBarcodes` capability flag.
-- Private and dev use the full database. They show Barcode Charts when
+- Dev uses the full database. It shows Barcode Charts when
   `verAB_barcodes` exists and has rows.
 - Server/local mode follows the active runtime database, so capabilities can vary.
 - The dashboard now checks barcode capability through a lightweight

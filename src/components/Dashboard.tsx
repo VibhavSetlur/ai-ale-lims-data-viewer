@@ -9,7 +9,7 @@ import {
   Database, Search, Sun, Moon, Table2, Dna,
   Server, HardDrive, RefreshCw, AlertCircle,
   ChevronLeft, ChevronRight, X, Clock, GitBranch,
-  BookOpen, Compass, ScrollText,
+  BookOpen, Compass, ScrollText, Bug, ExternalLink,
 } from 'lucide-react';
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
@@ -19,6 +19,8 @@ import GuideAssistant, { type GuideAction } from './GuideAssistant';
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
+
+const ISSUES_NEW_URL = 'https://github.com/VibhavSetlur/ai-ale-lims-data-viewer/issues/new/choose';
 
 interface TableInfo {
   name: string;
@@ -389,7 +391,7 @@ export default function Dashboard({ initialTables, buildInfo }: DashboardProps) 
                       <span className="text-[var(--text-soft)]">Barcodes</span><span>{channelInfo.barcodePolicy}</span>
                     </div>
                     <div className="mt-3 pt-2 border-t border-[var(--border)] space-y-1">
-                      {(['dev', 'public', 'private', 'server'] as const).map(channel => (
+                      {(['dev', 'public', 'server'] as const).map(channel => (
                         <div key={channel} className={cn('flex items-start gap-2 rounded px-1.5 py-1', channel === buildInfo.channel ? 'bg-[var(--accent-50)]' : '')}>
                           <GitBranch className="w-3.5 h-3.5 mt-0.5 text-[var(--text-faint)] shrink-0" />
                           <div className="min-w-0">
@@ -619,6 +621,11 @@ export default function Dashboard({ initialTables, buildInfo }: DashboardProps) 
                   <BookOpen className="w-4 h-4 shrink-0 text-[var(--accent-600)]" />
                   <span className="flex-1 text-left">Help</span>
                 </button>
+                <a href={ISSUES_NEW_URL} target="_blank" rel="noopener noreferrer" className="lims-nav mt-0.5" title="Report a bug or request a feature on GitHub">
+                  <Bug className="w-4 h-4 shrink-0 text-[var(--accent-600)]" />
+                  <span className="flex-1 text-left">Report an issue</span>
+                  <ExternalLink className="w-3 h-3 shrink-0 opacity-50" />
+                </a>
               </div>
             </>
           ) : (
@@ -640,6 +647,7 @@ export default function Dashboard({ initialTables, buildInfo }: DashboardProps) 
                 <button onClick={() => setShowGuide(true)} className="p-1.5 rounded-md text-[var(--text-faint)] hover:bg-[var(--surface-3)]" title="Guide"><Compass className="w-4 h-4" /></button>
                 <button onClick={() => setShowChangesPanel(true)} className="p-1.5 rounded-md text-[var(--text-faint)] hover:bg-[var(--surface-3)]" title="Changelog"><ScrollText className="w-4 h-4" /></button>
                 <button onClick={() => setShowHelp(true)} className="p-1.5 rounded-md text-[var(--text-faint)] hover:bg-[var(--surface-3)]" title="Help"><BookOpen className="w-4 h-4" /></button>
+                <a href={ISSUES_NEW_URL} target="_blank" rel="noopener noreferrer" className="p-1.5 rounded-md text-[var(--text-faint)] hover:bg-[var(--surface-3)]" title="Report an issue"><Bug className="w-4 h-4" /></a>
               </div>
             </div>
           )}

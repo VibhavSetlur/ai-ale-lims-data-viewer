@@ -46,7 +46,7 @@ const SECTIONS: Section[] = [
         'Database Tables: the raw LIMS tables with search, sort, filters, pagination, and CSV export. Use this to audit source rows or trace where a number came from. (Hidden on the public static deployment.)',
         'Mutation Explorer: the curated scientific views built on those tables — Sample Selection, Comparative View (heatmap), Copy Number, and Barcode Charts.',
       ] },
-      { kind: 'note', text: 'The public and private deployments are built from different database snapshots, so they can show different tabs. If Barcode Charts is missing, that snapshot has no non-empty verAB_barcodes table.' },
+      { kind: 'note', text: 'The Dev and Public deployments are built from different database snapshots, so they can show different tabs. If Barcode Charts is missing, that snapshot has no non-empty verAB_barcodes table.' },
     ],
   },
   {
