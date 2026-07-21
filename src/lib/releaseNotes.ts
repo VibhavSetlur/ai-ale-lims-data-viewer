@@ -6,6 +6,11 @@ export interface ReleaseNote {
 
 export const releaseNotes: readonly ReleaseNote[] = [
   {
+    version: '1.9.0',
+    date: '2026-07-21',
+    summary: 'Added a verAB combos column to the Sample Selection table that shows how many distinct verA-verB combinations were detected for each sample. The column appears only on deployments that include barcode data, and samples without barcode data show a dash.',
+  },
+  {
     version: '1.8.0',
     date: '2026-07-21',
     summary: 'Added a Question issue form so you can ask about the viewer, the data, or how something works, separate from bug reports and feature requests.',

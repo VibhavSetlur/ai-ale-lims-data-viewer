@@ -13,6 +13,7 @@ export interface MutationSample {
   strain?: string;
   donor_dna?: string;
   has_barcodes?: boolean;
+  verab_combinations?: number;
   selection_note?: string;
   growth_curve?: { t: number; od: number }[];
   growth_curve_source?: {
@@ -118,6 +119,7 @@ interface SeqSampleRow {
   seqorder: string | null;
   has_barcodes: number | null;
   barcode_read_count: number | null;
+  verab_combinations: number | null;
 }
 
 interface MutationRawRow {
@@ -334,7 +336,8 @@ function buildSamplesSql(opts: { experiment: boolean; registry: boolean; barcode
           MIN(v."Seqorder") AS seqorder,
           'barcode' AS source,
           1 AS has_barcodes,
-          SUM(COALESCE(v."Count", 0)) AS barcode_read_count
+          SUM(COALESCE(v."Count", 0)) AS barcode_read_count,
+          COUNT(DISTINCT v."Candidate") AS verab_combinations
         FROM verAB_barcodes v
         LEFT JOIN Seq_samples ss_filter
           ON ss_filter."Sequencing_sample" = v."Seqsample" AND ss_filter.deleted = 0
@@ -347,6 +350,7 @@ function buildSamplesSql(opts: { experiment: boolean; registry: boolean; barcode
       ms.seqorder                                AS seqorder,
       ms.has_barcodes                            AS has_barcodes,
       ms.barcode_read_count                      AS barcode_read_count,
+      ms.verab_combinations                      AS verab_combinations,
       ss."Experiment"                            AS experiment_from_seq,
       ss."Sample_Name"                           AS sample_name,
       ss."Population_or_Single_colony?"          AS pop_or_colony_raw,
@@ -364,7 +368,8 @@ function buildSamplesSql(opts: { experiment: boolean; registry: boolean; barcode
           MAX(CASE WHEN source = 'barcode' THEN seqorder END)
         ) AS seqorder,
         MAX(has_barcodes) AS has_barcodes,
-        SUM(barcode_read_count) AS barcode_read_count
+        SUM(barcode_read_count) AS barcode_read_count,
+        MAX(verab_combinations) AS verab_combinations
       FROM (
         SELECT
           "Seq_sample" AS seq_sample,
@@ -372,7 +377,8 @@ function buildSamplesSql(opts: { experiment: boolean; registry: boolean; barcode
           MIN("Seqorder") AS seqorder,
           'mutation' AS source,
           0 AS has_barcodes,
-          0 AS barcode_read_count
+          0 AS barcode_read_count,
+          0 AS verab_combinations
         FROM Mutations
         WHERE ${inner.join(' AND ')}
         GROUP BY "Seq_sample"
@@ -771,6 +777,7 @@ export async function GET(req: NextRequest) {
         strain: r.strain ?? undefined,
         donor_dna,
         has_barcodes: Boolean(r.has_barcodes),
+        verab_combinations: Number(r.verab_combinations ?? 0),
         selection_note: describeSelection(popOrColony ?? undefined, r.notes),
         growth_curve: growth_curve && growth_curve.length >= 2 ? growth_curve : undefined,
         growth_curve_source,
