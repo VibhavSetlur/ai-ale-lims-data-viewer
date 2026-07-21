@@ -51,7 +51,7 @@ function cleanChannel(value: string | undefined): DeploymentChannel {
 export function getBuildInfo(): BuildInfo {
   const mode = process.env.NEXT_PUBLIC_STATIC === '1' ? 'static' : 'server';
   return {
-    version: process.env.NEXT_PUBLIC_VIEWER_VERSION || '1.7.0',
+    version: process.env.NEXT_PUBLIC_VIEWER_VERSION || '1.7.1',
     channel: cleanChannel(process.env.NEXT_PUBLIC_DEPLOYMENT_CHANNEL),
     branch: process.env.NEXT_PUBLIC_DEPLOYMENT_BRANCH || (mode === 'static' ? 'deploy/aiale-public' : 'main'),
     commit: process.env.NEXT_PUBLIC_GIT_COMMIT || 'local',

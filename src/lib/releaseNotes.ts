@@ -6,6 +6,11 @@ export interface ReleaseNote {
 
 export const releaseNotes: readonly ReleaseNote[] = [
   {
+    version: '1.7.1',
+    date: '2026-07-21',
+    summary: 'Fixed relative abundance bar charts that could total more than 100 percent when All variants were selected; stacked heights are now budget clamped so a sample never exceeds the 100 percent line, and the exported figures match. Fixed duplicate barcode measurements across seqorders being dropped; per-sample abundances and pairing-table percentages now use complete counts. Fixed grouped sample headers not lining up with the vertical bars when many samples are selected; headers and bars now share one layout so they stay aligned at any sample count.',
+  },
+  {
     version: '1.7.0',
     date: '2026-07-21',
     summary: 'Added a "Report an issue" link in the sidebar that opens guided GitHub issue forms for bug reports and feature requests. Added structured issue forms so feedback captures the deployment, tab, and details. Removed the private deployment channel; the viewer now documents only the Dev and Public deployments plus Server mode.',

@@ -91,3 +91,6 @@ CLAUDE.md
 AGENTS.md
 GEMINI.md
 /docs/MANUSCRIPT_INTEGRATION.md
+
+# operator prompt shortcuts (session starters, not for publication)
+docs/prompts/
