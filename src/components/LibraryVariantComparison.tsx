@@ -781,7 +781,10 @@ function BarsChart({ variants, samples, colors, metric, maxValue, valueFor, hove
                     <rect x={cellX + 1} y={bandY + 1} width={cellW - 2} height={BAR_BAND_ROW_H - 2} rx="2" fill="var(--surface-2)" stroke="var(--border)" strokeWidth="0.75" />
                     <text x={cellX + cellW / 2} y={bandY + BAR_BAND_ROW_H * 0.72} textAnchor="middle" fontSize="9" fill="var(--text-faint)" style={{ textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                       <title>{`${band.levelLabel}: ${cell.label}\n${cell.rows.length} sample${cell.rows.length === 1 ? '' : 's'}`}</title>
-                      {cell.label}
+                      {(() => {
+                        const maxChars = Math.max(1, Math.floor((cellW - 8) / 6.5));
+                        return cell.label.length > maxChars ? `${cell.label.slice(0, Math.max(1, maxChars - 1))}…` : cell.label;
+                      })()}
                     </text>
                   </g>
                 );
