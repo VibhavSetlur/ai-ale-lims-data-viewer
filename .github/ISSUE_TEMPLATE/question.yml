@@ -1,0 +1,62 @@
+name: Question
+description: Ask a question about the viewer, the data, or how something works.
+title: "[Question]: "
+labels:
+  - question
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This is the place to ask anything about the viewer or the data. For example, what a number means, how a chart is calculated, or where to find something. No technical knowledge needed. If your question turns out to be a bug or a feature idea, we can take it from there.
+
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: Which version of the viewer are you using?
+      options:
+        - "Public (modelseed.org/annotation/projects/aiale/)"
+        - "Dev (modelseed.org/annotation/projects/aiale-dev/)"
+        - "Not sure"
+    validations:
+      required: false
+
+  - type: dropdown
+    id: tab
+    attributes:
+      label: Which tab or view is your question about?
+      options:
+        - Database Tables
+        - Mutation Explorer
+        - Sample Selection
+        - Compare Mutations
+        - Compare Growth Curves
+        - Compare Library Variants
+        - Copy Number
+        - Barcode Charts
+        - Not sure / general
+    validations:
+      required: false
+
+  - type: input
+    id: location
+    attributes:
+      label: What are you looking at?
+      description: "For example a chart, a column, a number, a sample, or a table."
+    validations:
+      required: false
+
+  - type: textarea
+    id: question
+    attributes:
+      label: What would you like to know?
+      description: "Ask in your own words. For example: when I hover over the pairing chart I see percentages, what do those mean?"
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Anything else that would help us answer?
+      description: "You can drag in a screenshot of what you are looking at."
+    validations:
+      required: false
