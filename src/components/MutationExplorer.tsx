@@ -453,7 +453,7 @@ function sortSamples(samples: MutationSample[]): MutationSample[] {
     const ad = a.donor_dna || '';
     const bd = b.donor_dna || '';
     if (ad !== bd) return ad.localeCompare(bd);
-    // Sort by transfer NUMBER whenever both samples have one (not just ALE) —
+    // Sort by transfer NUMBER whenever both samples have one (not just ALE):
     // any time-course experiment benefits from T1 < T6 < T11 < T25 ordering
     // instead of the lexicographic T1 < T11 < T18 < T25 < T6.
     if (typeof a.transfer === 'number' && typeof b.transfer === 'number' && a.transfer !== b.transfer) {
@@ -541,7 +541,7 @@ export default function MutationExplorer() {
   };
   useEffect(() => { load(experiment, registry); }, [experiment, registry]);
 
-  // Changing the experiment also resets the registry — the set of available
+  // Changing the experiment also resets the registry: the set of available
   // registries differs by experiment, so a stale pin would silently fall back
   // to the modal-registry warning every time.
   const onExperimentChange = (next: string) => { setRegistry(''); setExperiment(next); };
@@ -708,7 +708,7 @@ export default function MutationExplorer() {
         </div>
       )}
 
-      {/* Dataset notes only render when toggled — they never steal table space. */}
+      {/* Dataset notes only render when toggled; they never steal table space. */}
       {!error && showNotes && data?.warnings && data.warnings.length > 0 && (
         <div className="flex items-start gap-2 mx-3 mt-2 p-2 bg-amber-50/70 dark:bg-amber-900/20 text-amber-800 dark:text-amber-200 text-[11px] rounded border border-amber-200 dark:border-amber-800">
           <Info className="w-3.5 h-3.5 shrink-0 mt-0.5" />
@@ -1067,7 +1067,7 @@ function SampleSelectionPanel({
   const collapseAll = () => setCollapsed(new Set(grouped.map(g => g.key)));
   const expandAll = () => setCollapsed(new Set());
 
-  // Select first + last transfer per group — useful for time-course experiments
+  // Select first + last transfer per group - useful for time-course experiments
   // where you usually want the endpoints, not every intermediate.
   const selectEndpoints = () => {
     const next = new Set(selected);
@@ -1377,14 +1377,14 @@ function SampleSelectionPanel({
                            <td className="px-2 py-1 text-right tabular-nums">
                              {s.has_barcodes && (s.verab_combinations ?? 0) > 0
                                ? <span className="tabular-nums text-[var(--text)]">{(s.verab_combinations ?? 0).toLocaleString()}</span>
-                                : <span className="text-[var(--text-faint)]">—</span>}
+                                 : <span className="text-[var(--text-faint)]">-</span>}
 
                            </td>
                          )}
-                         <td className="px-2 py-1 text-right tabular-nums">
-                           {muts > 0 ? (
-                             <span className="inline-block px-1.5 py-0.5 rounded lims-pill-mut text-[10.5px] font-semibold">{muts}</span>
-                           ) : <span className="text-[var(--text-faint)]">—</span>}
+                          <td className="px-2 py-1 text-right tabular-nums">
+                            {muts > 0 ? (
+                              <span className="inline-block px-1.5 py-0.5 rounded lims-pill-mut text-[10.5px] font-semibold">{muts}</span>
+                            ) : <span className="text-[var(--text-faint)]">-</span>}
                          </td>
                         <td className="px-2 py-1">
                           <div className="flex justify-end">
@@ -1579,7 +1579,7 @@ function ComparativePanel({
   }, [samples, selected, groupOrder]);
 
   // shared y-max and x-extent so growth curves are visually comparable across columns.
-  // Uses visibleSamples (declared below) — JS hoisting handles the cycle since
+  // Uses visibleSamples (declared below); JS hoisting handles the cycle since
   // both are useMemo values referenced at render time. We re-derive when either changes.
   const curveScale = useMemo(() => {
     let yMax = 0;
@@ -2152,11 +2152,11 @@ function ComparativePanel({
                   <th
                     key={cell.key}
                     colSpan={cell.colCount}
-                    onClick={() => setDetailGroup({ levelKey: band.levelKey, levelLabel: band.levelLabel, label: cell.label || '—', rows: cell.fullRows })}
+                    onClick={() => setDetailGroup({ levelKey: band.levelKey, levelLabel: band.levelLabel, label: cell.label || '-', rows: cell.fullRows })}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' || e.key === ' ') {
                         e.preventDefault();
-                        setDetailGroup({ levelKey: band.levelKey, levelLabel: band.levelLabel, label: cell.label || '—', rows: cell.fullRows });
+                        setDetailGroup({ levelKey: band.levelKey, levelLabel: band.levelLabel, label: cell.label || '-', rows: cell.fullRows });
                       }
                     }}
                     tabIndex={0}
@@ -2169,7 +2169,7 @@ function ComparativePanel({
                     )}
                     title={`Open ${band.levelLabel} group details (${cell.rows.length} visible of ${cell.fullRows.length} selected sample${cell.fullRows.length === 1 ? '' : 's'})`}
                     >
-                      {cell.label || '—'}
+                      {cell.label || '-'}
 
                   </th>
                 ))}
@@ -2363,7 +2363,7 @@ function ComparativePanel({
                           : `${m.gene} ${m.variant} in ${s.name}: no data`)
                       }
                     >
-                      {hasVal ? formatMetric(v, m.metric) : (providedUnobserved ? <span className="text-amber-600 dark:text-amber-400 text-[10px] font-semibold" title="provided in donor DNA, 0% abundance">0%</span> : '—')}
+                      {hasVal ? formatMetric(v, m.metric) : (providedUnobserved ? <span className="text-amber-600 dark:text-amber-400 text-[10px] font-semibold" title="provided in donor DNA, 0% abundance">0%</span> : '-')}
                     </td>
                   );
                 })}
@@ -3661,7 +3661,7 @@ function SampleDetailModal({
                           {r.mutation.gene_product && <div className="text-[10px] text-[var(--text-faint)] truncate italic">{r.mutation.gene_product}</div>}
                         </td>
                         <td className="px-2 py-1 text-[var(--text-soft)]">{r.mutation.type}</td>
-                        <td className="px-2 py-1 text-right tabular-nums">{typeof r.value === 'number' ? formatMetric(r.value, r.mutation.metric) : '—'}</td>
+                        <td className="px-2 py-1 text-right tabular-nums">{typeof r.value === 'number' ? formatMetric(r.value, r.mutation.metric) : '-'}</td>
                         <td className="px-2 py-1 text-right">{r.provided ? <span className="text-amber-600 dark:text-amber-400 font-semibold">yes</span> : ''}</td>
                       </tr>
                     ))}
@@ -4653,7 +4653,7 @@ function CopyNumberPanel({
             className="lims-select"
           >
             {cnRows.map(r => (
-              <option key={r.id} value={r.id}>{r.gene}{r.gene_product ? ` — ${r.gene_product}` : ''}</option>
+              <option key={r.id} value={r.id}>{r.gene}{r.gene_product ? `: ${r.gene_product}` : ''}</option>
             ))}
           </select>
         </label>
