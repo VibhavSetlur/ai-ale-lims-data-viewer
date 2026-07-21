@@ -83,6 +83,7 @@ const BAR_PAD_L = 64;
 const BAR_PAD_R = 26;
 const BAR_PAD_T = 18;
 const BAR_PAD_B = 92;
+const BAR_BAND_ROW_H = 16;
 const HEATMAP_BAND_H = 24;
 
 function parseCandidate(label: string): { a: string; b: string } | null {
@@ -742,92 +743,108 @@ interface ChartProps {
   showGroupedHeaders: boolean;
 }
 
-function BandsHeaderStrip({ bands, sampleCount, colWidth, padLeft, padRight }: { bands: ColumnBand[]; sampleCount: number; colWidth: number; padLeft: number; padRight: number }) {
-  const gridTemplateColumns = `${padLeft}px repeat(${sampleCount}, ${colWidth}px) ${padRight}px`;
-  return (
-    <div className="space-y-0.5 text-[9px] uppercase tracking-wide text-[var(--text-faint)]" style={{ width: padLeft + sampleCount * colWidth + padRight }}>
-      {bands.map(band => (
-        <div key={band.levelKey} className="grid gap-0.5" style={{ gridTemplateColumns }}>
-          <div className="flex items-center justify-end pr-2 font-semibold">{band.levelLabel}</div>
-          {band.cells.map(cell => (
-            <div key={cell.key} className="min-w-0 rounded border border-[var(--border)] bg-[var(--surface-2)] px-1 py-0.5 text-center" style={{ gridColumn: `span ${cell.colCount}` }} title={`${band.levelLabel}: ${cell.label}\n${cell.rows.length} sample${cell.rows.length === 1 ? '' : 's'}`}>
-              <div className="truncate">{cell.label}</div>
-            </div>
-          ))}
-          <div />
-        </div>
-      ))}
-    </div>
-  );
-}
-
 function BarsChart({ variants, samples, colors, metric, maxValue, valueFor, hoveredVariantId, activeVariantIds, onHoverVariant, onTip, columnBands, showGroupedHeaders }: ChartProps) {
   const chartHeight = 390;
-  const width = Math.max(720, BAR_PAD_L + samples.length * BAR_COL_W + BAR_PAD_R);
+  // One source of truth for the SVG width: pure function of sample count and column
+  // width, no Math.max(720,...) floor. The outer overflow-x-auto handles scrolling.
+  const width = BAR_PAD_L + samples.length * BAR_COL_W + BAR_PAD_R;
+  // Header band reserved at the top of the SVG. Rows rendered in the same coordinate
+  // system as bars so they cannot drift from column rounding.
+  const headerH = showGroupedHeaders ? columnBands.length * BAR_BAND_ROW_H : 0;
+  // Plot area sits below the header band. innerH is the 100% gridline height; all
+  // bar height math (including the issue-3 running-budget clamp) uses this value.
   const innerH = chartHeight - BAR_PAD_T - BAR_PAD_B;
-  const baseY = BAR_PAD_T + innerH;
+  const plotTop = headerH + BAR_PAD_T;
+  const baseY = plotTop + innerH;
+  const svgHeight = chartHeight + headerH;
   const sampleTotals = samples.map(sample => variants.reduce((sum, variant) => sum + valueFor(sample.id, variant.variantId), 0));
   const yMax = Math.max(maxValue, ...sampleTotals, metric === 'abundance' ? 0.01 : 1);
   const ticks = [0, 0.25, 0.5, 0.75, 1];
   const groupComposites = samples.map(sample => columnBands[0]?.cells.find(cell => cell.rows.some(row => row.id === sample.id))?.key ?? '');
   return (
     <div className="overflow-x-auto p-3">
-      <div className="space-y-2" style={{ width }}>
-        {showGroupedHeaders && <BandsHeaderStrip bands={columnBands} sampleCount={samples.length} colWidth={BAR_COL_W} padLeft={BAR_PAD_L} padRight={BAR_PAD_R} />}
-        <svg width={width} height={chartHeight} role="img" aria-label="Library variant vertical stacked bars">
-          {ticks.map(tick => {
-            const y = baseY - tick * innerH;
-            // Relative % bars are normalized per sample to 100%, so the axis is a
-            // fixed 0..100% scale; count mode keeps the data-driven yMax scale.
-            const tickLabel = metric === 'abundance' ? fmtValue(tick, metric) : fmtValue(yMax * tick, metric);
-            return <g key={tick}><line x1={BAR_PAD_L} x2={width - BAR_PAD_R} y1={y} y2={y} stroke="var(--border)" /><text x={BAR_PAD_L - 8} y={y + 3} textAnchor="end" fontSize="10" fill="var(--text-faint)">{tickLabel}</text></g>;
-          })}
-          <text x={14} y={BAR_PAD_T + innerH / 2} transform={`rotate(-90 14 ${BAR_PAD_T + innerH / 2})`} textAnchor="middle" fontSize="10" fill="var(--text-soft)">{metric === 'count' ? 'count' : 'relative abundance'}</text>
-          <line x1={BAR_PAD_L} x2={BAR_PAD_L} y1={BAR_PAD_T} y2={baseY} stroke="var(--border-strong)" />
-          <line x1={BAR_PAD_L} x2={width - BAR_PAD_R} y1={baseY} y2={baseY} stroke="var(--border-strong)" />
-          {samples.slice(1).map((sample, idx) => {
-            if (groupComposites[idx] === groupComposites[idx + 1]) return null;
-            const x = BAR_PAD_L + (idx + 1) * BAR_COL_W;
-            return <line key={`div-${sample.id}`} x1={x} x2={x} y1={BAR_PAD_T} y2={baseY + 8} stroke="var(--border-strong)" strokeDasharray="4 4" opacity="0.7" />;
-          })}
-          {samples.map((sample, sampleIdx) => {
-            const slotX = BAR_PAD_L + sampleIdx * BAR_COL_W;
-            const barW = Math.min(34, BAR_COL_W * 0.62);
-            const x = slotX + (BAR_COL_W - barW) / 2;
-            let yCursor = baseY;
-            // Relative % mode: normalize every bar to its OWN sample total so each
-            // stacked bar fills to 100%. Count mode keeps the shared yMax scale.
-            const sampleTotal = variants.reduce((sum, variant) => sum + valueFor(sample.id, variant.variantId), 0);
-            const denom = metric === 'abundance' ? (sampleTotal > 0 ? sampleTotal : 1) : yMax;
-            // Running budget so cumulative stacked height never exceeds innerH (the 100%
-            // gridline). Replacing the old per-segment Math.max(0.5, ...) floor that added
-            // a fixed 0.5 px per nonzero segment regardless of true fraction, causing
-            // visible overflow with many segments (e.g. ~245 variants => ~122% overflow).
-            let remaining = innerH;
-            return (
-              <g key={sample.id}>
-                {variants.map(variant => {
-                  const value = valueFor(sample.id, variant.variantId);
-                  if (value <= 0) return null;
-                  const h = Math.min(remaining, (value / denom) * innerH);
-                  remaining -= h;
-                  yCursor -= h;
-                  // Relative % mode stacks each bar to 100% of its OWN visible total, so the
-                  // displayed percentage must match the drawn height (value / denom), not the
-                  // raw per-sample abundance. Count mode shows the raw count.
-                  const displayValue = metric === 'abundance' ? value / denom : value;
-                  const color = colors.get(variant.variantId) ?? colorForCandidate(variant.label);
-                  const dim = isDimmed(variant.variantId, hoveredVariantId, activeVariantIds);
-                  return (
-                    <rect key={variant.variantId} x={x} y={yCursor} width={barW} height={h} rx={h > 4 ? 1.5 : 0} fill={color} opacity={dim ? 0.18 : 1} stroke="rgba(15,23,42,0.18)" strokeWidth={h > 6 ? 0.4 : 0} onMouseEnter={event => { onHoverVariant(variant.variantId); onTip(event, `${variant.label}\n${sampleLabel(sample)}\n${fmtValue(displayValue, metric)}\nverA: ${variantAiA(variant) ? 'AI-generated' : 'not AI-generated'}\nverB: ${variantAiB(variant) ? 'AI-generated' : 'not AI-generated'}`); }} />
-                  );
-                })}
-                <text x={slotX + BAR_COL_W / 2} y={baseY + 18} textAnchor="end" transform={`rotate(-42 ${slotX + BAR_COL_W / 2} ${baseY + 18})`} fontSize="10" fill="var(--text-soft)">{sampleLabel(sample)}</text>
-              </g>
-            );
-          })}
-        </svg>
-      </div>
+      <svg width={width} height={svgHeight} role="img" aria-label="Library variant vertical stacked bars">
+        {/* Grouped header bands rendered in SVG using the same x-position math as bars.
+            This removes the separate CSS grid strip and eliminates layout-engine drift. */}
+        {showGroupedHeaders && columnBands.map((band, bandIdx) => {
+          const bandY = bandIdx * BAR_BAND_ROW_H;
+          let colCursor = 0;
+          return (
+            <g key={band.levelKey}>
+              <text x={BAR_PAD_L - 6} y={bandY + BAR_BAND_ROW_H * 0.72} textAnchor="end" fontSize="9" fontWeight="600" fill="var(--text-faint)" style={{ textTransform: 'uppercase', letterSpacing: '0.05em' }}>{band.levelLabel}</text>
+              {band.cells.map(cell => {
+                const cellX = BAR_PAD_L + colCursor * BAR_COL_W;
+                const cellW = cell.colCount * BAR_COL_W;
+                colCursor += cell.colCount;
+                return (
+                  <g key={cell.key}>
+                    <rect x={cellX + 1} y={bandY + 1} width={cellW - 2} height={BAR_BAND_ROW_H - 2} rx="2" fill="var(--surface-2)" stroke="var(--border)" strokeWidth="0.75" />
+                    <text x={cellX + cellW / 2} y={bandY + BAR_BAND_ROW_H * 0.72} textAnchor="middle" fontSize="9" fill="var(--text-faint)" style={{ textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                      <title>{`${band.levelLabel}: ${cell.label}\n${cell.rows.length} sample${cell.rows.length === 1 ? '' : 's'}`}</title>
+                      {(() => {
+                        const maxChars = Math.max(1, Math.floor((cellW - 8) / 6.5));
+                        return cell.label.length > maxChars ? `${cell.label.slice(0, Math.max(1, maxChars - 1))}…` : cell.label;
+                      })()}
+                    </text>
+                  </g>
+                );
+              })}
+            </g>
+          );
+        })}
+        {ticks.map(tick => {
+          const y = baseY - tick * innerH;
+          // Relative % bars are normalized per sample to 100%, so the axis is a
+          // fixed 0..100% scale; count mode keeps the data-driven yMax scale.
+          const tickLabel = metric === 'abundance' ? fmtValue(tick, metric) : fmtValue(yMax * tick, metric);
+          return <g key={tick}><line x1={BAR_PAD_L} x2={width - BAR_PAD_R} y1={y} y2={y} stroke="var(--border)" /><text x={BAR_PAD_L - 8} y={y + 3} textAnchor="end" fontSize="10" fill="var(--text-faint)">{tickLabel}</text></g>;
+        })}
+        <text x={14} y={plotTop + innerH / 2} transform={`rotate(-90 14 ${plotTop + innerH / 2})`} textAnchor="middle" fontSize="10" fill="var(--text-soft)">{metric === 'count' ? 'count' : 'relative abundance'}</text>
+        <line x1={BAR_PAD_L} x2={BAR_PAD_L} y1={plotTop} y2={baseY} stroke="var(--border-strong)" />
+        <line x1={BAR_PAD_L} x2={width - BAR_PAD_R} y1={baseY} y2={baseY} stroke="var(--border-strong)" />
+        {samples.slice(1).map((sample, idx) => {
+          if (groupComposites[idx] === groupComposites[idx + 1]) return null;
+          const x = BAR_PAD_L + (idx + 1) * BAR_COL_W;
+          // Extend dividers up through the header band so grouping reads top to bottom.
+          return <line key={`div-${sample.id}`} x1={x} x2={x} y1={0} y2={baseY + 8} stroke="var(--border-strong)" strokeDasharray="4 4" opacity="0.7" />;
+        })}
+        {samples.map((sample, sampleIdx) => {
+          const slotX = BAR_PAD_L + sampleIdx * BAR_COL_W;
+          const barW = Math.min(34, BAR_COL_W * 0.62);
+          const x = slotX + (BAR_COL_W - barW) / 2;
+          let yCursor = baseY;
+          // Relative % mode: normalize every bar to its OWN sample total so each
+          // stacked bar fills to 100%. Count mode keeps the shared yMax scale.
+          const sampleTotal = variants.reduce((sum, variant) => sum + valueFor(sample.id, variant.variantId), 0);
+          const denom = metric === 'abundance' ? (sampleTotal > 0 ? sampleTotal : 1) : yMax;
+          // Running budget so cumulative stacked height never exceeds innerH (the 100%
+          // gridline). Replacing the old per-segment Math.max(0.5, ...) floor that added
+          // a fixed 0.5 px per nonzero segment regardless of true fraction, causing
+          // visible overflow with many segments (e.g. ~245 variants => ~122% overflow).
+          let remaining = innerH;
+          return (
+            <g key={sample.id}>
+              {variants.map(variant => {
+                const value = valueFor(sample.id, variant.variantId);
+                if (value <= 0) return null;
+                const h = Math.min(remaining, (value / denom) * innerH);
+                remaining -= h;
+                yCursor -= h;
+                // Relative % mode stacks each bar to 100% of its OWN visible total, so the
+                // displayed percentage must match the drawn height (value / denom), not the
+                // raw per-sample abundance. Count mode shows the raw count.
+                const displayValue = metric === 'abundance' ? value / denom : value;
+                const color = colors.get(variant.variantId) ?? colorForCandidate(variant.label);
+                const dim = isDimmed(variant.variantId, hoveredVariantId, activeVariantIds);
+                return (
+                  <rect key={variant.variantId} x={x} y={yCursor} width={barW} height={h} rx={h > 4 ? 1.5 : 0} fill={color} opacity={dim ? 0.18 : 1} stroke="rgba(15,23,42,0.18)" strokeWidth={h > 6 ? 0.4 : 0} onMouseEnter={event => { onHoverVariant(variant.variantId); onTip(event, `${variant.label}\n${sampleLabel(sample)}\n${fmtValue(displayValue, metric)}\nverA: ${variantAiA(variant) ? 'AI-generated' : 'not AI-generated'}\nverB: ${variantAiB(variant) ? 'AI-generated' : 'not AI-generated'}`); }} />
+                );
+              })}
+              <text x={slotX + BAR_COL_W / 2} y={baseY + 18} textAnchor="end" transform={`rotate(-42 ${slotX + BAR_COL_W / 2} ${baseY + 18})`} fontSize="10" fill="var(--text-soft)">{sampleLabel(sample)}</text>
+            </g>
+          );
+        })}
+      </svg>
     </div>
   );
 }
