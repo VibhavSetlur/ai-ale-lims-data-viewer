@@ -292,9 +292,15 @@ export default function LibraryVariantComparison({ samples, selected, loading: s
   const valueBySampleVariant = useMemo(() => {
     const map = new Map<string, { abundance: number; count: number }>();
     for (const measurement of measurements) {
-      map.set(`${measurement.sampleId}|${measurement.variantId}`, {
-        abundance: Number(measurement.abundance) || 0,
-        count: Number(measurement.count) || 0,
+      const key = `${measurement.sampleId}|${measurement.variantId}`;
+      const prev = map.get(key);
+      // Sum duplicate (sampleId, variantId) rows that arise when the same candidate
+      // appears in multiple seqorders. Last-wins would keep only one seqorder's
+      // numerator while the API denominator already spans all seqorders, causing
+      // per-sample abundance to under-count and then be rescaled incorrectly.
+      map.set(key, {
+        abundance: (prev?.abundance ?? 0) + (Number(measurement.abundance) || 0),
+        count:     (prev?.count ?? 0)     + (Number(measurement.count) || 0),
       });
     }
     return map;
@@ -793,12 +799,18 @@ function BarsChart({ variants, samples, colors, metric, maxValue, valueFor, hove
             // stacked bar fills to 100%. Count mode keeps the shared yMax scale.
             const sampleTotal = variants.reduce((sum, variant) => sum + valueFor(sample.id, variant.variantId), 0);
             const denom = metric === 'abundance' ? (sampleTotal > 0 ? sampleTotal : 1) : yMax;
+            // Running budget so cumulative stacked height never exceeds innerH (the 100%
+            // gridline). Replacing the old per-segment Math.max(0.5, ...) floor that added
+            // a fixed 0.5 px per nonzero segment regardless of true fraction, causing
+            // visible overflow with many segments (e.g. ~245 variants => ~122% overflow).
+            let remaining = innerH;
             return (
               <g key={sample.id}>
                 {variants.map(variant => {
                   const value = valueFor(sample.id, variant.variantId);
                   if (value <= 0) return null;
-                  const h = Math.max(0.5, (value / denom) * innerH);
+                  const h = Math.min(remaining, (value / denom) * innerH);
+                  remaining -= h;
                   yCursor -= h;
                   // Relative % mode stacks each bar to 100% of its OWN visible total, so the
                   // displayed percentage must match the drawn height (value / denom), not the
