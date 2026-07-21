@@ -30,6 +30,7 @@ interface MutationSample {
   strain?: string;
   donor_dna?: string;
   has_barcodes?: boolean;
+  verab_combinations?: number;
   selection_note?: string;
   growth_curve?: { t: number; od: number }[];
   growth_curve_source?: {
@@ -733,6 +734,7 @@ export default function MutationExplorer() {
             setSearch={setSearch}
             loading={loading}
             onCompareSelected={() => setTab('compare')}
+            hasBarcodes={data?.stats?.hasBarcodes === true}
           />
         </div>
         <div className={cn('flex-1 min-h-0 flex flex-col', tab === 'compare' ? '' : 'hidden')}>
@@ -856,12 +858,13 @@ function ChipRow({
 }
 
 function SampleSelectionPanel({
-  samples, mutations, selected, setSelected, search, setSearch, loading, onCompareSelected,
+  samples, mutations, selected, setSelected, search, setSearch, loading, onCompareSelected, hasBarcodes,
 }: {
   samples: MutationSample[]; mutations: MutationRow[];
   selected: Set<string>; setSelected: (s: Set<string>) => void;
   search: string; setSearch: (s: string) => void; loading: boolean;
   onCompareSelected: () => void;
+  hasBarcodes: boolean;
 }) {
   const [filters, setFilters] = useState<SampleFilters>(EMPTY_SAMPLE_FILTERS);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
@@ -1257,16 +1260,19 @@ function SampleSelectionPanel({
               <th className="px-2 py-1.5 font-semibold">Strain</th>
               <th className="px-2 py-1.5 font-semibold">Condition</th>
               <th className="px-2 py-1.5 font-semibold text-right">Transfer</th>
+              {hasBarcodes && (
+                <th className="px-2 py-1.5 font-semibold text-right" title="Distinct verA-verB combinations detected for this sample">verAB combos</th>
+              )}
               <th className="px-2 py-1.5 font-semibold text-right">Mutations</th>
               <th className="px-2 py-1.5 font-semibold text-right">Growth curve</th>
             </tr>
           </thead>
           <tbody>
             {loading && (
-              <tr><td colSpan={10} className="px-4 py-8 text-center text-slate-400 dark:text-gray-500">Loading…</td></tr>
+              <tr><td colSpan={hasBarcodes ? 11 : 10} className="px-4 py-8 text-center text-slate-400 dark:text-gray-500">Loading…</td></tr>
             )}
             {!loading && filtered.length === 0 && (
-              <tr><td colSpan={10} className="px-4 py-8 text-center text-slate-400 dark:text-gray-500">
+              <tr><td colSpan={hasBarcodes ? 11 : 10} className="px-4 py-8 text-center text-slate-400 dark:text-gray-500">
                 {samples.length === 0
                   ? 'No mutation samples available.'
                   : anyFilterActive
@@ -1295,7 +1301,7 @@ function SampleSelectionPanel({
                             : <Square className="w-3.5 h-3.5 text-[var(--text-faint)]" />}
                       </button>
                     </td>
-                    <td colSpan={9} className="px-1 py-1">
+                    <td colSpan={hasBarcodes ? 10 : 9} className="px-1 py-1">
                       <button
                         onClick={() => toggleCollapse(group.key)}
                         className="flex items-center gap-1 font-semibold hover:text-[var(--text)]"
@@ -1366,12 +1372,19 @@ function SampleSelectionPanel({
                           ) : ''}
                         </td>
                         <td className="px-2 py-1 text-[var(--text-soft)]">{s.condition ?? ''}</td>
-                        <td className="px-2 py-1 text-right tabular-nums text-[var(--text)]">{s.transfer ?? ''}</td>
-                        <td className="px-2 py-1 text-right tabular-nums">
-                          {muts > 0 ? (
-                            <span className="inline-block px-1.5 py-0.5 rounded lims-pill-mut text-[10.5px] font-semibold">{muts}</span>
-                          ) : <span className="text-[var(--text-faint)]">—</span>}
-                        </td>
+                         <td className="px-2 py-1 text-right tabular-nums text-[var(--text)]">{s.transfer ?? ''}</td>
+                         {hasBarcodes && (
+                           <td className="px-2 py-1 text-right tabular-nums">
+                             {s.has_barcodes && (s.verab_combinations ?? 0) > 0
+                               ? <span className="tabular-nums text-[var(--text)]">{(s.verab_combinations ?? 0).toLocaleString()}</span>
+                               : <span className="text-[var(--text-faint)]">&#8212;</span>}
+                           </td>
+                         )}
+                         <td className="px-2 py-1 text-right tabular-nums">
+                           {muts > 0 ? (
+                             <span className="inline-block px-1.5 py-0.5 rounded lims-pill-mut text-[10.5px] font-semibold">{muts}</span>
+                           ) : <span className="text-[var(--text-faint)]">—</span>}
+                         </td>
                         <td className="px-2 py-1">
                           <div className="flex justify-end">
                             <GrowthCurveSparkline data={s.growth_curve} odSources={s.od_sources} width={70} height={26} sample={s} onExpand={setGrowthCurveSample} />
