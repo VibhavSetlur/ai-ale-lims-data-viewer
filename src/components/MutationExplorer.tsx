@@ -5,9 +5,8 @@ import {
   CheckSquare, Square, Search, X, AlertCircle, FlaskConical, GitCompare, RefreshCw,
   ArrowUpDown, ArrowUp, ArrowDown, ArrowRight, Filter, Download, Info,
   ChevronDown, ChevronRight, ChevronUp, Eye, EyeOff, FoldVertical, UnfoldVertical,
-  BarChart3, TrendingUp, Dna, ExternalLink, Layers, Sparkles,
+  TrendingUp, Dna, ExternalLink, Layers, Sparkles,
 } from 'lucide-react';
-import BarcodeCharts from './BarcodeCharts';
 import GrowthCurveComparison from './GrowthCurveComparison';
 import LibraryVariantComparison from './LibraryVariantComparison';
 import { fetchData, IS_STATIC } from '../lib/dataSource';
@@ -116,7 +115,7 @@ interface MutationDataset {
   };
 }
 
-type Tab = 'samples' | 'compare' | 'growth' | 'libraryVariants' | 'copynumber' | 'barcodes';
+type Tab = 'samples' | 'compare' | 'growth' | 'libraryVariants' | 'copynumber';
 
 const SELECTED_KEY = 'lims:mutation:selected';
 const TAB_KEY = 'lims:mutation:tab';
@@ -488,8 +487,8 @@ export default function MutationExplorer() {
   useEffect(() => {
     const onNav = (e: Event) => {
       const detail = (e as CustomEvent).detail as { tab?: Tab } | undefined;
-      if (detail?.tab && (detail.tab === 'samples' || detail.tab === 'compare' || detail.tab === 'growth' || detail.tab === 'libraryVariants' || detail.tab === 'copynumber' || detail.tab === 'barcodes')) {
-        if ((detail.tab === 'barcodes' || detail.tab === 'libraryVariants') && data?.stats?.hasBarcodes !== true) return;
+      if (detail?.tab && (detail.tab === 'samples' || detail.tab === 'compare' || detail.tab === 'growth' || detail.tab === 'libraryVariants' || detail.tab === 'copynumber')) {
+        if (detail.tab === 'libraryVariants' && data?.stats?.hasBarcodes !== true) return;
         setTab(detail.tab);
       }
     };
@@ -502,7 +501,7 @@ export default function MutationExplorer() {
       const s = localStorage.getItem(SELECTED_KEY);
       if (s) setSelected(new Set(JSON.parse(s)));
       const t = localStorage.getItem(TAB_KEY);
-      if (t === 'compare' || t === 'samples' || t === 'growth' || t === 'libraryVariants' || t === 'barcodes' || t === 'copynumber') setTab(t);
+      if (t === 'compare' || t === 'samples' || t === 'growth' || t === 'libraryVariants' || t === 'copynumber') setTab(t);
       const e = localStorage.getItem(EXPERIMENT_KEY);
       if (e !== null) setExperiment(e);
       const r = localStorage.getItem(REGISTRY_KEY);
@@ -513,10 +512,10 @@ export default function MutationExplorer() {
   useEffect(() => { try { localStorage.setItem(SELECTED_KEY, JSON.stringify([...selected])); } catch {} }, [selected]);
   useEffect(() => { try { localStorage.setItem(TAB_KEY, tab); } catch {} }, [tab]);
   // If the active dataset has no barcode data (e.g. the TFMN1 publication snapshot
-  // DB omits verAB_barcodes), the Barcode tab is hidden; make sure we are not
-  // stranded ON it (e.g. restored from a prior session) showing a blank pane.
+  // DB omits verAB_barcodes), the Compare Library Variants tab is hidden; make sure
+  // we are not stranded ON it (e.g. restored from a prior session) showing a blank pane.
   useEffect(() => {
-    if ((tab === 'barcodes' || tab === 'libraryVariants') && data && data.stats && !data.stats.hasBarcodes) {
+    if (tab === 'libraryVariants' && data && data.stats && !data.stats.hasBarcodes) {
       setTab('compare');
     }
   }, [tab, data]);
@@ -597,11 +596,7 @@ export default function MutationExplorer() {
               <span className="ml-1.5 px-1.5 py-0.5 rounded text-[10px] tabular-nums lims-pill-cn">{data!.stats!.cnRegionCount}</span>
             )}
           </TabButton>
-          {data?.stats?.hasBarcodes && (
-            <TabButton active={tab === 'barcodes'} onClick={() => setTab('barcodes')} icon={<BarChart3 className="w-3.5 h-3.5" />} tour="tab-barcodes">
-              Barcode Charts
-            </TabButton>
-          )}
+
         </div>
         <div className="flex items-center gap-1.5 pr-1" data-tour="experiment-controls">
           <label className="flex items-center gap-1.5 text-[11px] text-[var(--text-soft)]">
@@ -782,9 +777,7 @@ export default function MutationExplorer() {
             onPickSamples={() => setTab('samples')}
           />
         </div>
-        <div className={cn('flex-1 min-h-0 flex flex-col', tab === 'barcodes' ? '' : 'hidden')}>
-          <BarcodeCharts />
-        </div>
+
       </div>
     </div>
   );

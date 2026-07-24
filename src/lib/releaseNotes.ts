@@ -6,6 +6,11 @@ export interface ReleaseNote {
 
 export const releaseNotes: readonly ReleaseNote[] = [
   {
+    version: '1.10.0',
+    date: '2026-07-23',
+    summary: 'Compare Library Variants: abundance calculation control now appears before the top variants selector. Default top variants selection changed to All. Added explanation of how top variants are ranked under each metric mode.',
+  },
+  {
     version: '1.9.0',
     date: '2026-07-21',
     summary: 'Added a verAB combos column to the Sample Selection table that shows how many distinct verA-verB combinations were detected for each sample. The column appears only on deployments that include barcode data, and samples without barcode data show a dash.',

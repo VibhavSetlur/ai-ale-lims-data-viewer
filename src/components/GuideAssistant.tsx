@@ -18,7 +18,7 @@ import {
    approved assistant (clearly labelled as an external tool, not "the app's AI").
 --------------------------------------------------------------------------- */
 
-export type GuideAction = { kind: 'navigate'; view?: 'mutations' | 'tables'; tab?: 'samples' | 'compare' | 'copynumber' | 'barcodes'; tour?: string };
+export type GuideAction = { kind: 'navigate'; view?: 'mutations' | 'tables'; tab?: 'samples' | 'compare' | 'copynumber'; tour?: string };
 
 export type GuideContext = {
   view: string;
@@ -106,20 +106,7 @@ const ANSWERS: Answer[] = [
     takeMeThere: { label: 'Open Sample Selection', action: { kind: 'navigate', view: 'mutations', tab: 'samples', tour: 'tab-samples' } },
     keywords: 'growth curve od600 rate doubling mu lag auc robotic_od computed',
   },
-  {
-    id: 'barcodes',
-    q: 'How do I track VerA / VerB barcode composition?',
-    icon: <BarChart3 className="w-4 h-4" />,
-    steps: [
-      'Open Barcode Charts (only present when the snapshot has barcode data).',
-      'Each A#-B# is a VerA/VerB combination; the same combination always has the same color.',
-      'Select a candidate (or group by VerA/VerB and click a group header) to filter and emphasize it everywhere.',
-      'In Focus, switch chart type: Rows (most readable), Bars, Lines (over time), or Heatmap.',
-      'Add charts to Compare for a shared-axis, shared-legend side-by-side view.',
-    ],
-    takeMeThere: { label: 'Open Barcode Charts', action: { kind: 'navigate', view: 'mutations', tab: 'barcodes', tour: 'tab-barcodes' } },
-    keywords: 'barcode vera verb subunit candidate composition substrate split compare',
-  },
+
   {
     id: 'export',
     q: 'How do I export a figure for a slide or manuscript?',

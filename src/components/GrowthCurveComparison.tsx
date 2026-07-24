@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronDown, ChevronUp, Download, Info, LineChart, Loader2, PanelsTopLeft, Sparkles, X, GitCompare, Boxes, Barcode, MousePointerClick } from 'lucide-react';
+import { ChevronDown, ChevronUp, Download, Info, LineChart, Loader2, PanelsTopLeft, Sparkles, X, GitCompare, Boxes, MousePointerClick } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import ExportFigureMenu from './ExportFigureMenu';
@@ -284,7 +284,7 @@ interface GrowthCurveComparisonProps {
   loading?: boolean;
   experiment?: string;
   setSelected?: React.Dispatch<React.SetStateAction<Set<string>>>;
-  setTab?: (tab: 'samples' | 'compare' | 'growth' | 'libraryVariants' | 'copynumber' | 'barcodes') => void;
+  setTab?: (tab: 'samples' | 'compare' | 'growth' | 'libraryVariants' | 'copynumber') => void;
   hasBarcodes?: boolean;
 }
 
@@ -675,12 +675,11 @@ export default function GrowthCurveComparison(props: GrowthCurveComparisonProps)
     setSelected(prev => { const next = new Set(prev); for (const id of add) next.add(id); return next; });
     flashCross(`Added ${add.length} sequenced sample${add.length === 1 ? '' : 's'} to selection`);
   };
-  const TARGET_LABEL: Record<'compare' | 'libraryVariants' | 'barcodes', string> = {
+  const TARGET_LABEL: Record<'compare' | 'libraryVariants', string> = {
     compare: 'Compare Mutations',
     libraryVariants: 'Library Variants',
-    barcodes: 'Barcode Charts',
   };
-  const showIn = (lineageIds: string[], target: 'compare' | 'libraryVariants' | 'barcodes') => {
+  const showIn = (lineageIds: string[], target: 'compare' | 'libraryVariants') => {
     if (!setSelected) return;
     const add = idsForLineages(lineageIds);
     if (add.length === 0) { flashCross('No sequenced samples for these lineages'); return; }
@@ -1181,7 +1180,7 @@ interface TransferSeriesViewProps {
   crossMsg: string | null;
   lineageHasSequenced: (lin: string) => boolean;
   selectLineages: (lineageIds: string[]) => void;
-  showIn: (lineageIds: string[], target: 'compare' | 'libraryVariants' | 'barcodes') => void;
+  showIn: (lineageIds: string[], target: 'compare' | 'libraryVariants') => void;
 }
 
 function TransferSeriesView(p: TransferSeriesViewProps) {
@@ -1366,7 +1365,7 @@ interface FacetPanelProps {
   hasBarcodes: boolean;
   lineageHasSequenced: (lin: string) => boolean;
   selectLineages: (lineageIds: string[]) => void;
-  showIn: (lineageIds: string[], target: 'compare' | 'libraryVariants' | 'barcodes') => void;
+  showIn: (lineageIds: string[], target: 'compare' | 'libraryVariants') => void;
 }
 
 function FacetPanel(pp: FacetPanelProps) {
@@ -1472,11 +1471,7 @@ function FacetPanel(pp: FacetPanelProps) {
               <Boxes className="h-3 w-3" /> Variants
             </button>
           )}
-          {pp.hasSetTab && pp.hasBarcodes && (
-            <button type="button" onClick={() => pp.showIn(seqLineages, 'barcodes')} className="lims-toggle !py-1 !text-[10px]" title="Select these lineages and open Barcode Charts">
-              <Barcode className="h-3 w-3" /> Barcodes
-            </button>
-          )}
+
         </div>
       )}
     </div>
