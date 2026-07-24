@@ -129,19 +129,6 @@ export default function Dashboard({ initialTables, buildInfo }: DashboardProps) 
   // workspaces and report provenance consistently.
   const [showHelp, setShowHelp] = useState(false);
   const [showGuide, setShowGuide] = useState(false);
-  const [hasBarcodes, setHasBarcodes] = useState(false);
-
-  // Detect whether the active snapshot exposes the Barcode tab, so the Guide can
-  // hide barcode help when there is no barcode data (e.g. the TFMN1 snapshot).
-  useEffect(() => {
-    let cancelled = false;
-    fetchData('/api/mutations-stats')
-      .then(r => r.json())
-      .then(j => { if (!cancelled) setHasBarcodes(Boolean(j?.stats?.hasBarcodes)); })
-      .catch(() => { if (!cancelled) setHasBarcodes(false); });
-    return () => { cancelled = true; };
-  }, []);
-
   // Drive cross-component navigation: switch the workspace here, then broadcast
   // a tab change that MutationExplorer listens for. A small delay lets the view
   // mount before the tab event arrives.
@@ -598,10 +585,7 @@ export default function Dashboard({ initialTables, buildInfo }: DashboardProps) 
                       <span className="lims-pill lims-pill-cn shrink-0 mt-0.5">CMP</span>
                       <span><span className="font-medium text-[var(--text)]">Comparative View</span> — side-by-side mutation calls and copy-number rows.</span>
                     </div>
-                    <div className="flex gap-2">
-                      <span className="lims-pill lims-pill-grow shrink-0 mt-0.5">BC</span>
-                      <span><span className="font-medium text-[var(--text)]">Barcode Charts</span> — stacked bars from <span className="lims-id">verAB_barcodes</span>.</span>
-                    </div>
+
                   </div>
                 </div>
               )}
@@ -761,7 +745,7 @@ export default function Dashboard({ initialTables, buildInfo }: DashboardProps) 
       )}
       {showGuide && (
         <GuideAssistant
-          ctx={{ view: activeView === 'mutations' ? 'Mutation Explorer' : 'Database Tables', hasBarcodes }}
+          ctx={{ view: activeView === 'mutations' ? 'Mutation Explorer' : 'Database Tables' }}
           onClose={() => setShowGuide(false)}
           onAction={navigate}
         />

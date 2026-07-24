@@ -26,7 +26,6 @@ export type GuideContext = {
   selectedSampleCount?: number;
   sampleNames?: string[];
   barcodeColorMode?: string;
-  hasBarcodes?: boolean;
   notes?: string[];
 };
 
@@ -196,11 +195,10 @@ export default function GuideAssistant({
 
   const answers = useMemo(() => {
     const q = query.trim().toLowerCase();
-    let list = ANSWERS;
-    if (!ctx.hasBarcodes) list = list.filter(a => a.id !== 'barcodes');
+    const list = ANSWERS;
     if (!q) return list;
     return list.filter(a => (a.q + ' ' + a.steps.join(' ') + ' ' + (a.keywords || '')).toLowerCase().includes(q));
-  }, [query, ctx.hasBarcodes]);
+  }, [query]);
 
   const task = TASKS.find(t => t.id === taskId) || TASKS[0];
   const prompt = useMemo(() => buildPrompt(ctx, task.instruction, extra), [ctx, task, extra]);
