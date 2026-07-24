@@ -74,7 +74,7 @@ const SORT_LEVELS: readonly { key: SortKey; label: string }[] = [
 ];
 const SORT_LEVEL_BY_KEY = new Map(SORT_LEVELS.map(level => [level.key, level]));
 const DEFAULT_SORT: SortKey[] = ['experiment', 'condition', 'strain', 'dna', 'replicate', 'transfer'];
-const TOP_OPTIONS = [10, 20, 50, 0] as const;
+const TOP_OPTIONS = [0, 10, 20, 50] as const;
 const GOLDEN = 137.508;
 const FILL_SAT = 45;
 const FILL_LIGHT = 52;
@@ -248,7 +248,7 @@ export default function LibraryVariantComparison({ samples, selected, loading: s
   const [error, setError] = useState<string | null>(null);
   const [mode, setMode] = useState<ChartMode>('bars');
   const [metric, setMetric] = useState<MetricMode>('abundance');
-  const [topN, setTopN] = useState<number>(20);
+  const [topN, setTopN] = useState<number>(0);
   const [variantSort, setVariantSort] = useState<VariantSortMode>('total');
   const [showHeatmapValues, setShowHeatmapValues] = useState(false);
   const [showGroupedHeaders, setShowGroupedHeaders] = useState(true);
@@ -557,8 +557,17 @@ export default function LibraryVariantComparison({ samples, selected, loading: s
             <ModeButton active={mode === 'bars'} onClick={() => setMode('bars')} icon={<BarChart3 className="h-3.5 w-3.5" />}>Vertical bars</ModeButton>
             <ModeButton active={mode === 'heatmap'} onClick={() => setMode('heatmap')} icon={<Grid3X3 className="h-3.5 w-3.5" />}>Heatmap</ModeButton>
           </div>
+          {hasCounts && (
+            <div className="flex items-center gap-1">
+              <button type="button" className="lims-toggle" data-on={effectiveMetric === 'abundance'} onClick={() => setMetric('abundance')}>Relative %</button>
+              <button type="button" className="lims-toggle" data-on={effectiveMetric === 'count'} onClick={() => setMetric('count')}>Count</button>
+            </div>
+          )}
           <label className="flex items-center gap-1.5 text-[11px] text-[var(--text-soft)]">
             <span className="lims-label">Top variants</span>
+            <InfoPopover title="How Top variants is chosen">
+              Top variants are selected after ranking all variants by the active metric. Under Count, variants are ranked by total read count across selected samples. Under Relative %, variants are ranked by total relative abundance. Switching the metric changes which variants appear in a filtered top selection.
+            </InfoPopover>
             <select className="lims-select" value={topN} onChange={event => setTopN(Number(event.target.value))}>
               {TOP_OPTIONS.map(option => <option key={option} value={option}>{option === 0 ? 'All' : `Top ${option}`}</option>)}
             </select>
@@ -573,12 +582,6 @@ export default function LibraryVariantComparison({ samples, selected, loading: s
           <button type="button" className="lims-toggle" data-on={showGroupedHeaders} onClick={() => setShowGroupedHeaders(value => !value)}>Grouped headers</button>
           {mode === 'heatmap' && (
             <button type="button" className="lims-toggle" data-on={showHeatmapValues} onClick={() => setShowHeatmapValues(value => !value)}>Show values</button>
-          )}
-          {hasCounts && (
-            <div className="flex items-center gap-1">
-              <button type="button" className="lims-toggle" data-on={effectiveMetric === 'abundance'} onClick={() => setMetric('abundance')}>Relative %</button>
-              <button type="button" className="lims-toggle" data-on={effectiveMetric === 'count'} onClick={() => setMetric('count')}>Count</button>
-            </div>
           )}
           <button type="button" onClick={exportCsv} className="lims-btn lims-btn-secondary" disabled={visibleVariants.length === 0} title="Export the current variant by sample matrix as CSV">
             <Download className="h-3.5 w-3.5" /> CSV
