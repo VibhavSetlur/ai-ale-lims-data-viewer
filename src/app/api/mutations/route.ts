@@ -7,6 +7,7 @@ export interface MutationSample {
   experiment: string;
   experiment_type?: string;
   seqorder?: string;
+  seqorders?: string[];
   replicate?: string;
   transfer?: number;
   condition?: string;
@@ -117,6 +118,7 @@ interface SeqSampleRow {
   transforming_dna: string | null;
   notes: string | null;
   seqorder: string | null;
+  seqorders: string | null;
   has_barcodes: number | null;
   barcode_read_count: number | null;
   verab_combinations: number | null;
@@ -348,6 +350,7 @@ function buildSamplesSql(opts: { experiment: boolean; registry: boolean; barcode
       ms.seq_sample                              AS seq_sample,
       ms.experiment                              AS experiment_from_mutations,
       ms.seqorder                                AS seqorder,
+      ms.seqorders                               AS seqorders,
       ms.has_barcodes                            AS has_barcodes,
       ms.barcode_read_count                      AS barcode_read_count,
       ms.verab_combinations                      AS verab_combinations,
@@ -367,6 +370,7 @@ function buildSamplesSql(opts: { experiment: boolean; registry: boolean; barcode
           MAX(CASE WHEN source = 'mutation' THEN seqorder END),
           MAX(CASE WHEN source = 'barcode' THEN seqorder END)
         ) AS seqorder,
+        GROUP_CONCAT(DISTINCT seqorder) AS seqorders,
         MAX(has_barcodes) AS has_barcodes,
         SUM(barcode_read_count) AS barcode_read_count,
         MAX(verab_combinations) AS verab_combinations
@@ -771,6 +775,13 @@ export async function GET(req: NextRequest) {
         experiment: r.experiment_from_mutations ?? r.experiment_from_seq ?? '',
         experiment_type: r.experiment_type ?? undefined,
         seqorder: (r.seqorder && String(r.seqorder).trim()) || undefined,
+        seqorders: (() => {
+          const list = String(r.seqorders ?? '')
+            .split(',')
+            .map((x: string) => x.trim())
+            .filter(Boolean);
+          return list.length ? Array.from(new Set(list)) : undefined;
+        })(),
         replicate,
         transfer,
         condition: r.condition ?? undefined,
