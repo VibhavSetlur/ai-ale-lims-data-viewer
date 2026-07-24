@@ -6,6 +6,11 @@ export interface ReleaseNote {
 
 export const releaseNotes: readonly ReleaseNote[] = [
   {
+    version: '1.10.1',
+    date: '2026-07-23',
+    summary: 'Mutation Explorer Sample Selection now shows all sequencing run identifiers per sample. Samples with both mutation and barcode data now appear under every sequencing run they belong to in the seqorder filter.',
+  },
+  {
     version: '1.10.0',
     date: '2026-07-23',
     summary: 'Compare Library Variants: abundance calculation control now appears before the top variants selector. Default top variants selection changed to All. Added explanation of how top variants are ranked under each metric mode.',
