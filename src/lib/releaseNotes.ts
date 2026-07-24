@@ -6,6 +6,11 @@ export interface ReleaseNote {
 
 export const releaseNotes: readonly ReleaseNote[] = [
   {
+    version: '1.10.2',
+    date: '2026-07-24',
+    summary: 'Copy number region labels improved: DEL_6kb_ACN3560, Kanamycin, verAB, ver cassette, and dgoA-Star now show human-readable names in the Compare Mutations heatmap instead of raw region keys.',
+  },
+  {
     version: '1.10.1',
     date: '2026-07-23',
     summary: 'Mutation Explorer Sample Selection now shows all sequencing run identifiers per sample. Samples with both mutation and barcode data now appear under every sequencing run they belong to in the seqorder filter.',

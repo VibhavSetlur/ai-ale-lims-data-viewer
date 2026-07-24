@@ -925,7 +925,12 @@ export async function GET(req: NextRequest) {
     // included when present so the two regions can be compared.
     const REGION_LABELS: Record<string, { gene: string; product: string }> = {
       'dgoA-star': { gene: 'dgoA*', product: 'dgoA amplified region (copy number)' },
+      'dgoA-Star': { gene: 'dgoA*', product: 'dgoA amplified region (copy number)' },
       'verC': { gene: 'verC', product: 'verC amplified region (copy number)' },
+      'verAB': { gene: 'verAB', product: 'verAB amplified region (copy number)' },
+      'ver_cassette': { gene: 'ver cassette', product: 'ver cassette region (copy number)' },
+      'DEL_6kb_ACN3560': { gene: 'DEL 6kb ACN3560', product: '6 kb deletion in ACN3560 (copy number)' },
+      'Kanamycin': { gene: 'Kan', product: 'Kanamycin resistance region (copy number)' },
     };
     const cnRowsByRegion = new Map<string, MutationRow>();
     let cnSamplesSeen = 0;
@@ -951,8 +956,8 @@ export async function GET(req: NextRequest) {
         row.values[seqSample] = cnVal;
       }
     }
-    // Surface dgoA-star first (the requested region), then verC, then any others.
-    const cnOrder = ['dgoA-star', 'verC'];
+    // Surface known regions in a consistent order; unlabelled regions sort last.
+    const cnOrder = ['dgoA-star', 'dgoA-Star', 'verC', 'verAB', 'ver_cassette', 'DEL_6kb_ACN3560', 'Kanamycin'];
     const copyNumberRows = [...cnRowsByRegion.entries()]
       .sort((a, b) => {
         const ai = cnOrder.indexOf(a[0]); const bi = cnOrder.indexOf(b[0]);
