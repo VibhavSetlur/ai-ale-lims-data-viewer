@@ -23,6 +23,7 @@ interface MutationSample {
   experiment: string;
   experiment_type?: string;
   seqorder?: string;
+  seqorders?: string[];
   replicate?: string;
   transfer?: number;
   condition?: string;
@@ -39,6 +40,19 @@ interface MutationSample {
     points: number;
   };
   od_sources?: { type: string; source: string }[];
+}
+
+// Seqorder is the one multi-valued facet: a sample can belong to several
+// sequencing orders (e.g. a WGS mutation order + a Plasmidsaurus amplicon
+// barcode order). Union the array field with the legacy single string so a
+// sample shows up under EVERY seqorder it belongs to.
+// Note: seqorder values must not contain commas for GROUP_CONCAT split to work;
+// current data uses underscore-delimited identifiers so this is safe.
+function seqorderVals(s: MutationSample): string[] {
+  const set = new Set<string>();
+  for (const v of s.seqorders ?? []) if (v) set.add(v);
+  if (s.seqorder) set.add(s.seqorder);
+  return [...set];
 }
 
 // Rich structural detail for the Comparative-view mutation popup. Mirrors the
@@ -948,7 +962,12 @@ function SampleSelectionPanel({
     const matchesExcept = (s: MutationSample, except: ChipKey): boolean => {
       for (const k of keys) {
         if (k === except) continue;
-        if (sel[k].size > 0 && !sel[k].has(fieldVal(s, k))) return false;
+        if (sel[k].size === 0) continue;
+        if (k === 'seqorder') {
+          if (!seqorderVals(s).some(v => sel[k].has(v))) return false;
+          continue;
+        }
+        if (!sel[k].has(fieldVal(s, k))) return false;
       }
       return true;
     };
@@ -956,6 +975,10 @@ function SampleSelectionPanel({
       const counts = new Map<string, number>();
       for (const s of samples) {
         if (!matchesExcept(s, k)) continue;
+        if (k === 'seqorder') {
+          for (const v of seqorderVals(s)) counts.set(v, (counts.get(v) ?? 0) + 1);
+          continue;
+        }
         const v = fieldVal(s, k);
         if (!v) continue;
         counts.set(v, (counts.get(v) ?? 0) + 1);
@@ -998,12 +1021,12 @@ function SampleSelectionPanel({
       if (chipSet.donor_dna.size > 0 && !chipSet.donor_dna.has(s.donor_dna ?? '')) return false;
       if (chipSet.strain.size > 0 && !chipSet.strain.has(s.strain ?? '')) return false;
       if (chipSet.condition.size > 0 && !chipSet.condition.has(s.condition ?? '')) return false;
-      if (chipSet.seqorder.size > 0 && !chipSet.seqorder.has(s.seqorder ?? '')) return false;
+      if (chipSet.seqorder.size > 0 && !seqorderVals(s).some(v => chipSet.seqorder.has(v))) return false;
       if (chipSet.verab.size > 0 && !chipSet.verab.has(s.has_barcodes ? 'has verAB' : '')) return false;
       if (filters.transferMin !== null && (s.transfer ?? -Infinity) < filters.transferMin) return false;
       if (filters.transferMax !== null && (s.transfer ?? Infinity) > filters.transferMax) return false;
       if (q) {
-        const hay = `${s.name} ${s.experiment} ${s.strain ?? ''} ${s.donor_dna ?? ''} ${s.condition ?? ''} ${s.replicate ?? ''} ${s.seqorder ?? ''} ${s.has_barcodes ? 'verAB barcode' : ''}`.toLowerCase();
+        const hay = `${s.name} ${s.experiment} ${s.strain ?? ''} ${s.donor_dna ?? ''} ${s.condition ?? ''} ${s.replicate ?? ''} ${seqorderVals(s).join(' ')} ${s.has_barcodes ? 'verAB barcode' : ''}`.toLowerCase();
         if (!hay.includes(q)) return false;
       }
       return true;
