@@ -44,6 +44,7 @@ const curatedTargets = [
   { key: 'mutations-stats', url: '/api/mutations-stats' },
   { key: 'barcode-counts', url: '/api/barcode-counts' },
   { key: 'library-variants', url: '/api/library-variants' },
+  { key: 'plate-design-factors', url: '/api/plate-design/factors' },
   { key: 'tables', url: '/api/tables?withCounts=1' },
   { key: 'mirror-info', url: '/api/mirror-info' },
   { key: 'config', url: '/api/config' },
@@ -64,7 +65,7 @@ async function main() {
     process.stdout.write(`baking ${t.key} ... `);
     let data;
     try { data = await fetchJson(t.url); }
-    catch (err) { console.log(`SKIP (${err.message})`); continue; }
+    catch (err) { throw new Error(`Could not bake ${t.key}: ${err instanceof Error ? err.message : String(err)}`); }
     const json = JSON.stringify(data);
     const gz = gzipSync(Buffer.from(json), { level: 9 });
     const hash = createHash('sha1').update(json).digest('hex').slice(0, 10);

@@ -5,10 +5,9 @@ import {
   CheckSquare, Square, Search, X, AlertCircle, FlaskConical, GitCompare, RefreshCw,
   ArrowUpDown, ArrowUp, ArrowDown, ArrowRight, Filter, Download, Info,
   ChevronDown, ChevronRight, ChevronUp, Eye, EyeOff, FoldVertical, UnfoldVertical,
-  TrendingUp, Dna, ExternalLink, Layers, Sparkles, Grid3X3,
+  TrendingUp, Dna, ExternalLink, Layers, Sparkles,
 } from 'lucide-react';
 import GrowthCurveComparison from './GrowthCurveComparison';
-import PlateDesignWorkspace from './PlateDesignWorkspace';
 import ViewInfo from './ViewInfo';
 import LibraryVariantComparison from './LibraryVariantComparison';
 import { fetchData, IS_STATIC } from '../lib/dataSource';
@@ -131,7 +130,7 @@ interface MutationDataset {
   };
 }
 
-type Tab = 'samples' | 'compare' | 'growth' | 'libraryVariants' | 'copynumber' | 'plateDesign';
+type Tab = 'samples' | 'compare' | 'growth' | 'libraryVariants' | 'copynumber';
 
 const SELECTED_KEY = 'lims:mutation:selected';
 const TAB_KEY = 'lims:mutation:tab';
@@ -503,7 +502,7 @@ export default function MutationExplorer() {
   useEffect(() => {
     const onNav = (e: Event) => {
       const detail = (e as CustomEvent).detail as { tab?: Tab } | undefined;
-      if (detail?.tab && (detail.tab === 'samples' || detail.tab === 'compare' || detail.tab === 'growth' || detail.tab === 'libraryVariants' || detail.tab === 'copynumber' || detail.tab === 'plateDesign')) {
+      if (detail?.tab && (detail.tab === 'samples' || detail.tab === 'compare' || detail.tab === 'growth' || detail.tab === 'libraryVariants' || detail.tab === 'copynumber')) {
         if (detail.tab === 'libraryVariants' && data?.stats?.hasBarcodes !== true) return;
         setTab(detail.tab);
       }
@@ -515,9 +514,12 @@ export default function MutationExplorer() {
   useEffect(() => {
     try {
       const s = localStorage.getItem(SELECTED_KEY);
-      if (s) setSelected(new Set(JSON.parse(s)));
+      if (s) {
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- Restores browser-local selection.
+        setSelected(new Set(JSON.parse(s)));
+      }
       const t = localStorage.getItem(TAB_KEY);
-      if (t === 'compare' || t === 'samples' || t === 'growth' || t === 'libraryVariants' || t === 'copynumber' || t === 'plateDesign') setTab(t);
+      if (t === 'compare' || t === 'samples' || t === 'growth' || t === 'libraryVariants' || t === 'copynumber') setTab(t);
       const e = localStorage.getItem(EXPERIMENT_KEY);
       if (e !== null) setExperiment(e);
       const r = localStorage.getItem(REGISTRY_KEY);
@@ -532,6 +534,7 @@ export default function MutationExplorer() {
   // we are not stranded ON it (e.g. restored from a prior session) showing a blank pane.
   useEffect(() => {
     if (tab === 'libraryVariants' && data && data.stats && !data.stats.hasBarcodes) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- Restored tab is unavailable in this snapshot.
       setTab('compare');
     }
   }, [tab, data]);
@@ -554,7 +557,10 @@ export default function MutationExplorer() {
       setData({ samples: [], mutations: [], experiments: [] });
     } finally { setLoading(false); }
   };
-  useEffect(() => { load(experiment, registry); }, [experiment, registry]);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- Starts request-driven mutation loading.
+    load(experiment, registry);
+  }, [experiment, registry]);
 
   // Changing the experiment also resets the registry: the set of available
   // registries differs by experiment, so a stale pin would silently fall back
@@ -571,8 +577,11 @@ export default function MutationExplorer() {
       if (valid.has(id)) next.add(id);
       else changed = true;
     }
-    if (changed) setSelected(next);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    if (changed) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- Removes IDs absent from refreshed data.
+      setSelected(next);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- Pruning only occurs when external data changes.
   }, [data]);
 
   return (
@@ -612,11 +621,8 @@ export default function MutationExplorer() {
               <span className="ml-1.5 px-1.5 py-0.5 rounded text-[10px] tabular-nums lims-pill-cn">{data!.stats!.cnRegionCount}</span>
             )}
           </TabButton>
-          <TabButton active={tab === 'plateDesign'} onClick={() => setTab('plateDesign')} icon={<Grid3X3 className="w-3.5 h-3.5" />} tour="tab-plate-design">
-            Plate Design
-          </TabButton>
         </div>
-        {tab !== 'plateDesign' && <div className="flex items-center gap-1.5 pr-1" data-tour="experiment-controls">
+        {<div className="flex items-center gap-1.5 pr-1" data-tour="experiment-controls">
           <label className="flex items-center gap-1.5 text-[11px] text-[var(--text-soft)]">
             <span className="lims-label">Experiment</span>
             <select
@@ -675,7 +681,7 @@ export default function MutationExplorer() {
       </div>
 
       {/* Compact context strip: stats + dataset-notes toggle in ONE thin row */}
-      {tab !== 'plateDesign' && !error && data?.stats && (
+      {!error && data?.stats && (
         <div className="flex items-center gap-4 flex-wrap px-3 h-8 border-b border-[var(--border)] bg-[var(--surface-2)] text-[11px]" data-tour="stats-strip">
           <StatPill label="samples" value={data.stats.sampleCount} />
           <StatPill label="mutations" value={data.stats.frequencyRowCount} accent="mut" />
@@ -710,7 +716,7 @@ export default function MutationExplorer() {
         </div>
       )}
 
-      {tab !== 'plateDesign' && error && (
+      {error && (
         <div className="flex items-start gap-2 m-3 p-2.5 bg-amber-50 dark:bg-amber-900/20 text-amber-800 dark:text-amber-200 text-[12px] rounded border border-amber-200 dark:border-amber-800">
           <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
           <div>
@@ -722,7 +728,7 @@ export default function MutationExplorer() {
       )}
 
       {/* Dataset notes only render when toggled; they never steal table space. */}
-      {tab !== 'plateDesign' && !error && showNotes && data?.warnings && data.warnings.length > 0 && (
+      {!error && showNotes && data?.warnings && data.warnings.length > 0 && (
         <div className="flex items-start gap-2 mx-3 mt-2 p-2 bg-amber-50/70 dark:bg-amber-900/20 text-amber-800 dark:text-amber-200 text-[11px] rounded border border-amber-200 dark:border-amber-800">
           <Info className="w-3.5 h-3.5 shrink-0 mt-0.5" />
           <ul className="list-disc list-inside opacity-90 space-y-0.5 flex-1">
@@ -778,9 +784,6 @@ export default function MutationExplorer() {
             selected={selected}
             loading={loading}
           />
-        </div>
-        <div className={cn('flex-1 min-h-0 flex flex-col', tab === 'plateDesign' ? '' : 'hidden')}>
-          <PlateDesignWorkspace samples={data?.samples ?? []} />
         </div>
         <div className={cn('flex-1 min-h-0 flex flex-col', tab === 'copynumber' ? '' : 'hidden')}>
           <CopyNumberPanel
@@ -897,6 +900,7 @@ function SampleSelectionPanel({
       const raw = localStorage.getItem(SAMPLE_FILTERS_KEY);
       if (raw) {
         const f = JSON.parse(raw) as Partial<SampleFilters>;
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- Restores browser-local sample filters.
         setFilters({
           chips: {
             experiment: f.chips?.experiment ?? [],
@@ -1530,6 +1534,7 @@ function ComparativePanel({
       const raw = localStorage.getItem(COMPARE_FILTERS_KEY);
       if (raw) {
         const f = JSON.parse(raw) as Partial<CompareFilters>;
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- Restores browser-local comparison filters.
         if (typeof f.mutFilter === 'string') setMutFilter(f.mutFilter);
         if (f.metricFilter === 'all' || f.metricFilter === 'frequency' || f.metricFilter === 'copy_number') setMetricFilter(f.metricFilter);
         if (Array.isArray(f.snpTypes)) setSnpTypes(new Set(f.snpTypes));
@@ -1782,7 +1787,7 @@ function ComparativePanel({
     return groupOrder.map((levelKey, levelIdx) => {
       const cells: BandCell[] = [];
       let prevComposite: string | null = null;
-      visibleSamples.forEach((s, colIdx) => {
+      visibleSamples.forEach((s) => {
         const composite = groupOrder
           .slice(0, levelIdx + 1)
           .map(k => groupValue(s, k))
@@ -3733,7 +3738,7 @@ type GenomeGeom = {
 };
 
 function GenomeBrowserTrack({
-  geom, seqId, posLabel, refSeq, newSeq, sizeStr, snpType,
+  geom, seqId, posLabel, refSeq, newSeq, sizeStr,
 }: {
   geom: GenomeGeom;
   seqId?: string;
@@ -3741,7 +3746,6 @@ function GenomeBrowserTrack({
   refSeq?: string;
   newSeq?: string;
   sizeStr?: string;
-  snpType?: string;
 }) {
   const W = 680, H = 168;
   const axisY = 36;
@@ -4111,7 +4115,7 @@ function MutationDetailModal({
   groupOrder: GroupLevelKey[];
   onClose: () => void;
 }) {
-  const d = mutation.detail ?? {};
+  const d = useMemo(() => mutation.detail ?? {}, [mutation.detail]);
   const snpType = mutation.snp_type ?? mutation.type;
 
   // Close on Esc. Listener is added once per open modal; cheap and responsive.
@@ -4148,7 +4152,7 @@ function MutationDetailModal({
     return { posStart, posEnd, hasPos, isPoint, gp, isIntergenic, hasCodon, hasAA, isCoding, sizeStr, isIndel, hasRepeat, posLabel };
   }, [d, mutation.position, mutation.gene, snpType]);
 
-  const { posStart, posEnd, hasPos, isPoint, gp, isIntergenic, hasCodon, hasAA, isCoding, sizeStr, isIndel, hasRepeat, posLabel } = facts;
+  const { posStart, posEnd, hasPos, isPoint, gp, isIntergenic, isCoding, sizeStr, isIndel, hasRepeat, posLabel } = facts;
   const ncbiQuery = useMemo(() => mutationNcbiQuery(mutation, d, posLabel), [mutation, d, posLabel]);
   const seqIdForLink = d.seq_id;
   const ncbiAccessionHref = looksLikeNcbiAccession(seqIdForLink) && seqIdForLink ? ncbiNucleotideUrl(seqIdForLink) : null;
@@ -4341,7 +4345,7 @@ function MutationDetailModal({
                 refSeq={d.ref_seq}
                 newSeq={d.new_seq}
                 sizeStr={sizeStr}
-                snpType={snpType}
+
               />
             ) : (
               <div className="text-[12px] text-[var(--text-faint)]">Position not available for this call, so the genome track cannot be drawn.</div>
@@ -4570,6 +4574,7 @@ function CopyNumberPanel({
   // Default the region selector to the first CN row once data arrives.
   useEffect(() => {
     if (cnRows.length > 0 && !cnRows.some(r => r.id === region)) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- Selects a valid region after external data changes.
       setRegion(cnRows[0].id);
     }
   }, [cnRows, region]);
