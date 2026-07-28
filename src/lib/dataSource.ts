@@ -60,6 +60,7 @@ function apiUrlToKey(apiUrl: string): string | null {
   if (pathPart === 'mutations-stats') return 'mutations-stats';
   if (pathPart === 'barcode-counts') return 'barcode-counts';
   if (pathPart === 'library-variants') return 'library-variants';
+  if (pathPart === 'plate-design/factors') return 'plate-design-factors';
   if (pathPart === 'tables') return 'tables';
   if (pathPart === 'mirror-info') return 'mirror-info';
   if (pathPart === 'config') return 'config';

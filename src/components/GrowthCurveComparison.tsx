@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronDown, ChevronUp, Download, Info, LineChart, Loader2, PanelsTopLeft, Sparkles, X, GitCompare, Boxes, MousePointerClick } from 'lucide-react';
+import { ChevronDown, ChevronUp, Download, LineChart, Loader2, PanelsTopLeft, Sparkles, X, GitCompare, Boxes, MousePointerClick } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import ExportFigureMenu from './ExportFigureMenu';
@@ -253,32 +253,6 @@ function computeGenotypeMetric(
   };
 }
 
-function InfoPopover({ title, children, align = 'left' }: { title: string; children: React.ReactNode; align?: 'left' | 'right' }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    const onDoc = (event: MouseEvent) => { if (ref.current && !ref.current.contains(event.target as Node)) setOpen(false); };
-    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') setOpen(false); };
-    document.addEventListener('mousedown', onDoc);
-    document.addEventListener('keydown', onKey);
-    return () => { document.removeEventListener('mousedown', onDoc); document.removeEventListener('keydown', onKey); };
-  }, [open]);
-  return (
-    <div className="relative inline-flex" ref={ref} data-figure-omit>
-      <button type="button" onClick={() => setOpen(o => !o)} className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-[var(--accent-300)] bg-[var(--accent-50)] text-[var(--accent-700)] hover:bg-[var(--surface-3)]" title={title} aria-label={title}>
-        <Info className="h-2.5 w-2.5" />
-      </button>
-      {open && (
-        <div className={cn('lims-popover absolute top-full z-50 mt-1 w-72 p-3 text-[11px] leading-relaxed text-[var(--text-soft)]', align === 'right' ? 'right-0' : 'left-0')}>
-          <div className="mb-1 font-semibold text-[var(--text)]">{title}</div>
-          {children}
-        </div>
-      )}
-    </div>
-  );
-}
-
 interface GrowthCurveComparisonProps {
   samples: MutationSample[];
   selected: Set<string>;
@@ -326,6 +300,7 @@ export default function GrowthCurveComparison(props: GrowthCurveComparisonProps)
   // the same experiment filter as the loaded mutations dataset.
   useEffect(() => {
     let cancelled = false;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- Starts request-driven loading after scope changes.
     setSeriesLoading(true);
     setSeriesError(null);
     const url = experiment
@@ -530,7 +505,7 @@ export default function GrowthCurveComparison(props: GrowthCurveComparisonProps)
 
   /* ---------- Transfer-series derived state (faceted view) ---------- */
 
-  const allLineages = series1?.lineages ?? [];
+  const allLineages = useMemo(() => series1?.lineages ?? [], [series1]);
 
   // Which lineages to plot: full-figure mode plots everything; explorer mode
   // (default) reflows to lineages that map from the current selection.
@@ -632,7 +607,7 @@ export default function GrowthCurveComparison(props: GrowthCurveComparisonProps)
     if (!Number.isFinite(xMin)) { xMin = series1?.transferRange.min ?? 0; xMax = series1?.transferRange.max ?? 1; }
     const logLo = Math.max(0.001, positives.length ? Math.min(...positives) * 0.7 : 0.001);
     return { xMin, xMax: xMax === xMin ? xMin + 1 : xMax, yMin: 0, yMax: Math.max(0.05, yMax), logLo };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- seriesPoint derives solely from seriesAgg in this memo.
   }, [plottedLineages, seriesAgg, series1]);
 
   // Reps present across plotted lineages, for the shared legend.
@@ -645,7 +620,7 @@ export default function GrowthCurveComparison(props: GrowthCurveComparisonProps)
   // Per-genotype summary metrics for the visible (facet-ordered) panels.
   const genotypeMetrics = useMemo(
     () => facets.map(([g, lineages]) => computeGenotypeMetric(g, lineages, seriesPoint)),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- seriesPoint derives solely from seriesAgg in this memo.
     [facets, seriesAgg],
   );
 
@@ -1178,7 +1153,8 @@ interface TransferSeriesViewProps {
 }
 
 function TransferSeriesView(p: TransferSeriesViewProps) {
-  if (p.loading) {
+  const { figureRef, ...view } = p;
+  if (view.loading) {
     return (
       <div className="flex-1 min-h-0 p-3">
         <div className="lims-surface flex h-full min-h-[320px] items-center justify-center rounded-xl text-[13px] text-[var(--text-soft)]">
@@ -1188,8 +1164,8 @@ function TransferSeriesView(p: TransferSeriesViewProps) {
     );
   }
 
-  const warn = p.dataset?.warnings?.[0] || p.error;
-  const noData = !p.dataset || p.dataset.lineages.length === 0;
+  const warn = view.dataset?.warnings?.[0] || view.error;
+  const noData = !view.dataset || view.dataset.lineages.length === 0;
 
   return (
     <div className="flex-1 min-h-0 overflow-auto bg-[var(--surface-2)] p-3">
@@ -1199,35 +1175,35 @@ function TransferSeriesView(p: TransferSeriesViewProps) {
             <ViewInfo title="Compare Growth Curves" description="Compare endpoint or maximum OD across transfers, grouped by genotype and lineage." detail="Use the controls below to switch endpoint or maximum OD and shared or per-panel axes." />
           </div>
           <div className="flex flex-wrap items-center gap-3 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2">
-            <Stat value={p.facets.length.toLocaleString()} label="genotypes" />
-            <Stat value={p.plottedCount.toLocaleString()} label="lineages" />
-            <Stat value={p.totalLineageCount.toLocaleString()} label="total lineages" />
-            <Stat value={`${p.dataset?.transferRange.min ?? 0}..${p.dataset?.transferRange.max ?? 0}`} label="transfers" />
+            <Stat value={view.facets.length.toLocaleString()} label="genotypes" />
+            <Stat value={view.plottedCount.toLocaleString()} label="lineages" />
+            <Stat value={view.totalLineageCount.toLocaleString()} label="total lineages" />
+            <Stat value={`${view.dataset?.transferRange.min ?? 0}..${view.dataset?.transferRange.max ?? 0}`} label="transfers" />
           </div>
         </header>
 
         <div className="flex flex-wrap items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] p-2" data-figure-omit>
           <div className="flex items-center gap-1">
-            <button type="button" data-on={p.seriesAgg === 'endpoint'} onClick={() => p.setSeriesAgg('endpoint')} className="lims-toggle">Endpoint OD</button>
-            <button type="button" data-on={p.seriesAgg === 'max'} onClick={() => p.setSeriesAgg('max')} className="lims-toggle">Max OD</button>
+            <button type="button" data-on={view.seriesAgg === 'endpoint'} onClick={() => view.setSeriesAgg('endpoint')} className="lims-toggle">Endpoint OD</button>
+            <button type="button" data-on={view.seriesAgg === 'max'} onClick={() => view.setSeriesAgg('max')} className="lims-toggle">Max OD</button>
           </div>
           <div className="flex items-center gap-1">
-            <button type="button" data-on={!p.seriesLog} onClick={() => p.setSeriesLog(false)} className="lims-toggle">Linear Y</button>
-            <button type="button" data-on={p.seriesLog} onClick={() => p.setSeriesLog(true)} className="lims-toggle">Log Y</button>
+            <button type="button" data-on={!view.seriesLog} onClick={() => view.setSeriesLog(false)} className="lims-toggle">Linear Y</button>
+            <button type="button" data-on={view.seriesLog} onClick={() => view.setSeriesLog(true)} className="lims-toggle">Log Y</button>
           </div>
           <div className="flex items-center gap-1">
-            <button type="button" data-on={p.sharedAxes} onClick={() => p.setSharedAxes(true)} className="lims-toggle">Shared axes</button>
-            <button type="button" data-on={!p.sharedAxes} onClick={() => p.setSharedAxes(false)} className="lims-toggle">Per-panel</button>
+            <button type="button" data-on={view.sharedAxes} onClick={() => view.setSharedAxes(true)} className="lims-toggle">Shared axes</button>
+            <button type="button" data-on={!view.sharedAxes} onClick={() => view.setSharedAxes(false)} className="lims-toggle">Per-panel</button>
           </div>
           <div className="flex items-center gap-1">
-            <button type="button" data-on={!p.fullFigure} onClick={() => p.setFullFigure(false)} className="lims-toggle">Selected only</button>
-            <button type="button" data-on={p.fullFigure} onClick={() => p.setFullFigure(true)} className="lims-toggle" title="Plot every lineage from the endpoint, ignoring selection">Full figure</button>
+            <button type="button" data-on={!view.fullFigure} onClick={() => view.setFullFigure(false)} className="lims-toggle">Selected only</button>
+            <button type="button" data-on={view.fullFigure} onClick={() => view.setFullFigure(true)} className="lims-toggle" title="Plot every lineage from the endpoint, ignoring selection">Full figure</button>
           </div>
-          <button type="button" onClick={p.onExportCsv} className="lims-btn lims-btn-secondary" disabled={p.plottedCount === 0} title="Export long-format growth series as CSV">
+          <button type="button" onClick={view.onExportCsv} className="lims-btn lims-btn-secondary" disabled={view.plottedCount === 0} title="Export long-format growth series as CSV">
             <Download className="h-3.5 w-3.5" /> CSV
           </button>
-          <ExportFigureMenu getTarget={() => p.figureRef.current} title="AI-ALE growth series by genotype" filenameBase={`growth-series-${p.seriesAgg}-${p.seriesLog ? 'log' : 'linear'}`} disabled={p.plottedCount === 0} compact buildSpec={p.buildSpec} />
-          <button type="button" onClick={p.onSwitchToWithin} className="lims-btn lims-btn-ghost" title="Switch to the within-transfer overlay of your selected samples">
+          <ExportFigureMenu getTarget={() => figureRef.current} title="AI-ALE growth series by genotype" filenameBase={`growth-series-${view.seriesAgg}-${view.seriesLog ? 'log' : 'linear'}`} disabled={view.plottedCount === 0} compact buildSpec={view.buildSpec} />
+          <button type="button" onClick={view.onSwitchToWithin} className="lims-btn lims-btn-ghost" title="Switch to the within-transfer overlay of your selected samples">
             <LineChart className="h-3.5 w-3.5" /> Within-transfer curves
           </button>
         </div>
@@ -1239,14 +1215,14 @@ function TransferSeriesView(p: TransferSeriesViewProps) {
         )}
 
         {/* Shared replicate legend */}
-        {p.presentReps.length > 0 && (
+        {view.presentReps.length > 0 && (
           <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] p-2 text-[11px]" data-figure-omit>
             <span className="lims-label mr-1">Replicate</span>
-            {p.presentReps.map(rep => {
-              const pressed = p.isolatedReps.has(rep);
-              const dim = p.hoveredRep !== null && p.hoveredRep !== rep;
+            {view.presentReps.map(rep => {
+              const pressed = view.isolatedReps.has(rep);
+              const dim = view.hoveredRep !== null && view.hoveredRep !== rep;
               return (
-                <button key={rep} type="button" aria-pressed={pressed} onClick={() => p.toggleRep(rep)} onMouseEnter={() => p.setHoveredRep(rep)} onMouseLeave={() => p.setHoveredRep(null)} data-on={pressed} className={cn('lims-toggle !py-1', pressed && 'ring-1 ring-[var(--accent-500)]', dim && 'opacity-45')}>
+                <button key={rep} type="button" aria-pressed={pressed} onClick={() => view.toggleRep(rep)} onMouseEnter={() => view.setHoveredRep(rep)} onMouseLeave={() => view.setHoveredRep(null)} data-on={pressed} className={cn('lims-toggle !py-1', pressed && 'ring-1 ring-[var(--accent-500)]', dim && 'opacity-45')}>
                   <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: replicateColor(rep) }} />
                   Rep {rep}
                 </button>
@@ -1257,18 +1233,18 @@ function TransferSeriesView(p: TransferSeriesViewProps) {
         )}
 
         {/* Empty-selection prompt with a one-click full figure */}
-        {!noData && p.plottedCount === 0 && (
+        {!noData && view.plottedCount === 0 && (
           <div className="lims-surface flex min-h-[280px] flex-1 items-center justify-center rounded-xl p-6 text-center">
             <div className="max-w-xl">
               <MousePointerClick className="mx-auto mb-3 h-8 w-8 text-[var(--data-grow)]" />
               <h3 className="text-[15px] font-semibold text-[var(--text)]">Select samples to reflow the figure</h3>
               <p className="mt-2 text-[12px] leading-relaxed text-[var(--text-soft)]">
-                {p.selectionEmpty
+                {view.selectionEmpty
                   ? 'Choose samples in the Samples tab and their genotype panels appear here. Or plot the whole experiment now.'
                   : 'Your selected samples did not map to any Robotic_OD lineage. Plot the whole experiment instead.'}
               </p>
-              <button type="button" onClick={() => p.setFullFigure(true)} className="lims-btn lims-btn-primary mt-4">
-                <PanelsTopLeft className="h-4 w-4" /> Load full figure (all {p.totalLineageCount} lineages)
+              <button type="button" onClick={() => view.setFullFigure(true)} className="lims-btn lims-btn-primary mt-4">
+                <PanelsTopLeft className="h-4 w-4" /> Load full figure (all {view.totalLineageCount} lineages)
               </button>
             </div>
           </div>
@@ -1279,37 +1255,37 @@ function TransferSeriesView(p: TransferSeriesViewProps) {
         )}
 
         {/* Faceted grid */}
-        {p.plottedCount > 0 && (
-          <div ref={p.figureRef} className="relative min-w-0 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3 shadow-sm" onMouseLeave={() => p.setTip(null)}>
-            {p.tip && <FloatingTooltip tip={p.tip} />}
+        {view.plottedCount > 0 && (
+          <div ref={figureRef} className="relative min-w-0 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3 shadow-sm" onMouseLeave={() => view.setTip(null)}>
+            {view.tip && <FloatingTooltip tip={view.tip} />}
             <div className="mb-2 flex flex-wrap items-center gap-2 text-[12px] text-[var(--text-soft)]">
               <span className="font-semibold text-[var(--text)]">Endpoint OD by transfer, faceted by genotype</span>
-              <span className="lims-chip">{p.facets.length} panels</span>
-              <span className="lims-chip">{p.seriesAgg === 'max' ? 'max OD' : 'endpoint OD'}</span>
-              <span className="lims-chip">{p.seriesLog ? 'log Y' : 'linear Y'}</span>
-              <span className="lims-chip">{p.sharedAxes ? 'shared axes' : 'per-panel'}</span>
-              {p.fullFigure && <span className="lims-chip lims-chip-accent">full figure</span>}
+              <span className="lims-chip">{view.facets.length} panels</span>
+              <span className="lims-chip">{view.seriesAgg === 'max' ? 'max OD' : 'endpoint OD'}</span>
+              <span className="lims-chip">{view.seriesLog ? 'log Y' : 'linear Y'}</span>
+              <span className="lims-chip">{view.sharedAxes ? 'shared axes' : 'per-panel'}</span>
+              {view.fullFigure && <span className="lims-chip lims-chip-accent">full figure</span>}
             </div>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
-              {p.facets.map(([genotype, lineages]) => (
+              {view.facets.map(([genotype, lineages]) => (
                 <FacetPanel
                   key={genotype}
                   genotype={genotype}
                   lineages={lineages}
-                  seriesLog={p.seriesLog}
-                  sharedAxes={p.sharedAxes}
-                  globalDomain={p.globalDomain}
-                  seriesPoint={p.seriesPoint}
-                  hoveredRep={p.hoveredRep}
-                  repVisible={p.repVisible}
-                  figureRef={p.figureRef}
-                  setTip={p.setTip}
-                  hasSetSelected={p.hasSetSelected}
-                  hasSetTab={p.hasSetTab}
-                  hasBarcodes={p.hasBarcodes}
-                  lineageHasSequenced={p.lineageHasSequenced}
-                  selectLineages={p.selectLineages}
-                  showIn={p.showIn}
+                  seriesLog={view.seriesLog}
+                  sharedAxes={view.sharedAxes}
+                  globalDomain={view.globalDomain}
+                  seriesPoint={view.seriesPoint}
+                  hoveredRep={view.hoveredRep}
+                  repVisible={view.repVisible}
+                  figureRef={figureRef}
+                  setTip={view.setTip}
+                  hasSetSelected={view.hasSetSelected}
+                  hasSetTab={view.hasSetTab}
+                  hasBarcodes={view.hasBarcodes}
+                  lineageHasSequenced={view.lineageHasSequenced}
+                  selectLineages={view.selectLineages}
+                  showIn={view.showIn}
                 />
               ))}
             </div>

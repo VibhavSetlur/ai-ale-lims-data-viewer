@@ -9,7 +9,7 @@ import {
   Database, Search, Sun, Moon, Table2, Dna,
   Server, HardDrive, RefreshCw, AlertCircle,
   ChevronLeft, ChevronRight, X, Clock, GitBranch,
-  BookOpen, Compass, ScrollText, Bug, ExternalLink,
+  BookOpen, Compass, ScrollText, Bug, ExternalLink, Grid3X3,
 } from 'lucide-react';
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
@@ -49,9 +49,10 @@ const ACTIVE_TABLE_KEY = 'lims:activeTable';
 const SIDEBAR_COLLAPSED_KEY = 'lims:sidebarCollapsed';
 const ACTIVE_VIEW_KEY = 'lims:activeView';
 
-type ActiveView = 'tables' | 'mutations';
+type ActiveView = 'tables' | 'mutations' | 'plateDesign';
 
 const MutationExplorer = dynamic(() => import('./MutationExplorer'), { ssr: false, loading: () => <div className="p-4 text-sm text-[var(--text-soft)]">Loading Mutation Explorer…</div> });
+const PlateDesignWorkspace = dynamic(() => import('./PlateDesignWorkspace'), { ssr: false, loading: () => <div className="p-4 text-sm text-[var(--text-soft)]">Loading Plate Design…</div> });
 const DataTable = dynamic(() => import('./DataTable'), { ssr: false, loading: () => <div className="p-4 text-sm text-[var(--text-soft)]">Loading table browser…</div> });
 
 interface MirrorInfo {
@@ -88,6 +89,7 @@ export default function Dashboard({ initialTables, buildInfo }: DashboardProps) 
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- Initial browser theme hydration.
     setMounted(true);
     setDark(document.documentElement.classList.contains('dark'));
   }, []);
@@ -105,7 +107,7 @@ export default function Dashboard({ initialTables, buildInfo }: DashboardProps) 
   const [mysqlUser, setMysqlUser] = useState('root');
   const [mysqlPassword, setMysqlPassword] = useState('');
   const [mysqlDatabase, setMysqlDatabase] = useState('lims');
-  const [switching, setSwitching] = useState(false);
+  const [, setSwitching] = useState(false);
   const [switchError, setSwitchError] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState(false);
   // In the public static build the raw table browser is unavailable, so default
@@ -143,9 +145,12 @@ export default function Dashboard({ initialTables, buildInfo }: DashboardProps) 
   useEffect(() => {
     try {
       const c = localStorage.getItem(SIDEBAR_COLLAPSED_KEY);
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- Restores browser-local sidebar state.
       if (c === '1') setCollapsed(true);
       const v = localStorage.getItem(ACTIVE_VIEW_KEY);
-      if (v === 'mutations' || v === 'tables') setActiveView(v);
+      const oldTab = localStorage.getItem('lims:mutation:tab');
+       if (oldTab === 'plateDesign') { localStorage.setItem('lims:mutation:tab', 'samples'); setActiveView('plateDesign'); }
+       else if (v === 'mutations' || v === 'tables' || v === 'plateDesign') setActiveView(v);
     } catch {}
   }, []);
 
@@ -160,7 +165,9 @@ export default function Dashboard({ initialTables, buildInfo }: DashboardProps) 
 
   // Restore previously selected table once tables arrive
   useEffect(() => {
-    if (tables.length === 0) { setActiveTable(''); return; }
+    if (tables.length === 0) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- Clears an invalid table selection after its source changes.
+      setActiveTable(''); return; }
     try {
       const saved = localStorage.getItem(ACTIVE_TABLE_KEY);
       if (saved && tables.some(t => t.name === saved)) {
@@ -204,8 +211,9 @@ export default function Dashboard({ initialTables, buildInfo }: DashboardProps) 
   };
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- Starts the initial external data request.
     refreshTables();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+
   }, []);
 
   const refreshMirror = async () => {
@@ -216,7 +224,10 @@ export default function Dashboard({ initialTables, buildInfo }: DashboardProps) 
       setMirrorInfo(j);
     } catch {}
   };
-  useEffect(() => { refreshMirror(); }, [dbType]);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- Starts external mirror metadata refresh.
+    refreshMirror();
+  }, [dbType]);
 
   useEffect(() => {
     if (!showMirror) return;
@@ -518,10 +529,8 @@ export default function Dashboard({ initialTables, buildInfo }: DashboardProps) 
                   <Database className="w-4 h-4 shrink-0" />
                   <span className="flex-1">Database Tables</span>
                 </button>
-                <button onClick={() => setActiveView('mutations')} data-active={activeView === 'mutations'} data-tour="nav-mutations" className="lims-nav">
-                  <Dna className="w-4 h-4 shrink-0" />
-                  <span className="flex-1">Mutation Explorer</span>
-                </button>
+                <button onClick={() => setActiveView('mutations')} data-active={activeView === 'mutations'} data-tour="nav-mutations" className="lims-nav"><Dna className="w-4 h-4 shrink-0" /><span className="flex-1">Mutation Explorer</span></button>
+                <button onClick={() => setActiveView('plateDesign')} data-active={activeView === 'plateDesign'} className="lims-nav"><Grid3X3 className="w-4 h-4 shrink-0" /><span className="flex-1">Plate Design</span></button>
               </div>
 
               {activeView === 'tables' ? (
@@ -627,6 +636,7 @@ export default function Dashboard({ initialTables, buildInfo }: DashboardProps) 
                 title="Mutation Explorer">
                 <Dna className="w-4 h-4" />
               </button>
+              <button onClick={() => setActiveView('plateDesign')} className={cn("p-1.5 rounded-md", activeView === 'plateDesign' ? "text-[var(--accent-700)] bg-[var(--accent-50)]" : "text-[var(--text-faint)] hover:bg-[var(--surface-3)]")} title="Plate Design"><Grid3X3 className="w-4 h-4" /></button>
               <div className="mt-auto flex flex-col items-center gap-1 pb-2">
                 <button onClick={() => setShowGuide(true)} className="p-1.5 rounded-md text-[var(--text-faint)] hover:bg-[var(--surface-3)]" title="Guide"><Compass className="w-4 h-4" /></button>
                 <button onClick={() => setShowChangesPanel(true)} className="p-1.5 rounded-md text-[var(--text-faint)] hover:bg-[var(--surface-3)]" title="Changelog"><ScrollText className="w-4 h-4" /></button>
@@ -639,9 +649,7 @@ export default function Dashboard({ initialTables, buildInfo }: DashboardProps) 
 
         <div className="flex-1 min-w-0 p-3 flex flex-col overflow-hidden bg-[var(--surface-2)] relative">
           <div className="flex-1 min-h-0">
-            {activeView === 'mutations' ? (
-              <MutationExplorer />
-            ) : activeTable ? (
+            {activeView === 'mutations' ? <MutationExplorer /> : activeView === 'plateDesign' ? <PlateDesignWorkspace /> : activeTable ? (
               <DataTable key={activeTable} tableName={activeTable} />
             ) : (
               <div className="flex flex-col items-center justify-center h-full bg-[var(--surface)] rounded-lg border border-[var(--border)] text-[var(--text-soft)] text-sm gap-2" style={{ boxShadow: 'var(--shadow-sm)' }}>
@@ -745,7 +753,7 @@ export default function Dashboard({ initialTables, buildInfo }: DashboardProps) 
       )}
       {showGuide && (
         <GuideAssistant
-          ctx={{ view: activeView === 'mutations' ? 'Mutation Explorer' : 'Database Tables' }}
+          ctx={{ view: activeView === 'mutations' ? 'Mutation Explorer' : activeView === 'plateDesign' ? 'Plate Design' : 'Database Tables' }}
           onClose={() => setShowGuide(false)}
           onAction={navigate}
         />

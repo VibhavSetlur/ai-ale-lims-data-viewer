@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   X, Search, Compass, ArrowRight, Copy, Check, Download, ExternalLink,
-  MousePointerClick, Layers, TrendingUp, BarChart3, FlaskConical, Download as DownloadIcon,
+  MousePointerClick, Layers, TrendingUp, FlaskConical, Download as DownloadIcon,
 } from 'lucide-react';
 
 /* ---------------------------------------------------------------------------
@@ -18,7 +18,7 @@ import {
    approved assistant (clearly labelled as an external tool, not "the app's AI").
 --------------------------------------------------------------------------- */
 
-export type GuideAction = { kind: 'navigate'; view?: 'mutations' | 'tables'; tab?: 'samples' | 'compare' | 'copynumber' | 'plateDesign'; tour?: string };
+export type GuideAction = { kind: 'navigate'; view?: 'mutations' | 'tables' | 'plateDesign'; tab?: 'samples' | 'compare' | 'copynumber'; tour?: string };
 
 export type GuideContext = {
   view: string;
@@ -46,11 +46,11 @@ const ANSWERS: Answer[] = [
     steps: [
       'Open Plate Design and enter a robotic run name.',
       'Add the experiment, strain, condition or media, and transforming DNA for each condition.',
-      'Add one or two 96-well plates and assign conditions to wells.',
+      'Add from one to 24 fixed 96-well plates and assign conditions to wells. Twenty-four is a local workspace safety limit.',
       'Review the local layout, then download JSON or a pipeline layout CSV for hand-off.',
       'Drafts stay in this browser. Downloads do not create LIMS records, runs, plates, conditions, or samples.',
     ],
-    takeMeThere: { label: 'Open Plate Design', action: { kind: 'navigate', view: 'mutations', tab: 'plateDesign', tour: 'tab-plate-design' } },
+    takeMeThere: { label: 'Open Plate Design', action: { kind: 'navigate', view: 'plateDesign' } },
     keywords: 'plate design robotic run layout wells pipeline csv local draft',
   },
   {

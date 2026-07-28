@@ -770,7 +770,7 @@ function drawBarcodeLegend(parts: string[], panels: BarcodeChartPanelSpec[], opt
   const candidates = new Map<string, BarcodeChartPanelSpec['candidates'][number]>();
   panels.forEach(panel => panel.candidates.forEach(candidate => { if (!candidates.has(candidate.id)) candidates.set(candidate.id, candidate); }));
   parts.push(`<text x="${x}" y="${y}" font-family="${FONT_SANS}" font-size="${12 * fs}" font-weight="750" fill="${escapeAttr(options.textColor)}">${escapeXml(options.legendTitle || 'Barcode candidates')}</text>`);
-  let ly = y + 26;
+  const ly = y + 26;
   Array.from(candidates.values()).slice(0, 16).forEach((candidate, idx) => {
     const rowY = ly + idx * 20;
     parts.push(`<rect x="${x}" y="${rowY - 11}" width="14" height="14" rx="3" fill="${escapeAttr(normalizeColorForSvg(candidate.color))}" stroke="${escapeAttr(options.borderColor)}"/>`);
@@ -1028,7 +1028,7 @@ function drawLineLegend(parts: string[], spec: LineChartFigureSpec, options: Fig
 function drawLineLegendItems(parts: string[], seriesList: FigureLineSeries[], options: FigureRenderOptions, x: number, y: number, fs: number, title: string) {
   const labelSize = 12 * fs;
   parts.push(`<text x="${x}" y="${y}" font-family="${FONT_SANS}" font-size="${labelSize}" font-weight="750" fill="${escapeAttr(options.textColor)}">${escapeXml(title)}</text>`);
-  let ly = y + 26;
+  const ly = y + 26;
   seriesList.slice(0, 14).forEach((series, idx) => {
     const rowY = ly + idx * 20;
     parts.push(`<line x1="${x}" x2="${x + 16}" y1="${rowY - 4}" y2="${rowY - 4}" stroke="${escapeAttr(normalizeColorForSvg(series.color))}" stroke-width="${series.emphasis ? 3.2 : 2}" stroke-linecap="round"/>`);

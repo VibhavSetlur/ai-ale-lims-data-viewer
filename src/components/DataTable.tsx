@@ -182,6 +182,7 @@ export default function DataTable({ tableName }: DataTableProps) {
 
   // Reset table-specific state when switching tables
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- Switching tables resets table-local controls.
     setPage(1);
     setSortBy(undefined);
     setSortDirection(undefined);
@@ -486,7 +487,7 @@ export default function DataTable({ tableName }: DataTableProps) {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- Keyboard handler closes over current detail navigation.
   }, [detailRow, detailIndex, data]);
 
   if (error) {

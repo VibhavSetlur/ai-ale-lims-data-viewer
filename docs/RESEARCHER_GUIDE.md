@@ -39,13 +39,14 @@ what frequency, and the growth curves are how you connect genotype to phenotype.
 
 ---
 
-## 2. The two workspaces and four views
+## 2. Three peer workspaces
 
 Switch workspaces from the left sidebar.
 
 - **Database Tables** (interactive/server build only): raw LIMS tables with
   search, sort, filters, pagination, CSV export. Use it to audit source rows.
 - **Mutation Explorer**: the curated scientific views.
+- **Plate Design**: a browser-local, read-only planning workspace for one to 24 fixed 96-well plates. Twenty-four is a workspace safety cap, not a LIMS or pipeline limit. Suggestions are independent hints from the current read-only snapshot, and custom values remain allowed. Save snapshots or export JSON for recovery, then export CSV only as a hand-off. Plate Design never writes to LIMS.
   - **Sample Selection** — filter and pick the samples/lineages to study.
   - **Comparative View** — heatmap of mutation frequency + copy-number rows.
   - **Copy Number** — per-lineage copy-number trajectories over transfers.

@@ -388,6 +388,7 @@ export default function LibraryVariantComparison({ samples, selected, loading: s
     const aList = [...aSet].sort((x, y) => x.localeCompare(y, undefined, { numeric: true }));
     const bList = [...bSet].sort((x, y) => x.localeCompare(y, undefined, { numeric: true }));
     return { aList, bList, byPair, aAiSet, bAiSet, sampleCount: selectedSamples.length };
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- selected count is represented in visible variants.
   }, [visibleVariants]);
 
   const setTipFromPointer = (event: React.MouseEvent<HTMLElement | SVGElement>, text: string) => {

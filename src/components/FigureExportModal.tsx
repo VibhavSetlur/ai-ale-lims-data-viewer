@@ -47,6 +47,7 @@ export default function FigureExportModal({
   const [previewError, setPreviewError] = useState(false);
 
   React.useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- New figure defaults initialize the modal.
     setOptions(defaults);
     setError(null);
   }, [defaults, open]);
@@ -58,6 +59,7 @@ export default function FigureExportModal({
   }, [svgText]);
 
   React.useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- New SVG clears its prior preview error.
     setPreviewError(false);
   }, [previewUrl]);
 
@@ -120,8 +122,8 @@ export default function FigureExportModal({
             <div className="mx-auto w-fit rounded-lg bg-white p-2 shadow ring-1 ring-slate-200">
               {previewUrl ? (
                 <>
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={previewUrl} alt="Figure preview" className="max-h-[68vh] max-w-full" onLoad={() => setPreviewError(false)} onError={() => setPreviewError(true)} />
+                  {/* eslint-disable-next-line @next/next/no-img-element -- SVG data URL is generated locally for preview. */}
+          <img src={previewUrl} alt="Figure preview" className="max-h-[68vh] max-w-full" onLoad={() => setPreviewError(false)} onError={() => setPreviewError(true)} />
                   {previewError && <div className="mt-2 text-[12px] text-red-600">Preview failed to render. Try a different format or reduce the selection.</div>}
                 </>
               ) : (
@@ -199,6 +201,7 @@ function NumberField({ label, value, min, max, step, onChange }: { label: string
   const [draft, setDraft] = useState(String(value));
 
   React.useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- Synchronizes the local number draft with its external value.
     setDraft(String(value));
   }, [value]);
 

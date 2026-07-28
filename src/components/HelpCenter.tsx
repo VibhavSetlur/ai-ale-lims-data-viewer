@@ -41,10 +41,11 @@ const SECTIONS: Section[] = [
     summary: 'A read-only window onto a LIMS mirror snapshot: mutations, copy number, growth, and VerA/VerB barcode composition.',
     blocks: [
       { kind: 'p', text: 'The AI-ALE LIMS viewer is a read-only interface over a snapshot of the lab LIMS database. It does not change any data. Everything you see is either a value stored in the database or a number computed transparently from stored values (and the help text tells you which).' },
-      { kind: 'p', text: 'There are two workspaces, switched from the left sidebar:' },
+      { kind: 'p', text: 'There are three peer workspaces, switched from the left sidebar:' },
       { kind: 'bullets', items: [
         'Database Tables: the raw LIMS tables with search, sort, filters, pagination, and CSV export. Use this to audit source rows or trace where a number came from. (Hidden on the public static deployment.)',
-        'Mutation Explorer: the curated scientific views built on those tables — Sample Selection, Comparative View (heatmap), Copy Number, and Barcode Charts.',
+        'Mutation Explorer: the curated scientific views built on those tables: Sample Selection, Comparative View (heatmap), Copy Number, and Barcode Charts.',
+        'Plate Design: a browser-local, read-only planning workspace for 1 to 24 fixed 96-well layouts. It offers snapshot suggestions, JSON and pipeline CSV hand-off, but never writes to LIMS. Export JSON regularly because browser storage can be cleared.',
       ] },
       { kind: 'note', text: 'The Dev and Public deployments are built from different database snapshots, so they can show different tabs. If Barcode Charts is missing, that snapshot has no non-empty verAB_barcodes table.' },
     ],
