@@ -10,6 +10,7 @@ import { twMerge } from 'tailwind-merge';
 import { fetchData } from '../lib/dataSource';
 import type { FigureSpec } from '../lib/figureSpec';
 import ExportFigureMenu from './ExportFigureMenu';
+import ViewInfo from './ViewInfo';
 
 function cn(...inputs: ClassValue[]) { return twMerge(clsx(inputs)); }
 
@@ -533,14 +534,7 @@ export default function LibraryVariantComparison({ samples, selected, loading: s
       <section className="lims-surface flex min-h-full flex-col gap-3 rounded-xl p-4 shadow-sm">
         <header className="flex flex-wrap items-start gap-3">
           <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
-              <Sparkles className="h-4 w-4 shrink-0 text-[var(--accent-600)]" />
-              <h2 className="truncate text-[15px] font-semibold text-[var(--text)]">Compare Library Variants</h2>
-              <InfoPopover title="About this view" align="right">
-                Compares verAB library-variant abundance across your selected samples. Colors are stable per variant identity, grouped headers follow the sample sort priority, and AI badges mark the specific verA or verB partner from Library_candidates metadata.
-              </InfoPopover>
-            </div>
-            <p className="mt-1 text-[12px] leading-relaxed text-[var(--text-soft)]">Barcode-style vertical bars and heatmap, sortable experimental-factor headers, CSV export, figure export, and Library_candidates metadata in one view.</p>
+            <ViewInfo title="Compare Library Variants" description="Compare verAB library-variant abundance across selected samples as bars or a heatmap." detail="This view appears only when the snapshot contains barcode data." />
           </div>
           <div className="flex flex-wrap items-center gap-3 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2">
             <Stat value={selectedSamples.length.toLocaleString()} label="samples" />

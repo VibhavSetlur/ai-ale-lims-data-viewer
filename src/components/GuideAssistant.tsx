@@ -18,7 +18,7 @@ import {
    approved assistant (clearly labelled as an external tool, not "the app's AI").
 --------------------------------------------------------------------------- */
 
-export type GuideAction = { kind: 'navigate'; view?: 'mutations' | 'tables'; tab?: 'samples' | 'compare' | 'copynumber'; tour?: string };
+export type GuideAction = { kind: 'navigate'; view?: 'mutations' | 'tables'; tab?: 'samples' | 'compare' | 'copynumber' | 'plateDesign'; tour?: string };
 
 export type GuideContext = {
   view: string;
@@ -39,6 +39,20 @@ type Answer = {
 };
 
 const ANSWERS: Answer[] = [
+  {
+    id: 'design-plates',
+    q: 'How do I design plates for a robotic run?',
+    icon: <Layers className="w-4 h-4" />,
+    steps: [
+      'Open Plate Design and enter a robotic run name.',
+      'Add the experiment, strain, condition or media, and transforming DNA for each condition.',
+      'Add one or two 96-well plates and assign conditions to wells.',
+      'Review the local layout, then download JSON or a pipeline layout CSV for hand-off.',
+      'Drafts stay in this browser. Downloads do not create LIMS records, runs, plates, conditions, or samples.',
+    ],
+    takeMeThere: { label: 'Open Plate Design', action: { kind: 'navigate', view: 'mutations', tab: 'plateDesign', tour: 'tab-plate-design' } },
+    keywords: 'plate design robotic run layout wells pipeline csv local draft',
+  },
   {
     id: 'find-dgoa',
     q: 'How do I see the dgoA* copy-number amplification (the main finding)?',

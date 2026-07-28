@@ -6,6 +6,11 @@ export interface ReleaseNote {
 
 export const releaseNotes: readonly ReleaseNote[] = [
   {
+    version: '1.11.0',
+    date: '2026-07-27',
+    summary: 'Added Plate Design Workspace in Mutation Explorer. Build one or two local 96-well plate layouts, save browser-only snapshots, import or export JSON, and download pipeline layout CSV files. The workspace does not create LIMS runs, plates, conditions, or samples.',
+  },
+  {
     version: '1.10.2',
     date: '2026-07-24',
     summary: 'Copy number region labels improved: DEL_6kb_ACN3560, Kanamycin, verAB, ver cassette, and dgoA-Star now show human-readable names in the Compare Mutations heatmap instead of raw region keys.',

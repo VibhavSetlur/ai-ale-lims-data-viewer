@@ -5,9 +5,11 @@ import {
   CheckSquare, Square, Search, X, AlertCircle, FlaskConical, GitCompare, RefreshCw,
   ArrowUpDown, ArrowUp, ArrowDown, ArrowRight, Filter, Download, Info,
   ChevronDown, ChevronRight, ChevronUp, Eye, EyeOff, FoldVertical, UnfoldVertical,
-  TrendingUp, Dna, ExternalLink, Layers, Sparkles,
+  TrendingUp, Dna, ExternalLink, Layers, Sparkles, Grid3X3,
 } from 'lucide-react';
 import GrowthCurveComparison from './GrowthCurveComparison';
+import PlateDesignWorkspace from './PlateDesignWorkspace';
+import ViewInfo from './ViewInfo';
 import LibraryVariantComparison from './LibraryVariantComparison';
 import { fetchData, IS_STATIC } from '../lib/dataSource';
 import ExportFigureMenu from './ExportFigureMenu';
@@ -129,7 +131,7 @@ interface MutationDataset {
   };
 }
 
-type Tab = 'samples' | 'compare' | 'growth' | 'libraryVariants' | 'copynumber';
+type Tab = 'samples' | 'compare' | 'growth' | 'libraryVariants' | 'copynumber' | 'plateDesign';
 
 const SELECTED_KEY = 'lims:mutation:selected';
 const TAB_KEY = 'lims:mutation:tab';
@@ -501,7 +503,7 @@ export default function MutationExplorer() {
   useEffect(() => {
     const onNav = (e: Event) => {
       const detail = (e as CustomEvent).detail as { tab?: Tab } | undefined;
-      if (detail?.tab && (detail.tab === 'samples' || detail.tab === 'compare' || detail.tab === 'growth' || detail.tab === 'libraryVariants' || detail.tab === 'copynumber')) {
+      if (detail?.tab && (detail.tab === 'samples' || detail.tab === 'compare' || detail.tab === 'growth' || detail.tab === 'libraryVariants' || detail.tab === 'copynumber' || detail.tab === 'plateDesign')) {
         if (detail.tab === 'libraryVariants' && data?.stats?.hasBarcodes !== true) return;
         setTab(detail.tab);
       }
@@ -515,7 +517,7 @@ export default function MutationExplorer() {
       const s = localStorage.getItem(SELECTED_KEY);
       if (s) setSelected(new Set(JSON.parse(s)));
       const t = localStorage.getItem(TAB_KEY);
-      if (t === 'compare' || t === 'samples' || t === 'growth' || t === 'libraryVariants' || t === 'copynumber') setTab(t);
+      if (t === 'compare' || t === 'samples' || t === 'growth' || t === 'libraryVariants' || t === 'copynumber' || t === 'plateDesign') setTab(t);
       const e = localStorage.getItem(EXPERIMENT_KEY);
       if (e !== null) setExperiment(e);
       const r = localStorage.getItem(REGISTRY_KEY);
@@ -576,7 +578,7 @@ export default function MutationExplorer() {
   return (
     <div className="flex flex-col h-full min-h-0 bg-[var(--surface)] rounded-lg border border-[var(--border)] overflow-hidden" style={{ boxShadow: 'var(--shadow-sm)' }}>
       <div className="flex items-center justify-between border-b border-[var(--border)] px-2">
-        <div className="flex items-stretch">
+        <div className="flex min-w-0 items-stretch overflow-x-auto">
           <TabButton active={tab === 'samples'} onClick={() => setTab('samples')} icon={<FlaskConical className="w-3.5 h-3.5" />} tour="tab-samples">
             Sample Selection
             <span className="ml-1.5 px-1.5 py-0.5 rounded text-[10px] bg-[var(--surface-3)] text-[var(--text-soft)] tabular-nums">{data?.samples.length ?? 0}</span>
@@ -610,9 +612,11 @@ export default function MutationExplorer() {
               <span className="ml-1.5 px-1.5 py-0.5 rounded text-[10px] tabular-nums lims-pill-cn">{data!.stats!.cnRegionCount}</span>
             )}
           </TabButton>
-
+          <TabButton active={tab === 'plateDesign'} onClick={() => setTab('plateDesign')} icon={<Grid3X3 className="w-3.5 h-3.5" />} tour="tab-plate-design">
+            Plate Design
+          </TabButton>
         </div>
-        <div className="flex items-center gap-1.5 pr-1" data-tour="experiment-controls">
+        {tab !== 'plateDesign' && <div className="flex items-center gap-1.5 pr-1" data-tour="experiment-controls">
           <label className="flex items-center gap-1.5 text-[11px] text-[var(--text-soft)]">
             <span className="lims-label">Experiment</span>
             <select
@@ -667,11 +671,11 @@ export default function MutationExplorer() {
           <button onClick={() => load(experiment, registry)} className="lims-btn lims-btn-ghost p-1.5" title="Reload mutation dataset">
             <RefreshCw className={cn('w-3.5 h-3.5', loading && 'animate-spin')} />
           </button>
-        </div>
+        </div>}
       </div>
 
       {/* Compact context strip: stats + dataset-notes toggle in ONE thin row */}
-      {!error && data?.stats && (
+      {tab !== 'plateDesign' && !error && data?.stats && (
         <div className="flex items-center gap-4 flex-wrap px-3 h-8 border-b border-[var(--border)] bg-[var(--surface-2)] text-[11px]" data-tour="stats-strip">
           <StatPill label="samples" value={data.stats.sampleCount} />
           <StatPill label="mutations" value={data.stats.frequencyRowCount} accent="mut" />
@@ -706,7 +710,7 @@ export default function MutationExplorer() {
         </div>
       )}
 
-      {error && (
+      {tab !== 'plateDesign' && error && (
         <div className="flex items-start gap-2 m-3 p-2.5 bg-amber-50 dark:bg-amber-900/20 text-amber-800 dark:text-amber-200 text-[12px] rounded border border-amber-200 dark:border-amber-800">
           <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
           <div>
@@ -718,7 +722,7 @@ export default function MutationExplorer() {
       )}
 
       {/* Dataset notes only render when toggled; they never steal table space. */}
-      {!error && showNotes && data?.warnings && data.warnings.length > 0 && (
+      {tab !== 'plateDesign' && !error && showNotes && data?.warnings && data.warnings.length > 0 && (
         <div className="flex items-start gap-2 mx-3 mt-2 p-2 bg-amber-50/70 dark:bg-amber-900/20 text-amber-800 dark:text-amber-200 text-[11px] rounded border border-amber-200 dark:border-amber-800">
           <Info className="w-3.5 h-3.5 shrink-0 mt-0.5" />
           <ul className="list-disc list-inside opacity-90 space-y-0.5 flex-1">
@@ -774,6 +778,9 @@ export default function MutationExplorer() {
             selected={selected}
             loading={loading}
           />
+        </div>
+        <div className={cn('flex-1 min-h-0 flex flex-col', tab === 'plateDesign' ? '' : 'hidden')}>
+          <PlateDesignWorkspace samples={data?.samples ?? []} />
         </div>
         <div className={cn('flex-1 min-h-0 flex flex-col', tab === 'copynumber' ? '' : 'hidden')}>
           <CopyNumberPanel
@@ -1144,6 +1151,7 @@ function SampleSelectionPanel({
 
   return (
     <div className="flex flex-col h-full min-h-0">
+      <div className="px-3 pt-2"><ViewInfo title="Sample Selection" description="Filter and select samples for mutation, growth, library-variant, and copy-number comparisons." detail="Options reflect the loaded read-only snapshot." /></div>
       {/* Search + summary row */}
       <div className="px-3 py-2 border-b border-slate-200 dark:border-gray-700 flex items-center gap-2 bg-white dark:bg-gray-800 flex-wrap">
         <div className="relative flex-1 max-w-md min-w-[240px]">
@@ -1931,6 +1939,7 @@ function ComparativePanel({
 
   return (
     <div className="flex flex-col h-full min-h-0">
+      <div className="px-3 pt-2"><ViewInfo title="Compare Mutations" description="Compare mutation frequencies and copy-number measurements across selected samples in one matrix." detail="Frequencies use fixed 0-100%; copy-number rows use their displayed numeric scale." /></div>
       {/* Controls */}
       <div className="px-3 py-2 border-b border-slate-200 dark:border-gray-700 bg-white dark:bg-gray-800 flex items-center gap-2 flex-wrap" data-tour="compare-controls">
         <div className="relative">
@@ -4659,6 +4668,7 @@ function CopyNumberPanel({
 
   return (
     <div className="flex flex-col h-full min-h-0">
+      <div className="px-3 pt-2"><ViewInfo title="Copy Number" description="Trace per-lineage copy-number measurements across transfers for a selected genomic region." detail="Only snapshot-present regions and measurements appear." /></div>
       {/* Controls */}
       <div className="px-3 py-2 border-b border-[var(--border)] bg-[var(--surface)] flex items-center gap-2 flex-wrap">
         <label className="text-[11.5px] text-[var(--text-soft)] flex items-center gap-1.5">
