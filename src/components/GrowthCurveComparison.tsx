@@ -5,6 +5,7 @@ import { ChevronDown, ChevronUp, Download, Info, LineChart, Loader2, PanelsTopLe
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import ExportFigureMenu from './ExportFigureMenu';
+import ViewInfo from './ViewInfo';
 import { fetchData } from '@/lib/dataSource';
 import type { FigureSpec } from '@/lib/figureSpec';
 
@@ -865,14 +866,7 @@ export default function GrowthCurveComparison(props: GrowthCurveComparisonProps)
       <section className="lims-surface flex min-h-full flex-col gap-3 rounded-xl p-4 shadow-sm">
         <header className="flex flex-wrap items-start gap-3">
           <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
-              <LineChart className="h-4 w-4 shrink-0 text-[var(--data-grow)]" />
-              <h2 className="truncate text-[15px] font-semibold text-[var(--text)]">Compare Growth Curves</h2>
-              <InfoPopover title="About this view" align="right">
-                Overlays OD600 growth curves for your selected samples. The x value is the server-normalized numeric t field, usually hours when timepoint data exists and otherwise the ordinal reading index. Colors are stable per sample, and legend clicks isolate one or more samples.
-              </InfoPopover>
-            </div>
-            <p className="mt-1 text-[12px] leading-relaxed text-[var(--text-soft)]">Overlay selected OD600 curves on a shared axis, switch linear or log Y, inspect facets, reorder samples by priority factors, and export CSV or figures.</p>
+            <ViewInfo title="Compare Growth Curves" description="Overlay selected OD600 curves or separate them into small multiples." detail="The x value is the normalized numeric t field, usually hours when timepoint data exists and otherwise the ordinal reading index." />
           </div>
           <div className="flex flex-wrap items-center gap-3 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2">
             <Stat value={series.length.toLocaleString()} label="plotted" />
@@ -1202,14 +1196,7 @@ function TransferSeriesView(p: TransferSeriesViewProps) {
       <section className="lims-surface flex min-h-full flex-col gap-3 rounded-xl p-4 shadow-sm">
         <header className="flex flex-wrap items-start gap-3">
           <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
-              <PanelsTopLeft className="h-4 w-4 shrink-0 text-[var(--data-grow)]" />
-              <h2 className="truncate text-[15px] font-semibold text-[var(--text)]">Compare Growth Curves</h2>
-              <InfoPopover title="Transfer series (endpoint OD by transfer)" align="right">
-                Small multiples faceted by genotype (Transforming_DNA). Each panel holds up to five replicate lines colored by replicate number. X is the ALE transfer (integer); Y is OD on a log scale by default. Endpoint OD is the reading at the last timepoint of each transfer; toggle to max OD without refetching. In explorer mode the panels reflow to your selected samples; use Load full figure for every lineage.
-              </InfoPopover>
-            </div>
-            <p className="mt-1 text-[12px] leading-relaxed text-[var(--text-soft)]">Publication-style OD-vs-transfer figure: one panel per genotype, replicate-colored lines, log Y, endpoint or max OD, shared or per-panel axes.</p>
+            <ViewInfo title="Compare Growth Curves" description="Compare endpoint or maximum OD across transfers, grouped by genotype and lineage." detail="Use the controls below to switch endpoint or maximum OD and shared or per-panel axes." />
           </div>
           <div className="flex flex-wrap items-center gap-3 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2">
             <Stat value={p.facets.length.toLocaleString()} label="genotypes" />
