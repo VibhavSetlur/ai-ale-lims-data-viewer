@@ -1,0 +1,11 @@
+{
+  "viewerVersion": "2.0.0",
+  "branch": "feat/viewer-2-clean-slate",
+  "baseCommit": "3e463b6bfcad86d1c153740f5ce60683fd35a214",
+  "deploymentStatus": "none",
+  "initialAnonymousSource": "planned dev-branch snapshot",
+  "scientificSnapshotOwner": "Natascha Spahr",
+  "futureIdentity": "Anyone with ORCID may save their own private work.",
+  "configuration": "local environment file",
+  "remainingDiscovery": ["Poplar process topology", "nginx configuration", "service configuration", "environment-file location"]
+}
