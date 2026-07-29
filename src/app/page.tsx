@@ -2,7 +2,7 @@ import { AppShell } from "@/components/app-shell/AppShell";
 import { StatusChip } from "@/components/design-system/StatusChip";
 
 const foundations = [
-  ["Research snapshots", "A public dev snapshot is planned for anonymous exploration, with provenance kept visible."],
+  ["Research snapshots", "A planned anonymous development catalog is represented by a verified metadata fixture. Scientific records are not loaded."],
   ["Personal workspaces", "ORCID sign-in is planned only for saving private work. It is not active yet."],
   ["Scientific stewardship", "Natascha Spahr will own future scientific snapshots and their release context."],
 ];
@@ -16,7 +16,7 @@ export default function Home() {
         <p className="lede">A new home for exploring AI-ALE scientific snapshots, tracing their provenance, and later preserving your own research context.</p>
         <div className="status-row" aria-label="Current foundation status">
           <StatusChip label="Foundation" />
-          <span>No data, authentication, or database is active.</span>
+          <span>A verified catalog metadata fixture is active. Scientific records, authentication, and databases are not.</span>
         </div>
       </section>
       <section className="foundation-grid" aria-label="Planned foundations">
