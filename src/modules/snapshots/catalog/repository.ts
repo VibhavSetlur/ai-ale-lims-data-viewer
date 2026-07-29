@@ -1,6 +1,8 @@
 import { AppError } from "../../../shared/errors/AppError";
 import type { PublicSnapshotCatalogRecord, SnapshotCatalogRecord, SnapshotList } from "./types";
 
+export const CURRENT_SNAPSHOT_ID = "dev-full-20260726-a86df340";
+
 const DEV_FULL_SNAPSHOT: SnapshotCatalogRecord = {
   snapshotId: "dev-full-20260726-a86df340",
   label: "dev-full",

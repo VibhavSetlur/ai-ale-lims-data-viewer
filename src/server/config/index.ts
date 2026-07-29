@@ -10,6 +10,7 @@ export interface AppConfig {
   orcidRedirectUri?: string;
   scientificDatabaseUrl?: string;
   operationalDatabaseUrl?: string;
+  legacySqlitePath?: string;
 }
 
 export interface PublicConfig {
@@ -36,7 +37,8 @@ export function parseConfig(env: Environment): AppConfig {
     if (scientificDatabaseUrl === operationalDatabaseUrl) throw new AppError("INVALID_CONFIG", "Database URLs must be distinct.");
     return { ...config, scientificDatabaseUrl, operationalDatabaseUrl };
   }
-  return config;
+  const legacySqlitePath = env.LEGACY_SQLITE_PATH?.trim();
+  return legacySqlitePath === undefined || legacySqlitePath === "" ? config : { ...config, legacySqlitePath };
 }
 
 export function publicConfig(config: AppConfig): PublicConfig {
