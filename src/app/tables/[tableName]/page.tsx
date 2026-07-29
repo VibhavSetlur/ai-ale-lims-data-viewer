@@ -1,4 +1,6 @@
-import { notFound } from "next/navigation";
-import { PageHeader, InlineNotice } from "@/components/design-system/Primitives";
-import { tablePreview } from "@/lib/research/mock-service";
-export default async function TablePage({ params }: Readonly<{ params: Promise<{ tableName: string }> }>) { const { tableName } = await params; const table = tablePreview(tableName); if (!table) notFound(); return <section><PageHeader eyebrow="DATABASE TABLES" title={table.name}><p className="lede">{table.description}</p></PageHeader><div className="filter-bar"><label>Search <input disabled placeholder="Search unavailable in preview" /></label><button disabled>Export CSV</button></div><InlineNotice>Filters, sorting, pagination, detail drawer, and CSV export require the upcoming read-only data service. Scientific records are not loaded.</InlineNotice><div className="table-overflow"><table><caption>Placeholder schema preview</caption><thead><tr><th>Column</th><th>Type</th><th>Status</th></tr></thead><tbody><tr><td>source_id</td><td>text</td><td>Not loaded</td></tr><tr><td>created_at</td><td>datetime</td><td>Not loaded</td></tr></tbody></table></div></section>; }
+import { CatalogTable } from "@/components/catalog/CatalogBrowser";
+
+export default async function TablePage({ params }: Readonly<{ params: Promise<{ tableName: string }> }>) {
+  const { tableName } = await params;
+  return <CatalogTable table={tableName} />;
+}
