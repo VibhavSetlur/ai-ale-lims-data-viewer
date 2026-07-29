@@ -1,2 +1,2 @@
-import { ResearchPage } from "@/components/research/ResearchPage";
-export default function growthPage() { return <ResearchPage title="Growth comparison" description="Compare cohort evidence through accessible summaries and exports." complex />; }
+import { MutationAnalysis } from "@/components/research/MutationAnalysis";
+export default function GrowthPage() { return <MutationAnalysis kind="growth" title="Growth comparison" />; }

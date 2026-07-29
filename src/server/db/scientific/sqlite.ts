@@ -1,6 +1,8 @@
 import Database from "better-sqlite3";
 import { AppError } from "../../../shared/errors/AppError";
 import type { ExportQuery, FacetsQuery, Filter, RowsQuery, RowsResult } from "../../../shared/contracts/catalog";
+import type { AnalysisResult, CohortQuery, CohortResult, MutationReadRequest } from "../../../shared/contracts/mutations";
+import { deriveCopyNumberComparison, deriveGrowthComparison, deriveLibraryVariants, deriveMutationComparison } from "../../../modules/mutations/derivations";
 import { CURRENT_SNAPSHOT_ID } from "../../../modules/snapshots/catalog/repository";
 import type { ScientificRepository, TableDescriptor } from "./types";
 
@@ -38,7 +40,7 @@ export class SqliteScientificRepository implements ScientificRepository {
 
   public probe() { this.db.prepare("SELECT 1").get(); return { available: true as const }; }
   public provenance() { return { snapshotId: CURRENT_SNAPSHOT_ID, label: "legacy SQLite", sourceSystem: "SQLite snapshot", sourceRevision: null, sourceSha256: "0".repeat(64), sourceUpdatedAt: null, receivedAt: new Date(0).toISOString(), materializedAt: null, schemaVersion: "legacy", schemaFingerprint: "legacy", manifestDigest: null }; }
-  public capabilities() { return { snapshotId: CURRENT_SNAPSHOT_ID, hasBarcodes: this.tables.has("verAB_barcodes"), capabilities: { catalog: { available: true } } }; }
+  public capabilities() { const barcodeTable = this.tables.get("verAB_barcodes"); const hasBarcodes = barcodeTable !== undefined && Number((this.db.prepare(`SELECT COUNT(*) AS count FROM ${quote(barcodeTable.name)}`).get() as { count: number }).count) > 0; return { snapshotId: CURRENT_SNAPSHOT_ID, hasBarcodes, capabilities: { catalog: { available: true }, barcodes: hasBarcodes ? { available: true } : { available: false, reason: "No barcode records are available in this snapshot." } } }; }
   public listTables() { return [...this.tables.values()]; }
 
   private table(name: string): TableDescriptor {
@@ -100,4 +102,32 @@ export class SqliteScientificRepository implements ScientificRepository {
     const csvText = [columns.map((column) => csv(column.label)).join(","), ...result.rows.map((row) => columns.map((column) => csv(row[column.key])).join(","))].join("\r\n");
     return { columns, csv: csvText };
   }
+  private snapshot(snapshotId: string) { if (snapshotId !== CURRENT_SNAPSHOT_ID) throw new AppError("SNAPSHOT_NOT_FOUND", "Snapshot not found."); }
+  private has(table: string, ...columns: string[]) { const descriptor = this.tables.get(table); return descriptor !== undefined && columns.every((column) => descriptor.columns.some((item) => item.key === column)); }
+  private rows(table: string, columns: string[], where: string, values: unknown[]) { if (!this.has(table, ...columns)) return null; return this.db.prepare(`SELECT ${columns.map(quote).join(", ")} FROM ${quote(table)} WHERE ${where}`).all(...values) as Record<string, unknown>[]; }
+  public cohort(query: CohortQuery): CohortResult {
+    this.snapshot(query.snapshotId); const warnings: string[] = [];
+    const experiments = this.has("Mutations", "Experiment") ? this.db.prepare(`SELECT DISTINCT "Experiment" AS key FROM "Mutations" WHERE "Experiment" IS NOT NULL ORDER BY "Experiment"`).all() : [];
+    const registries = this.has("Mutations", "Breseq_registry_ID") ? this.db.prepare(`SELECT DISTINCT "Breseq_registry_ID" AS key FROM "Mutations" WHERE "Breseq_registry_ID" IS NOT NULL ORDER BY "Breseq_registry_ID"`).all() : [];
+    const clauses = ["\"Seq_sample\" IS NOT NULL"]; const values: unknown[] = [];
+    if (query.experimentKey && this.has("Mutations", "Experiment")) { clauses.push("\"Experiment\" = ?"); values.push(query.experimentKey); }
+    if (query.registryKey && this.has("Mutations", "Breseq_registry_ID")) { clauses.push("\"Breseq_registry_ID\" = ?"); values.push(query.registryKey); }
+    const samples = this.has("Mutations", "Seq_sample") ? this.db.prepare(`SELECT DISTINCT "Seq_sample" AS key FROM "Mutations" WHERE ${clauses.join(" AND ")} ORDER BY "Seq_sample"`).all(...values) : [];
+    if (!this.has("Mutations", "Seq_sample")) warnings.push("Mutation sample records are unavailable in this snapshot.");
+    return { experiments, registries, samples, facets: {}, selectedKeyValidity: {}, warnings, capabilities: this.capabilities(), provenance: this.provenance() };
+  }
+  private analysis(query: MutationReadRequest, kind: "mutations" | "growth" | "library" | "copy"): AnalysisResult {
+    this.snapshot(query.snapshotId); const warnings: string[] = []; const caps = this.capabilities(); const placeholders = query.sampleKeys.map(() => "?").join(","); let rows: Record<string, unknown>[] = [];
+    if (kind === "mutations" && (!this.has("Mutations", "Experiment") || (query.registryKey && !this.has("Mutations", "Breseq_registry_ID")))) warnings.push("The requested mutation scope is unavailable in this snapshot.");
+    if (kind === "mutations") { const scopeAvailable = this.has("Mutations", "Experiment") && (!query.registryKey || this.has("Mutations", "Breseq_registry_ID")); const raw = scopeAvailable ? this.rows("Mutations", ["Seq_sample", "gene_name", "position", "frequency", "type"], `"Seq_sample" IN (${placeholders}) AND "Experiment" = ?${query.registryKey ? " AND \"Breseq_registry_ID\" = ?" : ""}`, [...query.sampleKeys, query.experimentKey, ...(query.registryKey ? [query.registryKey] : [])]) : null; if (!raw) warnings.push("Mutation records with the required columns are unavailable."); else rows = deriveMutationComparison(raw.map((r) => ({ sampleKey: String(r.Seq_sample), gene: r.gene_name == null ? null : String(r.gene_name), position: Number.isFinite(Number(r.position)) ? Number(r.position) : null, frequency: Number.isFinite(Number(r.frequency)) ? Number(r.frequency) : null, type: r.type == null ? null : String(r.type) }))); }
+    if (kind === "growth") { const raw = this.rows("Robotic_OD", ["sample_name", "transfer", "od", "timepoint"], `"sample_name" IN (${placeholders}) AND "od" IS NOT NULL`, query.sampleKeys); if (!raw) warnings.push("Growth records are unavailable."); else rows = deriveGrowthComparison(raw.filter((r) => Number.isFinite(Number(r.transfer)) && Number.isFinite(Number(r.od))).map((r) => ({ sampleKey: String(r.sample_name), transfer: Number(r.transfer), od: Number(r.od), timepoint: Number.isFinite(Number(r.timepoint)) ? Number(r.timepoint) : null }))); }
+    if (kind === "library") { if (!caps.hasBarcodes) throw new AppError("CAPABILITY_UNAVAILABLE", "Library variants are unavailable because this snapshot has no barcode records."); const raw = this.rows("verAB_barcodes", ["Seqsample", "Candidate", "Count"], `"Seqsample" IN (${placeholders})`, query.sampleKeys); if (!raw) warnings.push("Barcode records with the required columns are unavailable."); else rows = deriveLibraryVariants(raw.filter((r) => Number.isFinite(Number(r.Count))).map((r) => ({ sampleKey: String(r.Seqsample), variant: String(r.Candidate ?? "unassigned"), count: Number(r.Count) }))); }
+    if (kind === "copy") { const raw = this.rows("Copy_numbers", ["Seqsample", "Region_name", "Region_CN"], `"Seqsample" IN (${placeholders}) AND "Region_CN" IS NOT NULL`, query.sampleKeys); if (!raw) warnings.push("Copy-number records are unavailable."); else rows = deriveCopyNumberComparison(raw.filter((r) => r.Region_name != null && Number.isFinite(Number(r.Region_CN))).map((r) => ({ sampleKey: String(r.Seqsample), region: String(r.Region_name), value: Number(r.Region_CN) }))); }
+    if (!rows.length && !warnings.length) warnings.push("No matching records were found for the selected samples."); return { rows, summary: { resultCount: rows.length, sampleCount: query.sampleKeys.length }, warnings, derivationVersion: "v1", capabilities: caps, provenance: this.provenance() };
+  }
+  public compareMutations(query: MutationReadRequest) { return this.analysis(query, "mutations"); }
+  public compareGrowth(query: MutationReadRequest) { return this.analysis(query, "growth"); }
+  public compareLibraryVariants(query: MutationReadRequest) { return this.analysis(query, "library"); }
+  public compareCopyNumber(query: MutationReadRequest) { return this.analysis(query, "copy"); }
+  public factors(snapshotId: string) { this.snapshot(snapshotId); const warnings: string[] = []; const experiments = this.has("Mutations", "Experiment") ? (this.db.prepare(`SELECT DISTINCT "Experiment" AS value FROM "Mutations" WHERE "Experiment" IS NOT NULL ORDER BY "Experiment"`).all() as { value: string }[]).map((row) => row.value) : []; if (!experiments.length) warnings.push("Experiment factors are unavailable."); return { experiments, factors: { experiment: experiments, media: [], strain: [], transformingDNA: [] }, warnings, provenance: this.provenance() }; }
 }

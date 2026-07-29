@@ -1,2 +1,2 @@
-import { ResearchPage } from "@/components/research/ResearchPage";
-export default function mutationsPage() { return <ResearchPage title="Mutation comparison" description="Compare cohort evidence through accessible summaries and exports." complex />; }
+import { MutationAnalysis } from "@/components/research/MutationAnalysis";
+export default function MutationComparisonPage() { return <MutationAnalysis kind="compare" title="Mutation comparison" />; }
