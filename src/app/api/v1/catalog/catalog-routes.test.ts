@@ -30,7 +30,7 @@ describe("catalog routes", () => {
     expect(response.status).toBe(404);
     await expect(response.json()).resolves.toEqual({
       ok: false,
-      error: { code: "SNAPSHOT_NOT_FOUND", message: "Snapshot not found." },
+      error: { code: "SNAPSHOT_NOT_FOUND", message: "Snapshot not found.", retryable: false },
       request: { requestId: "req-catalog", correlationId: "cor-catalog" },
     });
   });

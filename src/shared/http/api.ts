@@ -18,8 +18,23 @@ export function jsonSuccess<T>(data: T, request: RequestContext): NextResponse {
   return NextResponse.json(success(data, request));
 }
 
+const ERROR_STATUS: Readonly<Record<string, number>> = {
+  INVALID_INPUT: 400,
+  UNAUTHENTICATED: 401,
+  FORBIDDEN: 403,
+  NOT_FOUND: 404,
+  SNAPSHOT_NOT_FOUND: 404,
+  CONFLICT: 409,
+  LIMIT_EXCEEDED: 413,
+  SEMANTIC_INVALID: 422,
+  RATE_LIMITED: 429,
+  DEPENDENCY_UNAVAILABLE: 503,
+};
+
 export function jsonError(error: unknown, request: RequestContext): NextResponse {
-  const publicError = error instanceof AppError ? error.toPublic() : { code: "INTERNAL_ERROR", message: "An unexpected error occurred." };
-  const status = error instanceof AppError && error.code === "SNAPSHOT_NOT_FOUND" ? 404 : 500;
+  const publicError = error instanceof AppError
+    ? error.toPublic()
+    : { code: "INTERNAL_ERROR", message: "An unexpected error occurred.", retryable: false };
+  const status = error instanceof AppError ? (ERROR_STATUS[error.code] ?? 500) : 500;
   return NextResponse.json({ ok: false, error: publicError, request }, { status });
 }

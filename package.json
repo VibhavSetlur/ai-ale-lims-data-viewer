@@ -11,12 +11,16 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "mysql2": "^3.23.2",
     "next": "16.2.6",
     "react": "19.2.4",
-    "react-dom": "19.2.4"
+    "react-dom": "19.2.4",
+    "umzug": "^3.8.3",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@eslint/eslintrc": "3.3.3",
+    "@playwright/test": "^1.62.0",
     "@types/node": "22.15.3",
     "@types/react": "19.2.7",
     "@types/react-dom": "19.2.3",
