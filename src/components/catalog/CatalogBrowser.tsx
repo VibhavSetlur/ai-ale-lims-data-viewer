@@ -4,8 +4,8 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button, InlineNotice, ProvenanceBadge, Skeleton } from "@/components/design-system/Primitives";
 import type { ColumnDescriptor, Filter, FilterGroup, RowsQuery, RowsResult } from "@/shared/contracts/catalog";
-import type { ApiEnvelope } from "@/shared/contracts/envelope";
 import { noValue, rowsQuery } from "./catalog-state";
+import { isStaticExport, staticApi } from "@/lib/static-data";
 
 type TableDescriptor = { name: string; columns: ColumnDescriptor[] };
 type Facet = { value: string | number | boolean | null; count: number };
@@ -13,10 +13,7 @@ type Snapshot = { snapshotId: string; label: string; sourceSystem: string; sourc
 const operators: ReadonlyArray<Filter["operator"]> = ["eq", "neq", "contains", "startsWith", "gt", "gte", "lt", "lte", "isNull", "isNotNull"];
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, { ...init, headers: { "content-type": "application/json", ...init?.headers } });
-  const body = await response.json() as ApiEnvelope<T>;
-  if (!response.ok || !body.ok) throw new Error(body.ok ? "Request failed." : body.error.message);
-  return body.data;
+  return staticApi<T>(path, init);
 }
 async function currentSnapshot() { return api<Snapshot>("/api/v1/catalog/current"); }
 function query(table: string, snapshotId: string, state: Pick<RowsQuery, "search" | "where" | "sort" | "includeDeleted" | "cursor">): RowsQuery {
@@ -24,6 +21,7 @@ function query(table: string, snapshotId: string, state: Pick<RowsQuery, "search
 }
 function display(value: unknown) { return value === null || value === undefined ? "—" : typeof value === "object" ? JSON.stringify(value) : String(value); }
 export function CatalogTableList() {
+  if (isStaticExport) return <section aria-labelledby="catalog-title"><header className="page-header"><p className="eyebrow">DATABASE TABLES</p><h1 id="catalog-title">Browse scientific tables</h1></header><InlineNotice tone="warning">Database Tables and live CSV export are available only in the server viewer. Use the curated research analyses in this static export.</InlineNotice></section>;
   const [snapshot, setSnapshot] = useState<Snapshot>(); const [tables, setTables] = useState<TableDescriptor[]>([]); const [search, setSearch] = useState(""); const [error, setError] = useState("");
   const load = useCallback(async () => { setError(""); try { const current = await currentSnapshot(); setSnapshot(current); setTables((await api<{ tables: TableDescriptor[] }>(`/api/v1/catalog/tables?snapshotId=${encodeURIComponent(current.snapshotId)}`)).tables); } catch (cause) { setError(cause instanceof Error ? cause.message : "Catalog is unavailable."); } }, []);
   // The async loader owns these state transitions after network completion.
@@ -34,6 +32,7 @@ export function CatalogTableList() {
 }
 
 export function CatalogTable({ table }: Readonly<{ table: string }>) {
+  if (isStaticExport) return <section aria-labelledby="table-title"><header className="page-header"><p className="eyebrow">DATABASE TABLES</p><h1 id="table-title">{table}</h1></header><InlineNotice tone="warning">Database Tables and live CSV export are available only in the server viewer. Use the curated research analyses in this static export.</InlineNotice></section>;
   const [snapshot, setSnapshot] = useState<Snapshot>(); const [result, setResult] = useState<RowsResult>(); const [search, setSearch] = useState(""); const [includeDeleted, setIncludeDeleted] = useState(false); const [filters, setFilters] = useState<Filter[]>([]); const [combinator, setCombinator] = useState<FilterGroup["combinator"]>("and"); const [sort, setSort] = useState<RowsQuery["sort"]>([]); const [cursor, setCursor] = useState<string>(); const [history, setHistory] = useState<string[]>([]); const [selected, setSelected] = useState<Record<string, unknown>>(); const [columns, setColumns] = useState<string[]>([]); const [facetColumn, setFacetColumn] = useState(""); const [facets, setFacets] = useState<Facet[]>([]); const [error, setError] = useState(""); const [loading, setLoading] = useState(false);
   const where = useMemo<FilterGroup | undefined>(() => filters.length ? { combinator, filters } : undefined, [combinator, filters]);
   const load = useCallback(async (nextCursor?: string) => { const requestCursor = nextCursor || undefined; setLoading(true); setError(""); try { const current = snapshot ?? await currentSnapshot(); if (!snapshot) setSnapshot(current); const rows = await api<RowsResult>("/api/v1/catalog/rows", { method: "POST", body: JSON.stringify(query(table, current.snapshotId, { search: search.trim() || undefined, where, sort, includeDeleted, cursor: requestCursor })) }); setResult(rows); setColumns(existing => existing.length ? existing : rows.columns.map(column => column.key)); setFacetColumn(existing => existing || rows.columns[0]?.key || ""); setCursor(nextCursor); } catch (cause) { setError(cause instanceof Error ? cause.message : "Rows are unavailable."); setResult(undefined); } finally { setLoading(false); } }, [includeDeleted, search, snapshot, sort, table, where]);
