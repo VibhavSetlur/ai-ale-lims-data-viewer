@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { success, type RequestContext } from "../contracts/envelope";
 import { AppError } from "../errors/AppError";
+import { requestLogEvent, writeLog } from "../../server/observability";
 
 const ID_PATTERN = /^[A-Za-z0-9._-]{1,128}$/;
 
@@ -37,4 +38,16 @@ export function jsonError(error: unknown, request: RequestContext): NextResponse
     : { code: "INTERNAL_ERROR", message: "An unexpected error occurred.", retryable: false };
   const status = error instanceof AppError ? (ERROR_STATUS[error.code] ?? 500) : 500;
   return NextResponse.json({ ok: false, error: publicError, request }, { status });
+}
+
+export function loggedJsonSuccess<T>(data: T, request: Request, context: RequestContext): NextResponse {
+  const response = jsonSuccess(data, context);
+  writeLog(requestLogEvent(request, context, response.status));
+  return response;
+}
+
+export function loggedJsonError(error: unknown, request: Request, context: RequestContext): NextResponse {
+  const response = jsonError(error, context);
+  writeLog(requestLogEvent(request, context, response.status));
+  return response;
 }

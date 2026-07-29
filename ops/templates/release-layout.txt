@@ -1,0 +1,5 @@
+# Do not install from this template without operator approval.
+/releases/<commit-or-version>/     # immutable built artifact
+/releases/current -> <commit-or-version>  # atomically switched pointer
+/config/viewer2.env                # service-account-readable, outside release tree
+# Bind Viewer 2 only to an unused loopback port. Never use or alter 3457 here.
