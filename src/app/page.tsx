@@ -1,40 +1,23 @@
-import { AppShell } from "@/components/app-shell/AppShell";
-import { StatusChip } from "@/components/design-system/StatusChip";
+"use client";
 
-const foundations = [
-  ["Research snapshots", "A planned anonymous development catalog is represented by a verified metadata fixture. Scientific records are not loaded."],
-  ["Personal workspaces", "ORCID sign-in is planned only for saving private work. It is not active yet."],
-  ["Scientific stewardship", "Natascha Spahr will own future scientific snapshots and their release context."],
-];
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { legacyRouteMigrationMarker, routeForLegacyTab } from "@/lib/research/legacy-route-migration";
 
 export default function Home() {
-  return (
-    <AppShell>
-      <section className="hero" aria-labelledby="viewer-title">
-        <p className="eyebrow">AI-ALE / VIEWER 2.0</p>
-        <h1 id="viewer-title">Live research, built with its evidence in view.</h1>
-        <p className="lede">A new home for exploring AI-ALE scientific snapshots, tracing their provenance, and later preserving your own research context.</p>
-        <div className="status-row" aria-label="Current foundation status">
-          <StatusChip label="Foundation" />
-          <span>A verified catalog metadata fixture is active. Scientific records, authentication, and databases are not.</span>
-        </div>
-      </section>
-      <section className="foundation-grid" aria-label="Planned foundations">
-        {foundations.map(([title, description], index) => (
-          <article className="foundation-card" key={title}>
-            <span className="card-number">0{index + 1}</span>
-            <h2>{title}</h2>
-            <p>{description}</p>
-          </article>
-        ))}
-      </section>
-      <section className="signal" aria-labelledby="next-title">
-        <div>
-          <p className="eyebrow">NEXT SIGNAL</p>
-          <h2 id="next-title">Nothing is being simulated.</h2>
-        </div>
-        <p>The research catalog, results, provenance records, and sign-in flow will appear only after their underlying services are ready. Until then, this page is a transparent starting point.</p>
-      </section>
-    </AppShell>
-  );
+  const router = useRouter();
+  useEffect(() => {
+    try {
+      if (!localStorage.getItem(legacyRouteMigrationMarker)) {
+        const destination = routeForLegacyTab(localStorage.getItem("ai-ale-viewer-tab"));
+        router.replace(destination);
+        localStorage.setItem(legacyRouteMigrationMarker, "complete");
+        return;
+      }
+    } catch {
+      // Storage can be unavailable in private or restricted browser contexts.
+    }
+    router.replace("/mutations/cohort");
+  }, [router]);
+  return <p className="route-loading" aria-live="polite">Opening the research viewer…</p>;
 }

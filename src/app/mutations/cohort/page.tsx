@@ -1,0 +1,3 @@
+import { InlineNotice } from "@/components/design-system/Primitives";
+import { ResearchPage } from "@/components/research/ResearchPage";
+export default async function CohortPage({ searchParams }: Readonly<{ searchParams: Promise<{ notice?: string }> }>) { const { notice } = await searchParams; return <><ResearchPage title="Mutation explorer" description="Build a sample cohort and inspect its evidence once the read-only scientific service is connected." />{notice === "barcode-unavailable" && <InlineNotice tone="warning">Library variants is unavailable because this preview has no barcode records.</InlineNotice>}</>; }

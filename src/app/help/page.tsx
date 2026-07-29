@@ -1,0 +1,2 @@
+import { PageHeader } from "@/components/design-system/Primitives";
+export default function HelpPage() { return <section><PageHeader eyebrow="SUPPORT" title="Help"><p className="lede">Find route guidance and read-only preview limitations.</p></PageHeader><label className="search-label">Search help <input type="search" placeholder="Search is available with support content" /></label><h2>Why is data unavailable?</h2><p>Scientific records are not loaded in this route shell. Data services will be introduced separately.</p></section>; }
