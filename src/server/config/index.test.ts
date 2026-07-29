@@ -8,6 +8,6 @@ describe("configuration", () => {
   });
   it("does not publish database URLs", () => {
     const config = parseConfig({ APP_PROFILE: "planes", SCIENTIFIC_DATABASE_URL: "science", OPERATIONAL_DATABASE_URL: "operations" });
-    expect(publicConfig(config)).toEqual({ profile: "planes", appOrigin: undefined, appPort: undefined, orcidRedirectUri: undefined });
+    expect(publicConfig(config)).toEqual({ profile: "planes", identityMode: "disabled", appOrigin: undefined, appPort: undefined, orcidRedirectUri: undefined });
   });
 });

@@ -1,5 +1,5 @@
-import PlateWorkspace from "@/modules/plates/PlateWorkspace";
-
-export default function PlatesPage() {
-  return <PlateWorkspace />;
-}
+"use client";
+/* eslint-disable react-hooks/set-state-in-effect -- route resolution starts after browser-only storage hydration. */
+import { useEffect, useState } from "react";
+import { createWorkspace, loadStore, saveStore } from "@/modules/workspaces/local-repository";
+export default function PlatesPage() { const [error, setError] = useState(""); useEffect(() => { const loaded = loadStore(window.localStorage); if (!loaded.ok) return setError(loaded.message); const existing = loaded.value.workspaces.find(workspace => workspace.id === loaded.value.activeWorkspaceId) ?? loaded.value.workspaces[0]; if (existing) { window.location.replace(`/plates/${existing.id}`); return; } const next = createWorkspace(loaded.value); if (!next.ok) return setError(next.message); const saved = saveStore(window.localStorage, next.value); if (!saved.ok) return setError(saved.message); window.location.replace(`/plates/${next.value.activeWorkspaceId}`); }, []); return error ? <p role="alert">{error}</p> : <p>Opening browser-local workspace…</p>; }
