@@ -11,10 +11,11 @@ import {
   SectionHeader,
   Toolbar,
 } from "@/components/design-system/Primitives";
-import { isStaticExport, staticApi } from "@/lib/static-data";
+import { isStaticExport, staticApi, staticManifest } from "@/lib/static-data";
 import {
   activeResultCsv,
   analysisFigureSvg,
+  buildAnalysisFigure,
   downloadHref,
 } from "./analysis-exports";
 import {
@@ -23,7 +24,6 @@ import {
   validateCohortSelection,
 } from "./cohort-selection";
 
-const STATIC_SNAPSHOT_ID = "fixture-full-v1";
 type Cohort = {
   experiments: { key: string }[];
   registries: { key: string }[];
@@ -41,16 +41,10 @@ type Result = {
 type Kind =
   "cohort" | "compare" | "growth" | "library-variants" | "copy-number";
 
-function KindSpecificFigure({ kind, rows, title }: Readonly<{ kind: Kind; rows: Record<string, unknown>[]; title: string }>) {
-  const values = rows.slice(0, 12).map((row) => {
-    if (kind === "compare") return { label: `${row.gene ?? "unknown"}:${row.position ?? ""}`, value: Object.keys((row.values as Record<string, unknown> | undefined) ?? {}).length };
-    if (kind === "growth") return { label: String(row.sampleKey ?? "sample"), value: Number(row.endpointOd ?? 0) };
-    if (kind === "library-variants") return { label: String(row.variant ?? "variant"), value: Number(row.abundance ?? 0) };
-    return { label: `${row.region ?? "region"} · ${row.sampleKey ?? "sample"}`, value: Number(row.value ?? 0) };
-  });
-  const maximum = Math.max(1, ...values.map(({ value }) => value));
-  const description = kind === "compare" ? "Mutation loci by the number of selected samples containing each locus." : kind === "growth" ? "Growth endpoint optical density by sample." : kind === "library-variants" ? "Library variant relative abundance by sample." : "Copy-number value by genomic region and sample.";
-  return <figure className="analysis-figure"><svg aria-labelledby="analysis-figure-title analysis-figure-description" role="img" viewBox="0 0 540 210"><title id="analysis-figure-title">{title}</title><desc id="analysis-figure-description">{description}</desc>{values.map((item, index) => <g key={`${item.label}-${index}`}><text x="20" y={30 + index * 15}>{item.label}: {item.value}</text><rect x="230" y={18 + index * 15} width={Math.round((item.value / maximum) * 280)} height="10" /></g>)}</svg><figcaption>{description} Up to 12 active result rows are shown; the table contains the complete active result.</figcaption></figure>;
+function KindSpecificFigure({ kind, rows, title }: Readonly<{ kind: Exclude<Kind, "cohort">; rows: Record<string, unknown>[]; title: string }>) {
+  const figure = buildAnalysisFigure(kind, title, rows);
+  const maximum = Math.max(1, ...figure.bars.map(({ value }) => value));
+  return <figure className="analysis-figure"><svg aria-labelledby="analysis-figure-title analysis-figure-description" role="img" viewBox="0 0 540 210"><title id="analysis-figure-title">{figure.title}</title><desc id="analysis-figure-description">{figure.description}</desc>{figure.bars.map((item, index) => <g key={`${item.label}-${index}`}><text x="20" y={30 + index * 15}>{item.label}: {item.value}</text><rect x="230" y={18 + index * 15} width={Math.round((item.value / maximum) * 280)} height="10" /></g>)}</svg><figcaption>{figure.description} Up to 12 active result rows are shown; the table contains the complete active result.</figcaption></figure>;
 }
 
 export function MutationAnalysis({
@@ -58,7 +52,8 @@ export function MutationAnalysis({
   title,
 }: Readonly<{ kind: Kind; title: string }>) {
   const [cohort, setCohort] = useState<Cohort>();
-  const [snapshotId, setSnapshotId] = useState(STATIC_SNAPSHOT_ID);
+  const [hasBarcodes, setHasBarcodes] = useState<boolean>();
+  const [snapshotId, setSnapshotId] = useState("");
   const [experimentKey, setExperimentKey] = useState("");
   const [registryKey, setRegistryKey] = useState("");
   const [sampleKeys, setSampleKeys] = useState<string[]>([]);
@@ -68,13 +63,13 @@ export function MutationAnalysis({
   const hydrated = useRef(false);
   useEffect(() => {
     const load = async () => {
-      const current = isStaticExport
-        ? { snapshotId: STATIC_SNAPSHOT_ID }
-        : await staticApi<{ snapshotId: string }>("/api/v1/catalog/current");
+      const current = await staticApi<{ snapshotId: string }>("/api/v1/catalog/current");
+      const manifest = isStaticExport ? await staticManifest() : undefined;
       const data = await staticApi<Cohort>(
         `/api/v1/mutations/cohort?snapshotId=${encodeURIComponent(current.snapshotId)}${experimentKey ? `&experimentKey=${encodeURIComponent(experimentKey)}` : ""}${registryKey ? `&registryKey=${encodeURIComponent(registryKey)}` : ""}`,
       );
       setSnapshotId(current.snapshotId);
+      setHasBarcodes(manifest?.capabilities.hasBarcodes ?? data.capabilities.hasBarcodes);
       setCohort(data);
       return data;
     };
@@ -116,8 +111,12 @@ export function MutationAnalysis({
     });
   }, [cohort, experimentKey, registryKey, sampleKeys]);
   const endpoint = kind === "compare" ? "compare" : kind;
-  const available =
-    kind !== "library-variants" || cohort?.capabilities.hasBarcodes;
+  const unavailableReason = kind === "copy-number"
+    ? "Copy-number analysis is unavailable because this snapshot cannot prove the required experiment scope."
+    : kind === "library-variants" && hasBarcodes === false
+      ? "Library variants is unavailable because this snapshot has no barcode records. Return to the cohort builder."
+      : undefined;
+  const available = hasBarcodes !== undefined && !unavailableReason;
   async function run() {
     if (!experimentKey)
       return setError("Select an experiment before running an analysis.");
@@ -150,8 +149,8 @@ export function MutationAnalysis({
     [result],
   );
   const svg = useMemo(
-    () => (result ? analysisFigureSvg(title, result.summary) : ""),
-    [result, title],
+    () => (result ? analysisFigureSvg(buildAnalysisFigure(kind as Exclude<Kind, "cohort">, title, result.rows)) : ""),
+    [kind, result, title],
   );
   const selection = (
     <Selectors
@@ -199,12 +198,7 @@ export function MutationAnalysis({
           Use the retained cohort below, then run a bounded read-only analysis.
         </p>
       </PageHeader>
-      {!available && (
-        <InlineNotice tone="warning">
-          Library variants is unavailable because this snapshot has no barcode
-          records. Return to the cohort builder.
-        </InlineNotice>
-      )}
+      {unavailableReason && <InlineNotice tone="warning">{unavailableReason}</InlineNotice>}
       {error && <InlineNotice tone="warning">{error}</InlineNotice>}
       <Panel className="cohort-panel">
         <SectionHeader eyebrow="COHORT" title="Analysis inputs">

@@ -1,3 +1,7 @@
+export type AnalysisFigureKind = "compare" | "growth" | "library-variants" | "copy-number";
+export type AnalysisFigureBar = { label: string; value: number };
+export type AnalysisFigure = { title: string; description: string; bars: AnalysisFigureBar[] };
+
 export function activeResultCsv(rows: Record<string, unknown>[]): string {
   const columns = [...new Set(rows.flatMap(row => Object.keys(row)))];
   return [columns.join(","), ...rows.map(row => columns.map(column => JSON.stringify(row[column] ?? "")).join(","))].join("\r\n");
@@ -5,14 +9,31 @@ export function activeResultCsv(rows: Record<string, unknown>[]): string {
 
 const escapeXml = (value: unknown) => String(value ?? "").replace(/[&<>"']/g, character => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&apos;" })[character] ?? character);
 
-export function analysisFigureSvg(title: string, summary: { resultCount: number; sampleCount: number }): string {
-  const values = [{ label: "Results", value: summary.resultCount }, { label: "Selected samples", value: summary.sampleCount }];
-  const maximum = Math.max(1, ...values.map(item => item.value));
-  const bars = values.map((item, index) => {
-    const y = 70 + index * 55; const width = Math.round((item.value / maximum) * 300);
-    return `<text x="20" y="${y + 20}">${escapeXml(item.label)}: ${item.value}</text><rect x="190" y="${y}" width="${width}" height="28" fill="#9a5b30"/><text x="${198 + width}" y="${y + 20}">${item.value}</text>`;
+export function buildAnalysisFigure(kind: AnalysisFigureKind, title: string, rows: Record<string, unknown>[]): AnalysisFigure {
+  const description = kind === "compare"
+    ? "Mutation loci by the number of selected samples containing each locus."
+    : kind === "growth"
+      ? "Growth endpoint optical density by sample."
+      : kind === "library-variants"
+        ? "Library variant relative abundance by sample."
+        : "Copy-number value by genomic region and sample.";
+  const bars = rows.slice(0, 12).map((row) => {
+    if (kind === "compare") return { label: `${row.gene ?? "unknown"}:${row.position ?? ""}`, value: Object.keys((row.values as Record<string, unknown> | undefined) ?? {}).length };
+    if (kind === "growth") return { label: String(row.sampleKey ?? "sample"), value: Number(row.endpointOd ?? 0) };
+    if (kind === "library-variants") return { label: String(row.variant ?? "variant"), value: Number(row.abundance ?? 0) };
+    return { label: `${row.region ?? "region"} · ${row.sampleKey ?? "sample"}`, value: Number(row.value ?? 0) };
+  });
+  return { title, description, bars };
+}
+
+export function analysisFigureSvg(figure: AnalysisFigure): string {
+  const maximum = Math.max(1, ...figure.bars.map(item => item.value));
+  const bars = figure.bars.map((item, index) => {
+    const y = 18 + index * 15;
+    const width = Math.round((item.value / maximum) * 280);
+    return `<text x="20" y="${y + 12}">${escapeXml(item.label)}: ${escapeXml(item.value)}</text><rect x="230" y="${y}" width="${width}" height="10" fill="#9a5b30"/>`;
   }).join("");
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="540" height="210" viewBox="0 0 540 210" role="img" aria-labelledby="title description"><title id="title">${escapeXml(title)}</title><desc id="description">Results and selected samples summary.</desc><rect width="100%" height="100%" fill="#fffaf2"/><text x="20" y="35" font-size="20" font-family="sans-serif">${escapeXml(title)}</text>${bars}</svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="540" height="210" viewBox="0 0 540 210" role="img" aria-labelledby="title description"><title id="title">${escapeXml(figure.title)}</title><desc id="description">${escapeXml(figure.description)}</desc>${bars}</svg>`;
 }
 
 export const downloadHref = (mime: string, text: string) => `data:${mime};charset=utf-8,${encodeURIComponent(text)}`;

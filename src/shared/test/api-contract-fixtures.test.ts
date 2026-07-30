@@ -29,7 +29,10 @@ const contracts: ApiContractFixture[] = [
 describe("API contract fixtures", () => {
   it("executes handlers with an injected repository and preserves export bytes", async () => {
     const results = await runApiContractFixtures(fixture(), contracts);
-    expect(Object.values(results).every((result) => result.status === 200)).toBe(true);
+    expect(Object.entries(results).filter(([name]) => !["growth", "library", "copy"].includes(name)).every(([, result]) => result.status === 200)).toBe(true);
+    expect(results.growth.status).toBe(422);
+    expect(results.library.status).toBe(422);
+    expect(results.copy.status).toBe(422);
     expect(results.export.csv).toBe("id,name\r\n1,alpha\r\n2,'=formula");
     expect(results.mutation.payload).toMatchObject({ ok: true, data: { warnings: [] } });
     expect(results.capabilities.payload).toMatchObject({ ok: true, data: { hasBarcodes: true } });

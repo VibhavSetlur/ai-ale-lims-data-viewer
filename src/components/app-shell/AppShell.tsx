@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import Link from "next/link";
 import { scientificRepository } from "@/server/db/scientific";
 import { isStaticExport } from "@/lib/static-data";
+import staticManifest from "../../../public/static-data/manifest.json";
 import { issueReportUrl } from "@/lib/support/support-content";
 import { assistantMode } from "@/modules/assistant/contracts";
 import { AssistantPanel } from "@/components/assistant/AssistantPanel";
@@ -9,9 +10,9 @@ import { IdentityControl } from "./IdentityControl";
 import { PrimaryNavigation } from "./PrimaryNavigation";
 
 export async function AppShell({ children }: Readonly<{ children: ReactNode }>) {
-  const fixture = { snapshotId: "fixture-full-v1", label: "Sanitized static fixture", sourceSystem: "generated-fixture" };
   const live = isStaticExport ? undefined : await (async () => { try { const repository = scientificRepository(); return { snapshot: await repository.provenance(), capabilities: await repository.capabilities() }; } catch { return undefined; } })();
-  const snapshot = isStaticExport ? fixture : live?.snapshot;
+  const staticData = isStaticExport ? staticManifest : undefined;
+  const snapshot = staticData?.provenance ?? live?.snapshot;
   return <div className="app-shell">
     <a className="skip-link" href="#research-canvas">Skip to research content</a>
     <header className="topbar">
@@ -34,7 +35,7 @@ export async function AppShell({ children }: Readonly<{ children: ReactNode }>) 
        {snapshot && <dl className="context-details">
          <div><dt>Source</dt><dd>{snapshot.sourceSystem}</dd></div>
          <div><dt>Snapshot</dt><dd>{snapshot.snapshotId}</dd></div>
-         <div><dt>Barcodes</dt><dd>{isStaticExport ? "Available" : live?.capabilities.hasBarcodes ? "Available" : "Unavailable"}</dd></div>
+          <div><dt>Barcodes</dt><dd>{(staticData?.capabilities.hasBarcodes ?? live?.capabilities.hasBarcodes) ? "Available" : "Unavailable"}</dd></div>
        </dl>}
       <AssistantPanel mode={assistantMode()} />
     </aside>

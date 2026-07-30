@@ -13,7 +13,7 @@ function fixture(): SqliteScientificRepository {
   directory = mkdtempSync(join(tmpdir(), "scientific-catalog-"));
   const path = join(directory, "fixture.db");
   const db = new Database(path);
-  db.exec("CREATE TABLE samples (id INTEGER PRIMARY KEY, name TEXT, deleted INTEGER); INSERT INTO samples VALUES (1, 'alpha', 0), (2, '=formula', 0), (3, 'removed', 1); CREATE TABLE Mutations (Seq_sample TEXT, Experiment TEXT, Breseq_registry_ID TEXT, gene_name TEXT, position INTEGER, frequency REAL, type TEXT); INSERT INTO Mutations VALUES ('s1', 'e1', 'r1', 'gyrA', 42, 0.4, 'SNP'), ('s2', 'e1', 'r1', 'gyrA', 42, 0.7, 'SNP'); CREATE TABLE Robotic_OD (sample_name TEXT, transfer INTEGER, od REAL, timepoint INTEGER); INSERT INTO Robotic_OD VALUES ('s1', 1, 0.2, 1), ('s1', 1, 0.5, 2); CREATE TABLE Copy_numbers (Seqsample TEXT, Region_name TEXT, Region_CN REAL); INSERT INTO Copy_numbers VALUES ('s1', 'region-1', 1.5); CREATE TABLE verAB_barcodes (Seqsample TEXT, Candidate TEXT, Count INTEGER); INSERT INTO verAB_barcodes VALUES ('s1', 'A1-B1', 10)");
+  db.exec("CREATE TABLE samples (id INTEGER PRIMARY KEY, name TEXT, deleted INTEGER); INSERT INTO samples VALUES (1, 'alpha', 0), (2, '=formula', 0), (3, 'removed', 1); CREATE TABLE Mutations (Seq_sample TEXT, Experiment TEXT, Breseq_registry_ID TEXT, gene_name TEXT, position INTEGER, frequency REAL, type TEXT); INSERT INTO Mutations VALUES ('s1', 'e1', 'r1', 'gyrA', 42, 0.4, 'SNP'), ('s2', 'e1', 'r1', 'gyrA', 42, 0.7, 'SNP'); CREATE TABLE Robotic_OD (sample_name TEXT, transfer INTEGER, od REAL, timepoint INTEGER, experiment TEXT); INSERT INTO Robotic_OD VALUES ('s1', 1, 0.2, 1, 'e1'), ('s1', 1, 0.5, 2, 'e1'), ('s1', 1, 9, 3, 'e2'); CREATE TABLE Copy_numbers (Seqsample TEXT, Region_name TEXT, Region_CN REAL); INSERT INTO Copy_numbers VALUES ('s1', 'region-1', 1.5); CREATE TABLE verAB_barcodes (Seqsample TEXT, Candidate TEXT, Count INTEGER); INSERT INTO verAB_barcodes VALUES ('s1', 'A1-B1', 10)");
   db.close();
   return new SqliteScientificRepository(path);
 }
@@ -40,10 +40,10 @@ describe("SQLite scientific repository", () => {
     expect(repository.capabilities().hasBarcodes).toBe(true);
     expect(repository.cohort({ snapshotId: CURRENT_SNAPSHOT_ID, experimentKey: "e1" }).samples).toEqual([{ key: "s1" }, { key: "s2" }]);
     expect(repository.compareMutations(request).rows).toMatchObject([{ gene: "gyrA", values: { s1: 0.4, s2: 0.7 } }]);
-    expect(repository.compareGrowth(request).rows).toEqual([{ sampleKey: "s1", transfer: 1, endpointOd: 0.5, maxOd: 0.5 }]);
-    expect(repository.compareCopyNumber(request).rows).toEqual([{ sampleKey: "s1", region: "region-1", value: 1.5 }]);
-    expect(repository.compareLibraryVariants(request).rows).toMatchObject([{ sampleKey: "s1", variant: "A1-B1", abundance: 1 }]);
-    expect(() => repository.compareGrowth({ ...request, registryKey: "other" })).toThrow("outside the requested experiment or registry");
+    expect(repository.compareGrowth({ ...request, registryKey: undefined }).rows).toEqual([{ sampleKey: "s1", transfer: 1, endpointOd: 0.5, maxOd: 0.5 }]);
+    expect(() => repository.compareCopyNumber(request)).toThrow("cannot be scoped truthfully");
+    expect(() => repository.compareLibraryVariants(request)).toThrow("cannot be scoped truthfully");
+    expect(() => repository.compareGrowth({ ...request, registryKey: "r1" })).toThrow("cannot be scoped truthfully");
   });
 
   it("opens a query-only handle", () => {
