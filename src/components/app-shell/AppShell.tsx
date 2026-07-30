@@ -3,12 +3,32 @@ import Link from "next/link";
 import { mockProvenance } from "@/lib/research/mock-service";
 import { issueReportUrl } from "@/lib/support/support-content";
 import { IdentityControl } from "./IdentityControl";
+import { PrimaryNavigation } from "./PrimaryNavigation";
 
-const researchLinks = [{ href: "/tables", label: "Database Tables" }, { href: "/mutations/cohort", label: "Mutation Explorer" }, { href: "/plates", label: "Plate Design" }, { href: "/workspaces", label: "Saved / Local workspaces" }];
 export function AppShell({ children }: Readonly<{ children: ReactNode }>) {
- return <div className="app-shell">
-  <header className="topbar"><Link className="brand" href="/mutations/cohort">AI-ALE / LIVE RESEARCH</Link><div className="header-meta"><span className="provenance">{mockProvenance.label}</span><span>Read-only</span><a href={issueReportUrl()} target="_blank" rel="noreferrer">Report an issue</a><IdentityControl /></div></header>
-  <nav className="primary-nav" aria-label="Primary navigation"><div><span className="nav-group">Research</span>{researchLinks.map((link) => <Link key={link.href} href={link.href}>{link.label}</Link>)}</div><div><span className="nav-group">Support</span><Link href="/guide">Guide</Link><Link href="/changelog">Changelog</Link><Link href="/help">Help</Link></div></nav>
-  <main className="research-canvas">{children}</main><aside className="context-inspector" aria-label="Context inspector"><h2>Context</h2><p>Read-only preview. Scientific records are not loaded.</p><p className="muted">{mockProvenance.snapshotId}</p></aside>
- </div>;
+  return <div className="app-shell">
+    <a className="skip-link" href="#research-canvas">Skip to research content</a>
+    <header className="topbar">
+      <Link className="brand" href="/mutations/cohort">AI-ALE <span>Research workspace</span></Link>
+      <div className="header-meta">
+        <span className="provenance" title={`Snapshot ${mockProvenance.snapshotId}`}>Snapshot preview</span>
+        <span className="status-chip status-read-only">Read-only</span>
+        <a href={issueReportUrl()} target="_blank" rel="noreferrer">Report an issue</a>
+        <IdentityControl />
+      </div>
+    </header>
+    <PrimaryNavigation />
+    <main className="research-canvas" id="research-canvas" tabIndex={-1}>{children}</main>
+    <aside className="context-inspector" aria-labelledby="context-heading">
+      <div className="inspector-heading">
+        <p className="eyebrow">Research context</p>
+        <h2 id="context-heading">Snapshot details</h2>
+      </div>
+      <p>Read-only preview. Scientific records are not loaded.</p>
+      <dl className="context-details">
+        <div><dt>Source</dt><dd>{mockProvenance.label}</dd></div>
+        <div><dt>Snapshot</dt><dd>{mockProvenance.snapshotId}</dd></div>
+      </dl>
+    </aside>
+  </div>;
 }
