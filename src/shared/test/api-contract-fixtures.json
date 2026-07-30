@@ -1,0 +1,12 @@
+[
+  {"name":"capabilities","method":"GET","path":"/api/v1/capabilities?snapshotId=sqlite-placeholder"},
+  {"name":"catalog-rows","method":"POST","path":"/api/v1/catalog/rows","body":{"snapshotId":"sqlite-placeholder","table":"samples","limit":10,"sort":[{"column":"id","direction":"asc"}]}},
+  {"name":"catalog-facets","method":"POST","path":"/api/v1/catalog/facets","body":{"snapshotId":"sqlite-placeholder","table":"samples","columns":["deleted"]}},
+  {"name":"catalog-export","method":"POST","path":"/api/v1/catalog/export","body":{"snapshotId":"sqlite-placeholder","table":"samples","limit":10,"columns":["id","name"]}},
+  {"name":"cohort","method":"GET","path":"/api/v1/mutations/cohort?snapshotId=sqlite-placeholder&experimentKey=e1&registryKey=r1"},
+  {"name":"mutation-comparison","method":"POST","path":"/api/v1/mutations/compare","body":{"snapshotId":"sqlite-placeholder","experimentKey":"e1","registryKey":"r1","sampleKeys":["s1","s2"]}},
+  {"name":"growth","method":"POST","path":"/api/v1/mutations/growth","body":{"snapshotId":"sqlite-placeholder","experimentKey":"e1","registryKey":"r1","sampleKeys":["s1","s2"]}},
+  {"name":"library-variants","method":"POST","path":"/api/v1/mutations/library-variants","body":{"snapshotId":"sqlite-placeholder","experimentKey":"e1","registryKey":"r1","sampleKeys":["s1","s2"]}},
+  {"name":"copy-number","method":"POST","path":"/api/v1/mutations/copy-number","body":{"snapshotId":"sqlite-placeholder","experimentKey":"e1","registryKey":"r1","sampleKeys":["s1","s2"]}},
+  {"name":"plate-factors","method":"GET","path":"/api/v1/plates/factors?snapshotId=sqlite-placeholder"}
+]
