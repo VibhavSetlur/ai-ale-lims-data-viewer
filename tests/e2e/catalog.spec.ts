@@ -8,6 +8,20 @@
 import { test, expect } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 
+/**
+ * Wrap a raw payload in the real API envelope so mocks exercise the true
+ * contract the client parses ({ ok: true, data } / { ok: false, error }).
+ * If the payload carries an "error" key it becomes a failure envelope.
+ */
+function env(payload: Record<string, unknown>): string {
+  const request = { requestId: "test-req", correlationId: "test-corr" };
+  if (payload && typeof payload === "object" && "error" in payload) {
+    return JSON.stringify({ ok: false, error: payload.error, request });
+  }
+  return JSON.stringify({ ok: true, data: payload, request });
+}
+
+
 // ─── Tables index ─────────────────────────────────────────────────────────────
 
 test("tables index lists tables from API", async ({ page }) => {
@@ -16,7 +30,7 @@ test("tables index lists tables from API", async ({ page }) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({
+      body: env({
         snapshotId: "snap-001",
         label: "Test snapshot",
         sourceSystem: "test-lims",
@@ -29,7 +43,7 @@ test("tables index lists tables from API", async ({ page }) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({
+      body: env({
         tables: [
           {
             name: "experiments",
@@ -67,7 +81,7 @@ test("tables index search filters cards client-side", async ({ page }) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({
+      body: env({
         snapshotId: "snap-001",
         label: "Test",
         sourceSystem: "lims",
@@ -79,7 +93,7 @@ test("tables index search filters cards client-side", async ({ page }) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({
+      body: env({
         tables: [
           { name: "experiments", columns: [{ key: "id", label: "ID", type: "number", nullable: false }] },
           { name: "plates", columns: [{ key: "id", label: "ID", type: "number", nullable: false }] },
@@ -102,7 +116,7 @@ test("tables index shows error state with retry on API failure", async ({ page }
     await route.fulfill({
       status: 503,
       contentType: "application/json",
-      body: JSON.stringify({ error: { code: "SERVICE_UNAVAILABLE", message: "Service unavailable", retryable: true } }),
+      body: env({ error: { code: "SERVICE_UNAVAILABLE", message: "Service unavailable", retryable: true } }),
     });
   });
 
@@ -119,14 +133,14 @@ test("table workspace loads rows with correct limit", async ({ page }) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({ snapshotId: "snap-001", label: "T", sourceSystem: "lims", sourceUpdatedAt: null }),
+      body: env({ snapshotId: "snap-001", label: "T", sourceSystem: "lims", sourceUpdatedAt: null }),
     });
   });
   await page.route("**/api/v1/catalog/tables*", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({
+      body: env({
         tables: [{ name: "experiments", columns: [
           { key: "id", label: "ID", type: "number", nullable: false },
           { key: "name", label: "Name", type: "string", nullable: false },
@@ -140,7 +154,7 @@ test("table workspace loads rows with correct limit", async ({ page }) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({
+      body: env({
         columns: [
           { key: "id", label: "ID", type: "number", nullable: false },
           { key: "name", label: "Name", type: "string", nullable: false },
@@ -180,14 +194,14 @@ test("adding a filter re-queries rows with where clause", async ({ page }) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({ snapshotId: "snap-001", label: "T", sourceSystem: "lims", sourceUpdatedAt: null }),
+      body: env({ snapshotId: "snap-001", label: "T", sourceSystem: "lims", sourceUpdatedAt: null }),
     });
   });
   await page.route("**/api/v1/catalog/tables*", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({
+      body: env({
         tables: [{ name: "experiments", columns: [
           { key: "id", label: "ID", type: "number", nullable: false },
           { key: "status", label: "Status", type: "string", nullable: true },
@@ -201,7 +215,7 @@ test("adding a filter re-queries rows with where clause", async ({ page }) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({
+      body: env({
         columns: [{ key: "id", label: "ID", type: "number", nullable: false }, { key: "status", label: "Status", type: "string", nullable: true }],
         rows: [{ id: 1, status: "active" }],
         nextCursor: null,
@@ -243,14 +257,14 @@ test("facets popover shows value counts and apply creates filter", async ({ page
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({ snapshotId: "snap-001", label: "T", sourceSystem: "lims", sourceUpdatedAt: null }),
+      body: env({ snapshotId: "snap-001", label: "T", sourceSystem: "lims", sourceUpdatedAt: null }),
     });
   });
   await page.route("**/api/v1/catalog/tables*", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({
+      body: env({
         tables: [{ name: "experiments", columns: [
           { key: "id", label: "ID", type: "number", nullable: false },
           { key: "status", label: "Status", type: "string", nullable: true },
@@ -262,7 +276,7 @@ test("facets popover shows value counts and apply creates filter", async ({ page
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({
+      body: env({
         columns: [{ key: "id", label: "ID", type: "number", nullable: false }, { key: "status", label: "Status", type: "string", nullable: true }],
         rows: [{ id: 1, status: "active" }, { id: 2, status: "done" }],
         nextCursor: null,
@@ -274,7 +288,7 @@ test("facets popover shows value counts and apply creates filter", async ({ page
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({
+      body: env({
         status: [
           { value: "active", count: 10 },
           { value: "done", count: 5 },
@@ -309,14 +323,14 @@ test("load more appears only when nextCursor is present and fetches next page", 
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({ snapshotId: "snap-001", label: "T", sourceSystem: "lims", sourceUpdatedAt: null }),
+      body: env({ snapshotId: "snap-001", label: "T", sourceSystem: "lims", sourceUpdatedAt: null }),
     });
   });
   await page.route("**/api/v1/catalog/tables*", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({
+      body: env({
         tables: [{ name: "experiments", columns: [{ key: "id", label: "ID", type: "number", nullable: false }] }],
       }),
     });
@@ -327,7 +341,7 @@ test("load more appears only when nextCursor is present and fetches next page", 
       await route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify({
+        body: env({
           columns: [{ key: "id", label: "ID", type: "number", nullable: false }],
           rows: [{ id: 1 }, { id: 2 }],
           nextCursor: "cursor-page-2",
@@ -338,7 +352,7 @@ test("load more appears only when nextCursor is present and fetches next page", 
       await route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify({
+        body: env({
           columns: [{ key: "id", label: "ID", type: "number", nullable: false }],
           rows: [{ id: 3 }, { id: 4 }],
           nextCursor: null,
@@ -376,14 +390,14 @@ test("export button triggers /catalog/export POST with filters and downloads CSV
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({ snapshotId: "snap-001", label: "T", sourceSystem: "lims", sourceUpdatedAt: null }),
+      body: env({ snapshotId: "snap-001", label: "T", sourceSystem: "lims", sourceUpdatedAt: null }),
     });
   });
   await page.route("**/api/v1/catalog/tables*", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({
+      body: env({
         tables: [{ name: "experiments", columns: [
           { key: "id", label: "ID", type: "number", nullable: false },
           { key: "name", label: "Name", type: "string", nullable: false },
@@ -395,7 +409,7 @@ test("export button triggers /catalog/export POST with filters and downloads CSV
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({
+      body: env({
         columns: [{ key: "id", label: "ID", type: "number", nullable: false }],
         rows: [{ id: 1, name: "Alpha" }],
         nextCursor: null,
@@ -409,7 +423,7 @@ test("export button triggers /catalog/export POST with filters and downloads CSV
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({
+      body: env({
         columns: ["id", "name"],
         csv: "id,name\n1,Alpha\n",
       }),
@@ -445,14 +459,14 @@ test("export 413 LIMIT_EXCEEDED shows scoped toast, not crash", async ({ page })
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({ snapshotId: "snap-001", label: "T", sourceSystem: "lims", sourceUpdatedAt: null }),
+      body: env({ snapshotId: "snap-001", label: "T", sourceSystem: "lims", sourceUpdatedAt: null }),
     });
   });
   await page.route("**/api/v1/catalog/tables*", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({
+      body: env({
         tables: [{ name: "experiments", columns: [{ key: "id", label: "ID", type: "number", nullable: false }] }],
       }),
     });
@@ -461,7 +475,7 @@ test("export 413 LIMIT_EXCEEDED shows scoped toast, not crash", async ({ page })
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({
+      body: env({
         columns: [{ key: "id", label: "ID", type: "number", nullable: false }],
         rows: [{ id: 1 }],
         nextCursor: null,
@@ -473,7 +487,7 @@ test("export 413 LIMIT_EXCEEDED shows scoped toast, not crash", async ({ page })
     await route.fulfill({
       status: 413,
       contentType: "application/json",
-      body: JSON.stringify({ error: { code: "LIMIT_EXCEEDED", message: "Export exceeds 10,000 rows. Narrow filters and retry.", retryable: false } }),
+      body: env({ error: { code: "LIMIT_EXCEEDED", message: "Export exceeds 10,000 rows. Narrow filters and retry.", retryable: false } }),
     });
   });
 
@@ -500,14 +514,14 @@ test("row click opens RecordDrawer, focus trapped, Escape restores row focus", a
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({ snapshotId: "snap-001", label: "T", sourceSystem: "lims", sourceUpdatedAt: null }),
+      body: env({ snapshotId: "snap-001", label: "T", sourceSystem: "lims", sourceUpdatedAt: null }),
     });
   });
   await page.route("**/api/v1/catalog/tables*", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({
+      body: env({
         tables: [{ name: "experiments", columns: [
           { key: "id", label: "ID", type: "number", nullable: false },
           { key: "name", label: "Name", type: "string", nullable: false },
@@ -519,7 +533,7 @@ test("row click opens RecordDrawer, focus trapped, Escape restores row focus", a
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({
+      body: env({
         columns: [
           { key: "id", label: "ID", type: "number", nullable: false },
           { key: "name", label: "Name", type: "string", nullable: false },
@@ -557,14 +571,14 @@ test("row Enter key opens RecordDrawer", async ({ page }) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({ snapshotId: "snap-001", label: "T", sourceSystem: "lims", sourceUpdatedAt: null }),
+      body: env({ snapshotId: "snap-001", label: "T", sourceSystem: "lims", sourceUpdatedAt: null }),
     });
   });
   await page.route("**/api/v1/catalog/tables*", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({
+      body: env({
         tables: [{ name: "experiments", columns: [
           { key: "id", label: "ID", type: "number", nullable: false },
         ]}],
@@ -575,7 +589,7 @@ test("row Enter key opens RecordDrawer", async ({ page }) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({
+      body: env({
         columns: [{ key: "id", label: "ID", type: "number", nullable: false }],
         rows: [{ id: 1 }],
         nextCursor: null,
@@ -619,7 +633,7 @@ test("static build shows server-only notice for table workspace", async ({ page 
     await route.fulfill({
       status: 503,
       contentType: "application/json",
-      body: JSON.stringify({
+      body: env({
         error: {
           code: "STATIC_UNAVAILABLE",
           message: "This operation is unavailable in the static viewer.",
@@ -645,14 +659,14 @@ test("table workspace shows empty state when no rows match filters", async ({ pa
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({ snapshotId: "snap-001", label: "T", sourceSystem: "lims", sourceUpdatedAt: null }),
+      body: env({ snapshotId: "snap-001", label: "T", sourceSystem: "lims", sourceUpdatedAt: null }),
     });
   });
   await page.route("**/api/v1/catalog/tables*", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({
+      body: env({
         tables: [{ name: "empty_table", columns: [{ key: "id", label: "ID", type: "number", nullable: false }] }],
       }),
     });
@@ -661,7 +675,7 @@ test("table workspace shows empty state when no rows match filters", async ({ pa
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({
+      body: env({
         columns: [{ key: "id", label: "ID", type: "number", nullable: false }],
         rows: [],
         nextCursor: null,
@@ -683,14 +697,14 @@ test("tables index page has no critical axe violations", async ({ page }) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({ snapshotId: "snap-axe", label: "Axe Test", sourceSystem: "lims", sourceUpdatedAt: null }),
+      body: env({ snapshotId: "snap-axe", label: "Axe Test", sourceSystem: "lims", sourceUpdatedAt: null }),
     });
   });
   await page.route("**/api/v1/catalog/tables*", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({
+      body: env({
         tables: [
           { name: "axe_table", columns: [{ key: "id", label: "ID", type: "number", nullable: false }] },
         ],
@@ -719,14 +733,14 @@ test("table workspace page has no critical axe violations", async ({ page }) => 
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({ snapshotId: "snap-axe", label: "Axe Test", sourceSystem: "lims", sourceUpdatedAt: null }),
+      body: env({ snapshotId: "snap-axe", label: "Axe Test", sourceSystem: "lims", sourceUpdatedAt: null }),
     });
   });
   await page.route("**/api/v1/catalog/tables*", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({
+      body: env({
         tables: [{ name: "axe_table", columns: [
           { key: "id", label: "ID", type: "number", nullable: false },
           { key: "name", label: "Name", type: "string", nullable: false },
@@ -738,7 +752,7 @@ test("table workspace page has no critical axe violations", async ({ page }) => 
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({
+      body: env({
         columns: [
           { key: "id", label: "ID", type: "number", nullable: false },
           { key: "name", label: "Name", type: "string", nullable: false },

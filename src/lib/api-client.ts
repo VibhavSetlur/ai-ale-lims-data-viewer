@@ -9,7 +9,8 @@
 import type { ResponseMeta } from "@/shared/contracts/envelope";
 import type { SnapshotProvenance } from "@/shared/contracts/provenance";
 import type { CapabilityManifest } from "@/shared/contracts/capability";
-import { staticApi } from "@/lib/static-data";
+import { staticApiEnvelope, StaticApiError } from "@/lib/static-data";
+import type { ResponseMeta as EnvelopeMeta } from "@/shared/contracts/envelope";
 
 // ---- Result type ----
 
@@ -66,6 +67,19 @@ export interface SnapshotSummary {
   label: string;
 }
 
+export interface CohortQuery {
+  snapshotId: string;
+  experimentKey?: string;
+  registryKey?: string;
+}
+
+export interface AnalysisRequest {
+  snapshotId: string;
+  experimentKey: string;
+  sampleKeys: string[];
+  registryKey?: string;
+}
+
 // ---- Internal wrapper ----
 
 async function call<T>(
@@ -73,21 +87,26 @@ async function call<T>(
   init?: RequestInit,
 ): Promise<ApiResult<T>> {
   try {
-    const data = await staticApi<T>(path, init);
-    return { ok: true, data };
+    const result = await staticApiEnvelope<T>(path, init);
+    return { ok: true, data: result.data, meta: result.meta as EnvelopeMeta | undefined };
   } catch (err) {
-    const message =
-      err instanceof Error ? err.message : "An unexpected error occurred.";
-    // Detect if the error came from a failed operation in static mode
-    const isStatic =
-      typeof message === "string" &&
-      message.includes("unavailable in the static viewer");
+    if (err instanceof StaticApiError) {
+      return {
+        ok: false,
+        error: {
+          code: err.code,
+          message: err.message,
+          fieldErrors: err.fieldErrors,
+          retryable: err.retryable,
+        },
+      };
+    }
     return {
       ok: false,
       error: {
-        code: isStatic ? "STATIC_UNAVAILABLE" : "CLIENT_ERROR",
-        message,
-        retryable: !isStatic,
+        code: "CLIENT_ERROR",
+        message: err instanceof Error ? err.message : "An unexpected error occurred.",
+        retryable: true,
       },
     };
   }
@@ -184,38 +203,32 @@ export const apiClient = {
     );
   },
 
-  /** POST /api/v1/mutations/cohort */
-  cohort(query: Record<string, string>): Promise<ApiResult<unknown>> {
-    return call<unknown>("/api/v1/mutations/cohort", {
-      method: "POST",
-      body: JSON.stringify(query),
-    });
+  /** GET /api/v1/mutations/cohort */
+  cohort(query: CohortQuery): Promise<ApiResult<unknown>> {
+    const params = new URLSearchParams({ snapshotId: query.snapshotId });
+    if (query.experimentKey) params.set("experimentKey", query.experimentKey);
+    if (query.registryKey) params.set("registryKey", query.registryKey);
+    return call<unknown>(`/api/v1/mutations/cohort?${params.toString()}`);
   },
 
   /** POST /api/v1/mutations/compare */
-  compareMutations(query: Record<string, string>): Promise<ApiResult<unknown>> {
-    return call<unknown>("/api/v1/mutations/compare", {
-      method: "POST",
-      body: JSON.stringify(query),
-    });
+  compareMutations(body: AnalysisRequest): Promise<ApiResult<unknown>> {
+    return call<unknown>("/api/v1/mutations/compare", { method: "POST", body: JSON.stringify(body) });
   },
 
-  /** GET /api/v1/mutations/growth */
-  growth(query: Record<string, string>): Promise<ApiResult<unknown>> {
-    const qs = new URLSearchParams(query).toString();
-    return call<unknown>(`/api/v1/mutations/growth?${qs}`);
+  /** POST /api/v1/mutations/growth */
+  growth(body: AnalysisRequest): Promise<ApiResult<unknown>> {
+    return call<unknown>("/api/v1/mutations/growth", { method: "POST", body: JSON.stringify(body) });
   },
 
-  /** GET /api/v1/mutations/library-variants */
-  libraryVariants(query: Record<string, string>): Promise<ApiResult<unknown>> {
-    const qs = new URLSearchParams(query).toString();
-    return call<unknown>(`/api/v1/mutations/library-variants?${qs}`);
+  /** POST /api/v1/mutations/library-variants */
+  libraryVariants(body: AnalysisRequest): Promise<ApiResult<unknown>> {
+    return call<unknown>("/api/v1/mutations/library-variants", { method: "POST", body: JSON.stringify(body) });
   },
 
-  /** GET /api/v1/mutations/copy-number */
-  copyNumber(query: Record<string, string>): Promise<ApiResult<unknown>> {
-    const qs = new URLSearchParams(query).toString();
-    return call<unknown>(`/api/v1/mutations/copy-number?${qs}`);
+  /** POST /api/v1/mutations/copy-number */
+  copyNumber(body: AnalysisRequest): Promise<ApiResult<unknown>> {
+    return call<unknown>("/api/v1/mutations/copy-number", { method: "POST", body: JSON.stringify(body) });
   },
 
   /** GET /api/v1/plates/factors */

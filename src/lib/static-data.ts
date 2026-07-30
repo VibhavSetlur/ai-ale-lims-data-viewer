@@ -8,7 +8,34 @@ type StaticManifest = {
   capabilities: CapabilityManifest;
   artifacts: Record<string, { file: string; sha256: string }>;
 };
-type StaticEnvelope<T> = { ok: true; data: T } | { ok: false; error: { message: string } };
+type PublicError = { code: string; message: string; fieldErrors?: Record<string, string[]>; retryable?: boolean };
+type StaticEnvelope<T> = { ok: true; data: T; meta?: unknown } | { ok: false; error: PublicError };
+
+/**
+ * Typed transport error that preserves the API error code, HTTP status,
+ * field-level validation errors, and retryable flag so callers can route
+ * every state (400/404/413/422/503, static-unavailable) truthfully instead
+ * of collapsing every failure to a single generic client error.
+ */
+export class StaticApiError extends Error {
+  readonly code: string;
+  readonly status?: number;
+  readonly fieldErrors?: Record<string, string[]>;
+  readonly retryable: boolean;
+  constructor(error: PublicError, status?: number) {
+    super(error.message);
+    this.name = "StaticApiError";
+    this.code = error.code;
+    this.status = status;
+    this.fieldErrors = error.fieldErrors;
+    this.retryable = error.retryable ?? false;
+  }
+}
+
+export interface StaticApiResult<T> {
+  data: T;
+  meta?: unknown;
+}
 
 function artifactKey(path: string, init?: RequestInit) {
   return `${init?.method ?? "GET"} ${new URL(path, "http://static.local").pathname}`;
@@ -40,23 +67,42 @@ export async function staticManifest(fetcher: typeof fetch = fetch): Promise<Sta
 export async function staticArtifactApi<T>(path: string, init: RequestInit | undefined, fetcher: typeof fetch): Promise<T> {
   const manifest = await staticManifest(fetcher);
   const artifact = manifest.artifacts[artifactKey(path, init)];
-  if (!artifact) throw new Error("This operation is unavailable in the static viewer.");
+  if (!artifact) throw new StaticApiError({ code: "STATIC_UNAVAILABLE", message: "This operation is unavailable in the static viewer.", retryable: false });
   const response = await fetcher(`/static-data/${artifact.file}`);
-  if (!response.ok) throw new Error("Static data artifact is unavailable.");
+  if (!response.ok) throw new StaticApiError({ code: "STATIC_UNAVAILABLE", message: "Static data artifact is unavailable.", retryable: false });
   const text = await response.text();
-  if (await sha256(text) !== artifact.sha256) throw new Error("Static data artifact checksum does not match its manifest.");
+  if (await sha256(text) !== artifact.sha256) throw new StaticApiError({ code: "STATIC_CHECKSUM_MISMATCH", message: "Static data artifact checksum does not match its manifest.", retryable: false });
   const body = JSON.parse(text) as StaticEnvelope<T>;
-  if (!body.ok) throw new Error(body.error.message);
+  if (!body.ok) throw new StaticApiError(body.error);
   return body.data;
 }
 
-export async function staticApi<T>(path: string, init?: RequestInit): Promise<T> {
+/**
+ * Transport with full envelope. Returns data plus meta (nextCursor, warnings).
+ * Throws StaticApiError carrying the typed error code/status/fieldErrors so
+ * callers can distinguish 400/404/413/422/503 and static-unavailable states.
+ */
+export async function staticApiEnvelope<T>(path: string, init?: RequestInit): Promise<StaticApiResult<T>> {
   if (isStaticExport) {
-    if (artifactKey(path, init) === "GET /api/v1/catalog/current") return { snapshotId: (await staticManifest()).provenance.snapshotId } as T;
-    return staticArtifactApi<T>(path, init, fetch);
+    if (artifactKey(path, init) === "GET /api/v1/catalog/current") return { data: { snapshotId: (await staticManifest()).provenance.snapshotId } as T };
+    return { data: await staticArtifactApi<T>(path, init, fetch) };
   }
   const response = await fetch(path, { ...init, headers: { "content-type": "application/json", ...init?.headers } });
-  const body = await response.json() as StaticEnvelope<T>;
-  if (!response.ok || !body.ok) throw new Error(body.ok ? "Request failed." : body.error.message);
-  return body.data;
+  let body: StaticEnvelope<T>;
+  try {
+    body = await response.json() as StaticEnvelope<T>;
+  } catch {
+    throw new StaticApiError({ code: "TRANSPORT_ERROR", message: "The server returned an unreadable response.", retryable: true }, response.status);
+  }
+  if (!response.ok || !body.ok) {
+    const error = body.ok
+      ? { code: "TRANSPORT_ERROR", message: "Request failed.", retryable: true }
+      : body.error;
+    throw new StaticApiError(error, response.status);
+  }
+  return { data: body.data, meta: body.meta };
+}
+
+export async function staticApi<T>(path: string, init?: RequestInit): Promise<T> {
+  return (await staticApiEnvelope<T>(path, init)).data;
 }
