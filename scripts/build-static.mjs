@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 
 const disabled = [
   [new URL("../src/app/api", import.meta.url), new URL("../src/.api-static-disabled", import.meta.url)],
+  [new URL("../src/shared/test/api-contract-fixtures.ts", import.meta.url), new URL("../src/shared/test/.api-contract-fixtures-static-disabled.ts", import.meta.url)],
   [new URL("../src/app/plates/[designId]", import.meta.url), new URL("../src/.plate-detail-static-disabled", import.meta.url)],
   [new URL("../src/app/tables/[tableName]", import.meta.url), new URL("../src/.table-detail-static-disabled", import.meta.url)],
 ];

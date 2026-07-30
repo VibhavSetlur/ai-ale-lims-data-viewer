@@ -5,7 +5,8 @@ import { join, resolve } from "node:path";
 import Database from "better-sqlite3";
 import mysql from "mysql2/promise";
 import { afterEach, describe, expect, it } from "vitest";
-import { candidateDatabase, createIndexSql, createTableSql, mysqlUrlFromSecret, quoteIdentifier } from "./mysql.mjs";
+import { APPROVED_SOURCE_SHA256, inspectSqlite } from "./manifest.mjs";
+import { candidateDatabase, chunkHash, createIndexSql, createTableSql, mysqlUrlFromSecret, quoteIdentifier } from "./mysql.mjs";
 let dir;
 afterEach(() => { if (dir) { rmSync(dir, { recursive: true, force: true }); dir = undefined; } });
 describe("ingest MySQL boundary", () => {
@@ -13,6 +14,7 @@ describe("ingest MySQL boundary", () => {
   it("preserves reviewed index order and fails closed for unsupported affinities", () => { expect(createIndexSql({ name: "samples" }, { name: "sample_note", unique: false, origin: "c", columns: [{ name: "note", desc: true }] })).toContain("`note` DESC"); expect(() => createTableSql({ name: "samples", columns: [{ name: "value", type: "JSON", notnull: 0, pk: 0 }] })).toThrow("Unsupported"); });
   it("uses a deterministic candidate name instead of the serving database", () => { expect(candidateDatabase("scientific", { sourceSha256: "a".repeat(64) })).toBe("scientific__candidate_aaaaaaaaaaaaaaaa"); });
   it("requires a private file and a purpose-specific URL without revealing it", () => { dir = mkdtempSync(join(tmpdir(), "mysql-secret-")); const file = join(dir, "secret.json"); writeFileSync(file, JSON.stringify({ ingestUrl: "mysql://user:secret@host/db" })); chmodSync(file, 0o600); expect(mysqlUrlFromSecret({ file, purpose: "ingestUrl" })).toBe("mysql://user:secret@host/db"); expect(() => mysqlUrlFromSecret({ file, purpose: "readUrl" })).toThrow("missing readUrl"); chmodSync(file, 0o644); expect(() => mysqlUrlFromSecret({ file, purpose: "ingestUrl" })).toThrow("must not be accessible"); });
+  it("pins inspection to the approved source before opening SQLite and hashes chunks deterministically", () => { dir = mkdtempSync(join(tmpdir(), "sqlite-source-")); const sqlite = join(dir, "source.db"); const db = new Database(sqlite); db.exec("CREATE TABLE samples (id INTEGER PRIMARY KEY, name TEXT)"); db.close(); expect(() => inspectSqlite(sqlite)).toThrow("required source checksum"); expect(() => inspectSqlite(sqlite, "b".repeat(64))).toThrow("approved source checksum"); expect(chunkHash([{ id: 1 }, { id: 2 }])).toBe(chunkHash([{ id: 1 }, { id: 2 }])); expect(APPROVED_SOURCE_SHA256).toHaveLength(64); });
 });
 
 describe.skipIf(!process.env.MYSQL_INTEGRATION_TEST_URL)("disposable MySQL importer lifecycle", () => {
@@ -24,10 +26,10 @@ describe.skipIf(!process.env.MYSQL_INTEGRATION_TEST_URL)("disposable MySQL impor
     try {
       await root.query(`CREATE DATABASE ${quoteIdentifier(database)}`);
       const run = (script, extra = []) => execFileSync(process.execPath, [resolve(process.cwd(), "scripts/ingest", script), ...extra, "--mysql-secrets-file", secrets], { encoding: "utf8" });
-      run("inspect.mjs", ["--sqlite", sqlite, "--out", manifest]); run("materialize.mjs", ["--sqlite", sqlite, "--manifest", manifest, "--database", database]);
+       run("inspect.mjs", ["--sqlite", sqlite, "--out", manifest, "--sha256", APPROVED_SOURCE_SHA256]); run("stage.mjs", ["--sqlite", sqlite, "--manifest", manifest, "--database", database]);
       run("reconcile.mjs", ["--sqlite", sqlite, "--manifest", manifest, "--database", database, "--out", report]); run("publish.mjs", ["--manifest", manifest, "--report", report, "--database", database]); run("publish.mjs", ["--manifest", manifest, "--report", report, "--database", database]);
       const candidate = candidateDatabase(database, JSON.parse((await import("node:fs")).readFileSync(manifest, "utf8"))); const [events] = await root.query(`SELECT event_id FROM ${quoteIdentifier(database)}.scientific_publication_event`); expect(events).toHaveLength(2); const [rows] = await root.query(`SELECT name FROM ${quoteIdentifier(candidate)}.samples ORDER BY id`); expect(rows.map((row) => row.name)).toEqual(["alpha", "=formula"]);
-      await root.query(`DROP DATABASE ${quoteIdentifier(candidate)}`); expect(() => run("materialize.mjs", ["--sqlite", sqlite, "--manifest", manifest, "--database", database])).not.toThrow();
+       await root.query(`DROP DATABASE ${quoteIdentifier(candidate)}`); expect(() => run("stage.mjs", ["--sqlite", sqlite, "--manifest", manifest, "--database", database])).not.toThrow();
     } finally { await root.query(`DROP DATABASE IF EXISTS ${quoteIdentifier(database)}`); await root.end(); }
   });
 });

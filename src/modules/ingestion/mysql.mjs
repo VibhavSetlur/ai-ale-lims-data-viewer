@@ -5,6 +5,7 @@ import mysql from "mysql2/promise";
 const IDENTIFIER = /^[A-Za-z][A-Za-z0-9_]*$/;
 export const quoteIdentifier = (value) => { if (!IDENTIFIER.test(value)) throw new Error("Unsafe MySQL identifier."); return `\`${value}\``; };
 export const sha256 = (value) => createHash("sha256").update(value).digest("hex");
+export const chunkHash = (rows) => sha256(JSON.stringify(rows));
 export const candidateDatabase = (database, manifest) => { quoteIdentifier(database); return `${database}__candidate_${manifest.sourceSha256.slice(0, 16)}`; };
 
 export function mysqlUrlFromSecret({ file, stdin = false, purpose }) {
@@ -23,6 +24,8 @@ export async function createMetadata(connection) {
   await connection.query("CREATE TABLE IF NOT EXISTS scientific_snapshot_catalog (snapshot_id VARCHAR(191) NOT NULL PRIMARY KEY, label VARCHAR(255) NOT NULL, source_system VARCHAR(128) NOT NULL, source_revision VARCHAR(255) NULL, source_sha256 CHAR(64) NOT NULL, source_updated_at DATETIME(6) NULL, received_at DATETIME(6) NOT NULL, materialized_at DATETIME(6) NULL, schema_version VARCHAR(64) NOT NULL, schema_fingerprint CHAR(64) NOT NULL, manifest_digest CHAR(64) NULL, UNIQUE KEY scientific_snapshot_source_sha (source_sha256)) ENGINE=InnoDB");
   await connection.query("CREATE TABLE IF NOT EXISTS scientific_table_allowlist (table_name VARCHAR(191) NOT NULL PRIMARY KEY, manifest_digest CHAR(64) NOT NULL, column_fingerprint CHAR(64) NOT NULL) ENGINE=InnoDB");
   await connection.query("CREATE TABLE IF NOT EXISTS ingest_run (run_id CHAR(36) NOT NULL PRIMARY KEY, source_sha256 CHAR(64) NOT NULL, manifest_digest CHAR(64) NOT NULL, started_at DATETIME(6) NOT NULL, completed_at DATETIME(6) NULL, status VARCHAR(32) NOT NULL, UNIQUE KEY ingest_run_manifest (manifest_digest)) ENGINE=InnoDB");
-  await connection.query("CREATE TABLE IF NOT EXISTS ingest_table_result (run_id CHAR(36) NOT NULL, table_name VARCHAR(191) NOT NULL, row_count BIGINT NOT NULL, table_sha256 CHAR(64) NOT NULL, chunk_count INT NOT NULL, PRIMARY KEY (run_id, table_name)) ENGINE=InnoDB");
+  await connection.query("CREATE TABLE IF NOT EXISTS ingest_table_result (run_id CHAR(36) NOT NULL, table_name VARCHAR(191) NOT NULL, row_count BIGINT NOT NULL, table_sha256 CHAR(64) NOT NULL, chunk_count INT NOT NULL, rejection_count INT NOT NULL DEFAULT 0, PRIMARY KEY (run_id, table_name)) ENGINE=InnoDB");
+  await connection.query("CREATE TABLE IF NOT EXISTS ingest_chunk_result (run_id CHAR(36) NOT NULL, table_name VARCHAR(191) NOT NULL, chunk_index INT NOT NULL, first_row BIGINT NOT NULL, row_count INT NOT NULL, chunk_sha256 CHAR(64) NOT NULL, PRIMARY KEY (run_id, table_name, chunk_index)) ENGINE=InnoDB");
+  await connection.query("CREATE TABLE IF NOT EXISTS ingest_rejection (run_id CHAR(36) NOT NULL, table_name VARCHAR(191) NOT NULL, chunk_index INT NOT NULL, row_index BIGINT NOT NULL, row_sha256 CHAR(64) NOT NULL, reason VARCHAR(1024) NOT NULL, rejected_at DATETIME(6) NOT NULL, PRIMARY KEY (run_id, table_name, row_index)) ENGINE=InnoDB");
 }
 export function manifestDigest(manifest) { return sha256(JSON.stringify(manifest)); }

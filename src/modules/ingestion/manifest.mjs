@@ -2,14 +2,16 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import Database from "better-sqlite3";
 
+export const APPROVED_SOURCE_SHA256 = "a3a286b4ac99fb2ed8cc24d65a0e4e2d86711d52c21be37e831bc80d97e3580a";
 export const digest = (value) => createHash("sha256").update(value).digest("hex");
 const quote = (identifier) => `"${String(identifier).replaceAll('"', '""')}"`;
 const unsupported = /\b(CHECK|FOREIGN\s+KEY|GENERATED\s+ALWAYS|WITHOUT\s+ROWID|AUTOINCREMENT)\b/i;
 
-/** Read the immutable source only. Unsupported SQLite constructs fail before MySQL DDL is emitted. */
-export function inspectSqlite(path, expectedSha256) {
+/** Read the approved immutable source only. The emitted inventory is the staging contract. */
+export function inspectSqlite(path, expectedSha256 = APPROVED_SOURCE_SHA256) {
+  if (expectedSha256 !== APPROVED_SOURCE_SHA256) throw new Error("The expected SQLite SHA-256 must be the approved source checksum.");
   const sourceSha256 = digest(readFileSync(path));
-  if (expectedSha256 && expectedSha256 !== sourceSha256) throw new Error("SQLite SHA-256 does not match the required source checksum.");
+  if (sourceSha256 !== expectedSha256) throw new Error("SQLite SHA-256 does not match the required source checksum.");
   const db = new Database(path, { readonly: true, fileMustExist: true });
   db.pragma("query_only = ON");
   try {
@@ -26,6 +28,7 @@ export function inspectSqlite(path, expectedSha256) {
       const nullCounts = Object.fromEntries(columns.map(({ name: column }) => [column, Number(db.prepare(`SELECT COUNT(*) AS count FROM ${quote(name)} WHERE ${quote(column)} IS NULL`).get().count)]));
       return { name, sql, columns, indexes, rowCount: count, nullCounts };
     });
-    return { sourceSha256, tableCount: tables.length, tables, capabilities: { hasBarcodes: (tables.find((table) => table.name === "verAB_barcodes")?.rowCount ?? 0) > 0 } };
+    const legacyInventory = tables.map(({ name, columns }) => ({ name, columns: columns.map(({ name: columnName, type, notnull, pk }) => ({ name: columnName, type, notnull, pk })) }));
+    return { sourceSha256, tableCount: tables.length, tables, legacyInventory, inventorySha256: digest(JSON.stringify(legacyInventory)), capabilities: { hasBarcodes: (tables.find((table) => table.name === "verAB_barcodes")?.rowCount ?? 0) > 0 } };
   } finally { db.close(); }
 }

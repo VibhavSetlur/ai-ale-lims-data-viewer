@@ -13,7 +13,7 @@
     "test": "vitest run",
     "ingest:inspect": "node scripts/ingest/inspect.mjs",
     "ingest:stage": "node scripts/ingest/stage.mjs",
-    "ingest:materialize": "node scripts/ingest/materialize.mjs",
+    "ingest:materialize": "node scripts/ingest/stage.mjs",
     "ingest:reconcile": "node scripts/ingest/reconcile.mjs",
     "ingest:publish": "node scripts/ingest/publish.mjs",
     "migrate:operational": "node scripts/migrate-operational.mjs"
