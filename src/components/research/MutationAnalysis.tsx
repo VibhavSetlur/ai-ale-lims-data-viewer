@@ -23,6 +23,7 @@ import {
   saveCohortSelection,
   validateCohortSelection,
 } from "./cohort-selection";
+import { analysisUnavailableReason } from "./analysis-availability";
 
 type Cohort = {
   experiments: { key: string }[];
@@ -111,11 +112,9 @@ export function MutationAnalysis({
     });
   }, [cohort, experimentKey, registryKey, sampleKeys]);
   const endpoint = kind === "compare" ? "compare" : kind;
-  const unavailableReason = kind === "copy-number"
-    ? "Copy-number analysis is unavailable because this snapshot cannot prove the required experiment scope."
-    : kind === "library-variants" && hasBarcodes === false
-      ? "Library variants is unavailable because this snapshot has no barcode records. Return to the cohort builder."
-      : undefined;
+  const unavailableReason = kind === "cohort"
+    ? undefined
+    : analysisUnavailableReason(kind, hasBarcodes);
   const available = hasBarcodes !== undefined && !unavailableReason;
   async function run() {
     if (!experimentKey)
