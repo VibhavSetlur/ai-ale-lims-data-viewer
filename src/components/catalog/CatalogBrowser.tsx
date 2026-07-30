@@ -197,6 +197,7 @@ export function CatalogTable({ table }: Readonly<{ table: string }>) {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const opener = useRef<HTMLButtonElement | null>(null);
+  const drawer = useRef<HTMLElement | null>(null);
   const where = useMemo<FilterGroup | undefined>(
     () => (filters.length ? { combinator, filters } : undefined),
     [combinator, filters],
@@ -282,7 +283,13 @@ export function CatalogTable({ table }: Readonly<{ table: string }>) {
   useEffect(() => {
     if (!selected) return;
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setSelected(undefined);
+      if (event.key === "Escape") { event.preventDefault(); setSelected(undefined); return; }
+      if (event.key !== "Tab" || !drawer.current) return;
+      const focusable = Array.from(drawer.current.querySelectorAll<HTMLElement>('button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'));
+      const first = focusable[0]; const last = focusable.at(-1);
+      if (!first || !last) return;
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
@@ -655,6 +662,7 @@ export function CatalogTable({ table }: Readonly<{ table: string }>) {
       )}
       {selected && (
         <aside
+          ref={drawer}
           className="record-drawer"
           role="dialog"
           aria-modal="true"

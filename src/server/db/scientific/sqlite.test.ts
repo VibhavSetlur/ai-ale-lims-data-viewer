@@ -26,6 +26,15 @@ describe("SQLite scientific repository", () => {
     expect(repository.exportRows({ snapshotId: CURRENT_SNAPSHOT_ID, table: "samples", limit: 10, columns: ["id", "name"] }).csv).toContain("'=formula");
   });
 
+  it("paginates and exports the complete filtered result within the explicit limit", () => {
+    const repository = fixture();
+    const first = repository.getRows({ snapshotId: CURRENT_SNAPSHOT_ID, table: "samples", limit: 1, sort: [{ column: "id", direction: "asc" }] });
+    expect(first.rows).toEqual([{ id: 1, name: "alpha", deleted: 0 }]);
+    expect(first.nextCursor).toBeTruthy();
+    expect(repository.getRows({ snapshotId: CURRENT_SNAPSHOT_ID, table: "samples", limit: 1, sort: [{ column: "id", direction: "asc" }], cursor: first.nextCursor! }).rows).toEqual([{ id: 2, name: "=formula", deleted: 0 }]);
+    expect(repository.exportRows({ snapshotId: CURRENT_SNAPSHOT_ID, table: "samples", limit: 1, columns: ["id", "name"] }).csv).toBe("id,name\r\n1,alpha\r\n2,'=formula");
+  });
+
   it("derives normalized mutation analyses and treats populated barcodes as a capability", () => {
     const repository = fixture(); const request = { snapshotId: CURRENT_SNAPSHOT_ID, experimentKey: "e1", registryKey: "r1", sampleKeys: ["s1", "s2"] };
     expect(repository.capabilities().hasBarcodes).toBe(true);
@@ -34,6 +43,7 @@ describe("SQLite scientific repository", () => {
     expect(repository.compareGrowth(request).rows).toEqual([{ sampleKey: "s1", transfer: 1, endpointOd: 0.5, maxOd: 0.5 }]);
     expect(repository.compareCopyNumber(request).rows).toEqual([{ sampleKey: "s1", region: "region-1", value: 1.5 }]);
     expect(repository.compareLibraryVariants(request).rows).toMatchObject([{ sampleKey: "s1", variant: "A1-B1", abundance: 1 }]);
+    expect(() => repository.compareGrowth({ ...request, registryKey: "other" })).toThrow("outside the requested experiment or registry");
   });
 
   it("opens a query-only handle", () => {

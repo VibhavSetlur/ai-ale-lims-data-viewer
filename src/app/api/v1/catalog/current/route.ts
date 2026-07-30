@@ -1,7 +1,8 @@
-import { getCurrentSnapshot } from "../../../../../modules/snapshots/catalog/repository";
-import { jsonSuccess, requestContext } from "../../../../../shared/http/api";
+import { scientificRepository } from "../../../../../server/db/scientific";
+import { jsonError, jsonSuccess, requestContext } from "../../../../../shared/http/api";
 
-export function GET(request: Request) {
+export async function GET(request: Request) {
   const context = requestContext(request.headers);
-  return jsonSuccess(getCurrentSnapshot(), context);
+  try { return jsonSuccess(await scientificRepository().provenance(), context); }
+  catch (error) { return jsonError(error, context); }
 }

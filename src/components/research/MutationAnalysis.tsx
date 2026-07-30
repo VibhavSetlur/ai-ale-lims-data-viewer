@@ -11,7 +11,7 @@ import {
   SectionHeader,
   Toolbar,
 } from "@/components/design-system/Primitives";
-import { staticApi } from "@/lib/static-data";
+import { isStaticExport, staticApi } from "@/lib/static-data";
 import {
   activeResultCsv,
   analysisFigureSvg,
@@ -23,7 +23,7 @@ import {
   validateCohortSelection,
 } from "./cohort-selection";
 
-const SNAPSHOT_ID = "dev-full-20260726-a86df340";
+const STATIC_SNAPSHOT_ID = "fixture-full-v1";
 type Cohort = {
   experiments: { key: string }[];
   registries: { key: string }[];
@@ -41,11 +41,24 @@ type Result = {
 type Kind =
   "cohort" | "compare" | "growth" | "library-variants" | "copy-number";
 
+function KindSpecificFigure({ kind, rows, title }: Readonly<{ kind: Kind; rows: Record<string, unknown>[]; title: string }>) {
+  const values = rows.slice(0, 12).map((row) => {
+    if (kind === "compare") return { label: `${row.gene ?? "unknown"}:${row.position ?? ""}`, value: Object.keys((row.values as Record<string, unknown> | undefined) ?? {}).length };
+    if (kind === "growth") return { label: String(row.sampleKey ?? "sample"), value: Number(row.endpointOd ?? 0) };
+    if (kind === "library-variants") return { label: String(row.variant ?? "variant"), value: Number(row.abundance ?? 0) };
+    return { label: `${row.region ?? "region"} · ${row.sampleKey ?? "sample"}`, value: Number(row.value ?? 0) };
+  });
+  const maximum = Math.max(1, ...values.map(({ value }) => value));
+  const description = kind === "compare" ? "Mutation loci by the number of selected samples containing each locus." : kind === "growth" ? "Growth endpoint optical density by sample." : kind === "library-variants" ? "Library variant relative abundance by sample." : "Copy-number value by genomic region and sample.";
+  return <figure className="analysis-figure"><svg aria-labelledby="analysis-figure-title analysis-figure-description" role="img" viewBox="0 0 540 210"><title id="analysis-figure-title">{title}</title><desc id="analysis-figure-description">{description}</desc>{values.map((item, index) => <g key={`${item.label}-${index}`}><text x="20" y={30 + index * 15}>{item.label}: {item.value}</text><rect x="230" y={18 + index * 15} width={Math.round((item.value / maximum) * 280)} height="10" /></g>)}</svg><figcaption>{description} Up to 12 active result rows are shown; the table contains the complete active result.</figcaption></figure>;
+}
+
 export function MutationAnalysis({
   kind,
   title,
 }: Readonly<{ kind: Kind; title: string }>) {
   const [cohort, setCohort] = useState<Cohort>();
+  const [snapshotId, setSnapshotId] = useState(STATIC_SNAPSHOT_ID);
   const [experimentKey, setExperimentKey] = useState("");
   const [registryKey, setRegistryKey] = useState("");
   const [sampleKeys, setSampleKeys] = useState<string[]>([]);
@@ -54,11 +67,19 @@ export function MutationAnalysis({
   const [running, setRunning] = useState(false);
   const hydrated = useRef(false);
   useEffect(() => {
-    staticApi<Cohort>(
-      `/api/v1/mutations/cohort?snapshotId=${SNAPSHOT_ID}${experimentKey ? `&experimentKey=${encodeURIComponent(experimentKey)}` : ""}${registryKey ? `&registryKey=${encodeURIComponent(registryKey)}` : ""}`,
-    )
+    const load = async () => {
+      const current = isStaticExport
+        ? { snapshotId: STATIC_SNAPSHOT_ID }
+        : await staticApi<{ snapshotId: string }>("/api/v1/catalog/current");
+      const data = await staticApi<Cohort>(
+        `/api/v1/mutations/cohort?snapshotId=${encodeURIComponent(current.snapshotId)}${experimentKey ? `&experimentKey=${encodeURIComponent(experimentKey)}` : ""}${registryKey ? `&registryKey=${encodeURIComponent(registryKey)}` : ""}`,
+      );
+      setSnapshotId(current.snapshotId);
+      setCohort(data);
+      return data;
+    };
+    load()
       .then((data) => {
-        setCohort(data);
         if (!hydrated.current) {
           hydrated.current = true;
           const stored = loadCohortSelection(
@@ -109,7 +130,7 @@ export function MutationAnalysis({
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
-            snapshotId: SNAPSHOT_ID,
+            snapshotId,
             experimentKey,
             registryKey: registryKey || undefined,
             sampleKeys,
@@ -228,56 +249,11 @@ export function MutationAnalysis({
               value={result.summary.sampleCount}
             />
           </div>
-          <figure className="analysis-figure">
-            <svg
-              aria-labelledby="analysis-figure-title analysis-figure-description"
-              role="img"
-              viewBox="0 0 540 210"
-            >
-              <title id="analysis-figure-title">{title}</title>
-              <desc id="analysis-figure-description">
-                A bar chart of results and selected samples.
-              </desc>
-              {[
-                { label: "Results", value: result.summary.resultCount },
-                {
-                  label: "Selected samples",
-                  value: result.summary.sampleCount,
-                },
-              ].map((item, index) => (
-                <g key={item.label}>
-                  <text x="20" y={90 + index * 55}>
-                    {item.label}: {item.value}
-                  </text>
-                  <rect
-                    x="190"
-                    y={70 + index * 55}
-                    width={Math.round(
-                      (item.value /
-                        Math.max(
-                          1,
-                          result.summary.resultCount,
-                          result.summary.sampleCount,
-                        )) *
-                        300,
-                    )}
-                    height="28"
-                  />
-                </g>
-              ))}
-            </svg>
-            <figcaption>
-              Analysis summary figure. The active result table provides the
-              underlying values.
-            </figcaption>
-          </figure>
+          <KindSpecificFigure kind={kind} rows={result.rows} title={title} />
           <h3>Figure notes</h3>
           <ul>
-            <li>Bars show result and selected-sample counts.</li>
-            <li>
-              Values appear in the active result table and are not inferred from
-              the figure.
-            </li>
+            <li>The figure uses the domain-specific values from the active result.</li>
+            <li>The active result table contains the complete underlying values.</li>
           </ul>
           {result.warnings.map((warning) => (
             <InlineNotice key={warning} tone="warning">

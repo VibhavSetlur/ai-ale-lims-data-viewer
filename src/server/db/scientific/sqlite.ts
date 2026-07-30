@@ -80,13 +80,25 @@ export class SqliteScientificRepository implements ScientificRepository {
     if (tie && !query.sort?.some((item) => item.column === tie)) sort.push(`${quote(tie)} ASC`);
     return sort.length ? ` ORDER BY ${sort.join(", ")}` : "";
   }
+  private cursorSignature(query: RowsQuery): string {
+    return JSON.stringify({ table: query.table, search: query.search ?? null, where: query.where ?? null, sort: query.sort ?? null, includeDeleted: query.includeDeleted ?? false, limit: query.limit });
+  }
+  private offset(cursor: string | undefined, query: RowsQuery): number {
+    if (!cursor) return 0;
+    try {
+      const value = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8")) as unknown;
+      if (value && typeof value === "object" && "offset" in value && "signature" in value && typeof value.offset === "number" && Number.isSafeInteger(value.offset) && value.offset >= 0 && value.signature === this.cursorSignature(query)) return value.offset;
+    } catch { /* invalid cursors are rejected below */ }
+    throw new AppError("INVALID_INPUT", "Cursor is invalid for this query.");
+  }
+  private cursor(offset: number, query: RowsQuery): string { return Buffer.from(JSON.stringify({ offset, signature: this.cursorSignature(query) })).toString("base64url"); }
   public getRows(query: RowsQuery): RowsResult {
     if (query.snapshotId !== CURRENT_SNAPSHOT_ID) throw new AppError("SNAPSHOT_NOT_FOUND", "Snapshot not found.");
-    if (query.cursor) throw new AppError("INVALID_INPUT", "Cursor pagination is not available for this snapshot.");
-    const table = this.table(query.table); const conditions = this.conditions(table, query);
+    const table = this.table(query.table); const conditions = this.conditions(table, query); const offset = this.offset(query.cursor, query);
     const totalCount = Number((this.db.prepare(`SELECT COUNT(*) AS count FROM ${quote(table.name)}${conditions.sql}`).get(...conditions.values) as { count: number }).count);
-    const rows = this.db.prepare(`SELECT * FROM ${quote(table.name)}${conditions.sql}${this.ordered(table, query)} LIMIT ?`).all(...conditions.values, query.limit) as Record<string, unknown>[];
-    return { columns: table.columns, rows, nextCursor: null, totalCount };
+    const rows = this.db.prepare(`SELECT * FROM ${quote(table.name)}${conditions.sql}${this.ordered(table, query)} LIMIT ? OFFSET ?`).all(...conditions.values, query.limit, offset) as Record<string, unknown>[];
+    const nextOffset = offset + rows.length;
+    return { columns: table.columns, rows, nextCursor: nextOffset < totalCount ? this.cursor(nextOffset, query) : null, totalCount };
   }
   public getFacets(query: FacetsQuery) {
     if (query.snapshotId !== CURRENT_SNAPSHOT_ID) throw new AppError("SNAPSHOT_NOT_FOUND", "Snapshot not found.");
@@ -98,9 +110,14 @@ export class SqliteScientificRepository implements ScientificRepository {
     return result;
   }
   public exportRows(query: ExportQuery) {
-    const result = this.getRows(query); const table = this.table(query.table);
+    if (query.snapshotId !== CURRENT_SNAPSHOT_ID) throw new AppError("SNAPSHOT_NOT_FOUND", "Snapshot not found.");
+    const table = this.table(query.table); const conditions = this.conditions(table, query);
+    const totalCount = Number((this.db.prepare(`SELECT COUNT(*) AS count FROM ${quote(table.name)}${conditions.sql}`).get(...conditions.values) as { count: number }).count);
+    const exportLimit = 10_000;
+    if (totalCount > exportLimit) throw new AppError("LIMIT_EXCEEDED", `Filtered export exceeds the ${exportLimit.toLocaleString()} row limit.`);
     const columns = query.columns.map((name) => { this.column(table, name); return table.columns.find((column) => column.key === name)!; });
-    const csvText = [columns.map((column) => csv(column.label)).join(","), ...result.rows.map((row) => columns.map((column) => csv(row[column.key])).join(","))].join("\r\n");
+    const rows = this.db.prepare(`SELECT * FROM ${quote(table.name)}${conditions.sql}${this.ordered(table, query)}`).all(...conditions.values) as Record<string, unknown>[];
+    const csvText = [columns.map((column) => csv(column.label)).join(","), ...rows.map((row) => columns.map((column) => csv(row[column.key])).join(","))].join("\r\n");
     return { columns, csv: csvText };
   }
   private snapshot(snapshotId: string) { if (snapshotId !== CURRENT_SNAPSHOT_ID) throw new AppError("SNAPSHOT_NOT_FOUND", "Snapshot not found."); }
@@ -117,9 +134,15 @@ export class SqliteScientificRepository implements ScientificRepository {
     if (!this.has("Mutations", "Seq_sample")) warnings.push("Mutation sample records are unavailable in this snapshot.");
     return { experiments, registries, samples, facets: {}, selectedKeyValidity: {}, warnings, capabilities: this.capabilities(), provenance: this.provenance() };
   }
+  private validateAnalysisScope(query: MutationReadRequest): void {
+    if (!this.has("Mutations", "Seq_sample", "Experiment")) throw new AppError("SEMANTIC_INVALID", "Experiment-scoped samples are unavailable in this snapshot.");
+    if (query.registryKey && !this.has("Mutations", "Breseq_registry_ID")) throw new AppError("SEMANTIC_INVALID", "Registry filtering is unavailable in this snapshot.");
+    const samples = this.db.prepare(`SELECT DISTINCT "Seq_sample" AS key FROM "Mutations" WHERE "Experiment" = ?${query.registryKey ? " AND \"Breseq_registry_ID\" = ?" : ""}`).all(query.experimentKey, ...(query.registryKey ? [query.registryKey] : [])) as { key: string }[];
+    const allowed = new Set(samples.map(({ key }) => key));
+    if (query.sampleKeys.some((key) => !allowed.has(key))) throw new AppError("SEMANTIC_INVALID", "Selected samples are outside the requested experiment or registry.");
+  }
   private analysis(query: MutationReadRequest, kind: "mutations" | "growth" | "library" | "copy"): AnalysisResult {
-    this.snapshot(query.snapshotId); const warnings: string[] = []; const caps = this.capabilities(); const placeholders = query.sampleKeys.map(() => "?").join(","); let rows: Record<string, unknown>[] = [];
-    if (kind === "mutations" && (!this.has("Mutations", "Experiment") || (query.registryKey && !this.has("Mutations", "Breseq_registry_ID")))) warnings.push("The requested mutation scope is unavailable in this snapshot.");
+    this.snapshot(query.snapshotId); this.validateAnalysisScope(query); const warnings: string[] = []; const caps = this.capabilities(); const placeholders = query.sampleKeys.map(() => "?").join(","); let rows: Record<string, unknown>[] = [];
     if (kind === "mutations") { const scopeAvailable = this.has("Mutations", "Experiment") && (!query.registryKey || this.has("Mutations", "Breseq_registry_ID")); const raw = scopeAvailable ? this.rows("Mutations", ["Seq_sample", "gene_name", "position", "frequency", "type"], `"Seq_sample" IN (${placeholders}) AND "Experiment" = ?${query.registryKey ? " AND \"Breseq_registry_ID\" = ?" : ""}`, [...query.sampleKeys, query.experimentKey, ...(query.registryKey ? [query.registryKey] : [])]) : null; if (!raw) warnings.push("Mutation records with the required columns are unavailable."); else rows = deriveMutationComparison(raw.map((r) => ({ sampleKey: String(r.Seq_sample), gene: r.gene_name == null ? null : String(r.gene_name), position: Number.isFinite(Number(r.position)) ? Number(r.position) : null, frequency: Number.isFinite(Number(r.frequency)) ? Number(r.frequency) : null, type: r.type == null ? null : String(r.type) }))); }
     if (kind === "growth") { const raw = this.rows("Robotic_OD", ["sample_name", "transfer", "od", "timepoint"], `"sample_name" IN (${placeholders}) AND "od" IS NOT NULL`, query.sampleKeys); if (!raw) warnings.push("Growth records are unavailable."); else rows = deriveGrowthComparison(raw.filter((r) => Number.isFinite(Number(r.transfer)) && Number.isFinite(Number(r.od))).map((r) => ({ sampleKey: String(r.sample_name), transfer: Number(r.transfer), od: Number(r.od), timepoint: Number.isFinite(Number(r.timepoint)) ? Number(r.timepoint) : null }))); }
     if (kind === "library") { if (!caps.hasBarcodes) throw new AppError("CAPABILITY_UNAVAILABLE", "Library variants are unavailable because this snapshot has no barcode records."); const raw = this.rows("verAB_barcodes", ["Seqsample", "Candidate", "Count"], `"Seqsample" IN (${placeholders})`, query.sampleKeys); if (!raw) warnings.push("Barcode records with the required columns are unavailable."); else rows = deriveLibraryVariants(raw.filter((r) => Number.isFinite(Number(r.Count))).map((r) => ({ sampleKey: String(r.Seqsample), variant: String(r.Candidate ?? "unassigned"), count: Number(r.Count) }))); }
