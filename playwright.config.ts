@@ -1,6 +1,9 @@
 import { defineConfig } from "@playwright/test";
 
-const port = Number(process.env.PLAYWRIGHT_PORT ?? 30_000 + Math.floor(Math.random() * 10_000));
+const port = Number(process.env.PLAYWRIGHT_PORT);
+if (!Number.isInteger(port) || port < 1 || port > 65_535) {
+  throw new Error("PLAYWRIGHT_PORT must be an available TCP port");
+}
 export default defineConfig({
   testDir: "./tests/e2e",
   use: { baseURL: `http://127.0.0.1:${port}` },

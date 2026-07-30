@@ -7,7 +7,7 @@ test("assistant requires confirmation and exposes semantic research landmarks", 
   await expect(page.getByRole("heading", { name: "Research navigation demo" })).toBeVisible();
   await page.getByLabel("What would you like to explore?").fill("tables");
   await page.getByRole("button", { name: "Suggest" }).click();
-  await expect(page.getByRole("status")).toBeVisible();
+  await expect(page.getByText("I can direct you to the table")).toBeVisible();
   await expect(page.getByText("Proposed destination")).toBeVisible();
   await page.getByRole("button", { name: "Cancel" }).click();
   await expect(page.getByText("Proposed destination")).toBeHidden();
@@ -17,7 +17,7 @@ test("assistant requires confirmation and exposes semantic research landmarks", 
 });
 
 test("drawer traps keyboard focus, escapes, and restores its opener", async ({ page }) => {
-  await page.goto("/tables");
+  await page.goto("/tables/samples");
   const opener = page.getByRole("button", { name: /view record/i }).first();
   await opener.click();
   const dialog = page.getByRole("dialog", { name: "Record details" });
