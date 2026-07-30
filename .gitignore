@@ -5,3 +5,5 @@ node_modules/
 *.log
 /out/
 /public/static-data/
+test-results/
+playwright-report/

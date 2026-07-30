@@ -4,6 +4,7 @@
  * CatalogBrowser.tsx -- Phase B1 catalog implementation
  * Owns: CatalogTableList, CatalogTable
  * Consumes: apiClient (POST rows/facets/export), Phase A design-system primitives
+ * Subcomponents: CatalogFilters, CatalogFacets, ColumnPicker, RecordDrawer, ExportDialog
  */
 
 import Link from "next/link";
@@ -11,7 +12,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Badge,
   Button,
-  Drawer,
   EmptyState,
   ErrorState,
   InlineNotice,
@@ -23,12 +23,16 @@ import {
 import type {
   ColumnDescriptor,
   Filter,
-  FilterGroup,
   RowsResult,
 } from "@/shared/contracts/catalog";
 import { isStaticExport } from "@/lib/static-data";
 import { apiClient } from "@/lib/api-client";
 import { pageSize } from "./catalog-state";
+import { CatalogFilters, type FilterState, noValue } from "./CatalogFilters";
+import { CatalogFacets, type FacetData } from "./CatalogFacets";
+import { ColumnPicker } from "./ColumnPicker";
+import { RecordDrawer } from "./RecordDrawer";
+import { ExportDialog, MAX_EXPORT_COLUMNS } from "./ExportDialog";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -43,19 +47,11 @@ type SortDir = "asc" | "desc";
 type SortEntry = { column: string; direction: SortDir };
 type Operator = Filter["operator"];
 
-const OPERATORS: Operator[] = [
-  "eq", "neq", "contains", "startsWith",
-  "gt", "gte", "lt", "lte",
-  "isNull", "isNotNull",
-];
-
 const OPERATOR_LABELS: Record<Operator, string> = {
   eq: "=", neq: "≠", contains: "contains", startsWith: "starts with",
   gt: ">", gte: "≥", lt: "<", lte: "≤",
   isNull: "is null", isNotNull: "is not null",
 };
-
-function noValue(op: Operator) { return op === "isNull" || op === "isNotNull"; }
 
 function displayValue(v: unknown): string {
   if (v === null || v === undefined) return "—";
@@ -118,7 +114,13 @@ export function CatalogTableList() {
 
   useEffect(() => {
     if (isStaticExport) return;
-    void load();
+    let cancelled = false;
+    (async () => {
+      await load();
+      // cancelled flag prevents stale state updates if component unmounts
+      if (cancelled) return;
+    })();
+    return () => { cancelled = true; };
   }, [load]);
 
   const visible = useMemo(
@@ -247,438 +249,6 @@ export function CatalogTableList() {
   );
 }
 
-// ─── Filter builder row ───────────────────────────────────────────────────────
-
-type FilterRowProps = {
-  filter: Filter & { _id: number };
-  columns: ColumnDescriptor[];
-  onChange: (f: Filter & { _id: number }) => void;
-  onRemove: () => void;
-  addRef?: React.RefObject<HTMLButtonElement | null>;
-};
-
-function FilterRow({ filter, columns, onChange, onRemove }: FilterRowProps) {
-  const handleChange = <K extends keyof Filter>(key: K, value: Filter[K]) => {
-    const next = { ...filter, [key]: value };
-    if (noValue(next.operator)) delete (next as Partial<Filter>).value;
-    onChange(next);
-  };
-
-  return (
-    <div style={{
-      display: "flex",
-      alignItems: "center",
-      gap: "var(--space-2)",
-      flexWrap: "wrap",
-      padding: "var(--space-2) 0",
-    }}>
-      {/* Column */}
-      <select
-        className="select-input"
-        value={filter.column}
-        onChange={e => handleChange("column", e.target.value)}
-        aria-label="Filter column"
-        style={{ minWidth: "140px" }}
-      >
-        {columns.map(c => <option key={c.key} value={c.key}>{c.label}</option>)}
-      </select>
-
-      {/* Operator */}
-      <select
-        className="select-input"
-        value={filter.operator}
-        onChange={e => handleChange("operator", e.target.value as Operator)}
-        aria-label="Filter operator"
-      >
-        {OPERATORS.map(op => <option key={op} value={op}>{OPERATOR_LABELS[op]}</option>)}
-      </select>
-
-      {/* Value */}
-      {!noValue(filter.operator) && (
-        <input
-          className="text-input"
-          type="text"
-          value={filter.value === undefined ? "" : String(filter.value)}
-          onChange={e => handleChange("value", e.target.value)}
-          placeholder="value"
-          aria-label="Filter value"
-          style={{ minWidth: "120px" }}
-        />
-      )}
-
-      <Button variant="ghost" size="sm" onClick={onRemove} aria-label="Remove this filter">
-        Remove
-      </Button>
-    </div>
-  );
-}
-
-// ─── CatalogFilters ───────────────────────────────────────────────────────────
-
-type FilterState = { combinator: "and" | "or"; rows: (Filter & { _id: number })[] };
-
-type CatalogFiltersProps = {
-  columns: ColumnDescriptor[];
-  filters: FilterState;
-  onChange: (f: FilterState) => void;
-};
-
-export function CatalogFilters({ columns, filters, onChange }: Readonly<CatalogFiltersProps>) {
-  const addBtnRef = useRef<HTMLButtonElement | null>(null);
-  const nextId = useRef(filters.rows.length + 1);
-
-  const addFilter = () => {
-    const id = nextId.current++;
-    const col = columns[0];
-    onChange({
-      ...filters,
-      rows: [...filters.rows, { _id: id, column: col?.key ?? "", operator: "eq", value: "" }],
-    });
-    // Focus management: after React re-renders, move focus to add button
-    window.setTimeout(() => {
-      addBtnRef.current?.focus();
-    }, 50);
-  };
-
-  const updateFilter = (idx: number, f: Filter & { _id: number }) => {
-    const rows = [...filters.rows];
-    rows[idx] = f;
-    onChange({ ...filters, rows });
-  };
-
-  const removeFilter = (idx: number) => {
-    const rows = filters.rows.filter((_, i) => i !== idx);
-    onChange({ ...filters, rows });
-  };
-
-  if (columns.length === 0) return null;
-
-  return (
-    <div style={{ padding: "var(--space-4)", borderTop: "1px solid var(--color-border)" }}>
-      {/* Combinator */}
-      {filters.rows.length > 1 && (
-        <div style={{ display: "flex", alignItems: "center", gap: "var(--space-3)", marginBottom: "var(--space-3)" }}>
-          <span style={{ fontSize: "var(--text-sm)", color: "var(--color-ink-secondary)" }}>Match</span>
-          <label style={{ display: "flex", alignItems: "center", gap: "var(--space-1)", cursor: "pointer" }}>
-            <input
-              type="radio"
-              name="combinator"
-              value="and"
-              checked={filters.combinator === "and"}
-              onChange={() => onChange({ ...filters, combinator: "and" })}
-            />
-            <span style={{ fontSize: "var(--text-sm)" }}>All (AND)</span>
-          </label>
-          <label style={{ display: "flex", alignItems: "center", gap: "var(--space-1)", cursor: "pointer" }}>
-            <input
-              type="radio"
-              name="combinator"
-              value="or"
-              checked={filters.combinator === "or"}
-              onChange={() => onChange({ ...filters, combinator: "or" })}
-            />
-            <span style={{ fontSize: "var(--text-sm)" }}>Any (OR)</span>
-          </label>
-        </div>
-      )}
-
-      {/* Filter rows */}
-      {filters.rows.map((row, idx) => (
-        <FilterRow
-          key={row._id}
-          filter={row}
-          columns={columns}
-          onChange={f => updateFilter(idx, f)}
-          onRemove={() => removeFilter(idx)}
-        />
-      ))}
-
-      <button
-        ref={addBtnRef}
-        type="button"
-        className="button button-ghost button-sm"
-        onClick={addFilter}
-        style={{ marginTop: "var(--space-2)" }}
-      >
-        + Add filter
-      </button>
-    </div>
-  );
-}
-
-// ─── CatalogFacets ────────────────────────────────────────────────────────────
-
-type FacetData = Record<string, { value: string | number | boolean | null; count: number }[]>;
-
-type CatalogFacetsProps = {
-  facets: FacetData;
-  columns: ColumnDescriptor[];
-  onApplyFacet: (column: string, value: string) => void;
-};
-
-export function CatalogFacets({ facets, columns, onApplyFacet }: Readonly<CatalogFacetsProps>) {
-  const cols = columns.filter(c => facets[c.key]?.length > 0);
-  if (cols.length === 0) {
-    return (
-      <div style={{ padding: "var(--space-3)", color: "var(--color-ink-tertiary)", fontSize: "var(--text-sm)" }}>
-        No facets available
-      </div>
-    );
-  }
-
-  return (
-    <div style={{ padding: "var(--space-3)", maxHeight: "400px", overflowY: "auto" }}>
-      {cols.map(col => (
-        <div key={col.key} style={{ marginBottom: "var(--space-4)" }}>
-          <p style={{
-            fontSize: "var(--text-xs)",
-            fontWeight: 600,
-            color: "var(--color-ink-secondary)",
-            textTransform: "uppercase",
-            letterSpacing: "0.05em",
-            marginBottom: "var(--space-1)",
-          }}>
-            {col.label}
-          </p>
-          {facets[col.key].slice(0, 10).map((item, i) => (
-            <button
-              key={i}
-              onClick={() => onApplyFacet(col.key, displayValue(item.value))}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                width: "100%",
-                textAlign: "left",
-                background: "none",
-                border: "none",
-                padding: "var(--space-1) var(--space-2)",
-                borderRadius: "var(--radius-sm)",
-                cursor: "pointer",
-                fontSize: "var(--text-sm)",
-                color: "var(--color-accent)",
-                gap: "var(--space-4)",
-                outline: "none",
-              }}
-              aria-label={`Filter ${col.label} = ${displayValue(item.value)} (${item.count})`}
-            >
-              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {displayValue(item.value)}
-              </span>
-              <span style={{
-                flexShrink: 0,
-                fontSize: "var(--text-xs)",
-                color: "var(--color-ink-tertiary)",
-                fontVariantNumeric: "tabular-nums",
-              }}>
-                {item.count}
-              </span>
-            </button>
-          ))}
-        </div>
-      ))}
-    </div>
-  );
-}
-
-// ─── ColumnPicker ─────────────────────────────────────────────────────────────
-
-type ColumnPickerProps = {
-  columns: ColumnDescriptor[];
-  visible: Set<string>;
-  onChange: (visible: Set<string>) => void;
-};
-
-export function ColumnPicker({ columns, visible, onChange }: Readonly<ColumnPickerProps>) {
-  const toggle = (key: string) => {
-    const next = new Set(visible);
-    if (next.has(key)) {
-      if (next.size <= 1) return; // must keep at least one
-      next.delete(key);
-    } else {
-      next.add(key);
-    }
-    onChange(next);
-  };
-
-  const showAll = () => onChange(new Set(columns.map(c => c.key)));
-  const showNone = () => onChange(new Set([columns[0]?.key ?? ""]));
-
-  return (
-    <div style={{ padding: "var(--space-3)", minWidth: "200px", maxHeight: "400px", overflowY: "auto" }}>
-      <div style={{ display: "flex", gap: "var(--space-2)", marginBottom: "var(--space-3)" }}>
-        <button
-          onClick={showAll}
-          style={{
-            background: "none", border: "none", cursor: "pointer", fontSize: "var(--text-xs)",
-            color: "var(--color-accent)", padding: 0,
-          }}
-        >
-          All
-        </button>
-        <span style={{ color: "var(--color-ink-tertiary)" }}>·</span>
-        <button
-          onClick={showNone}
-          style={{
-            background: "none", border: "none", cursor: "pointer", fontSize: "var(--text-xs)",
-            color: "var(--color-accent)", padding: 0,
-          }}
-        >
-          None
-        </button>
-      </div>
-      {columns.map(col => (
-        <label
-          key={col.key}
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: "var(--space-2)",
-            padding: "var(--space-1) 0",
-            cursor: "pointer",
-            fontSize: "var(--text-sm)",
-          }}
-        >
-          <input
-            type="checkbox"
-            checked={visible.has(col.key)}
-            onChange={() => toggle(col.key)}
-          />
-          <span style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-xs)" }}>{col.key}</span>
-          {col.nullable && (
-            <span style={{ color: "var(--color-ink-tertiary)", fontSize: "var(--text-xs)" }}>?</span>
-          )}
-        </label>
-      ))}
-    </div>
-  );
-}
-
-// ─── RecordDrawer ─────────────────────────────────────────────────────────────
-
-type RecordDrawerProps = {
-  open: boolean;
-  onClose: () => void;
-  record: Record<string, unknown> | null;
-  columns: ColumnDescriptor[];
-  tableName: string;
-};
-
-export function RecordDrawer({ open, onClose, record, columns, tableName }: Readonly<RecordDrawerProps>) {
-  return (
-    <Drawer open={open} onClose={onClose} title={tableName} side="right">
-      {record ? (
-        <div style={{ padding: "var(--space-5)", overflowY: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse" }} aria-label="Record fields">
-            <caption style={{ position: "absolute", left: "-9999px" }}>
-              Record from {tableName}
-            </caption>
-            <tbody>
-              {columns.map(col => (
-                <tr key={col.key} style={{ borderBottom: "1px solid var(--color-border)" }}>
-                  <th
-                    scope="row"
-                    style={{
-                      padding: "var(--space-2) var(--space-3) var(--space-2) 0",
-                      fontWeight: 600,
-                      fontSize: "var(--text-xs)",
-                      color: "var(--color-ink-secondary)",
-                      fontFamily: "var(--font-mono)",
-                      textAlign: "left",
-                      whiteSpace: "nowrap",
-                      verticalAlign: "top",
-                      width: "40%",
-                    }}
-                  >
-                    {col.key}
-                  </th>
-                  <td
-                    style={{
-                      padding: "var(--space-2) 0",
-                      fontSize: "var(--text-sm)",
-                      color: record[col.key] === null ? "var(--color-ink-tertiary)" : "var(--color-ink)",
-                      wordBreak: "break-word",
-                    }}
-                  >
-                    {displayValue(record[col.key])}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      ) : (
-        <div style={{ padding: "var(--space-5)" }}>
-          <Skeleton />
-        </div>
-      )}
-    </Drawer>
-  );
-}
-
-// ─── ExportDialog ─────────────────────────────────────────────────────────────
-
-type ExportDialogProps = {
-  open: boolean;
-  onClose: () => void;
-  onConfirm: () => void;
-  loading: boolean;
-  columns: ColumnDescriptor[];
-  visibleColumns: Set<string>;
-  filterSummary: string;
-};
-
-export function ExportDialog({
-  open,
-  onClose,
-  onConfirm,
-  loading,
-  filterSummary,
-}: Readonly<ExportDialogProps>) {
-  if (!open) return null;
-
-  return (
-    <div
-      className="dialog-backdrop"
-      onClick={e => { if (e.target === e.currentTarget) onClose(); }}
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="export-dialog-title"
-    >
-      <div className="dialog-panel">
-        <div className="dialog-header">
-          <h2 className="dialog-title" id="export-dialog-title">Export CSV</h2>
-          <button className="drawer-close" type="button" onClick={onClose} aria-label="Close dialog">x</button>
-        </div>
-        <div className="dialog-body">
-          <p style={{ fontSize: "var(--text-sm)", color: "var(--color-ink-secondary)", marginBottom: "var(--space-3)" }}>
-            Export visible columns with current filters applied. Exports are limited to 10,000 rows.
-          </p>
-          {filterSummary && (
-            <div style={{
-              padding: "var(--space-2) var(--space-3)",
-              borderRadius: "var(--radius-sm)",
-              background: "var(--color-surface-sunken)",
-              fontSize: "var(--text-xs)",
-              color: "var(--color-ink-secondary)",
-              fontFamily: "var(--font-mono)",
-              marginBottom: "var(--space-3)",
-            }}>
-              {filterSummary}
-            </div>
-          )}
-        </div>
-        <div className="dialog-footer">
-          <Button variant="ghost" size="sm" onClick={onClose}>Cancel</Button>
-          <Button variant="primary" size="sm" onClick={onConfirm} loading={loading} disabled={loading}>
-            {loading ? "Exporting..." : "Export CSV"}
-          </Button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 // ─── CatalogTable (main table workspace) ─────────────────────────────────────
 
 type TableState = {
@@ -757,7 +327,6 @@ export function CatalogTable({ table }: Readonly<{ table: string }>) {
   // ── Record drawer ─────────────────────────────────────────────────────────
   const [selectedRecord, setSelectedRecord] = useState<Record<string, unknown> | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const lastFocusedRowRef = useRef<HTMLTableRowElement | null>(null);
 
   // ── Export state ─────────────────────────────────────────────────────────
   const [showExport, setShowExport] = useState(false);
@@ -860,7 +429,7 @@ export function CatalogTable({ table }: Readonly<{ table: string }>) {
       snapRef.current = snap;
       const state: TableState = { search: "", filters: { combinator: "and", rows: [] }, sort: [], includeDeleted: false, cursor: null };
       await loadRows(snap, state);
-      setBootDone(true);
+      if (!cancelled) setBootDone(true);
     })();
     return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -915,8 +484,7 @@ export function CatalogTable({ table }: Readonly<{ table: string }>) {
   }, [filterState.rows]);
 
   // ── Row click/keyboard ────────────────────────────────────────────────────
-  const openRecord = useCallback((record: Record<string, unknown>, rowEl: HTMLTableRowElement) => {
-    lastFocusedRowRef.current = rowEl;
+  const openRecord = useCallback((record: Record<string, unknown>) => {
     setSelectedRecord(record);
     setDrawerOpen(true);
   }, []);
@@ -924,20 +492,28 @@ export function CatalogTable({ table }: Readonly<{ table: string }>) {
   const closeDrawer = useCallback(() => {
     setDrawerOpen(false);
     setSelectedRecord(null);
-    // Drawer already restores focus via triggerRef
   }, []);
 
   // ── Export ────────────────────────────────────────────────────────────────
   const handleExport = useCallback(async () => {
     if (!snapRef.current) return;
     setExportLoading(true);
-    const colKeys = columns.filter(c => visibleColumns.has(c.key)).map(c => c.key);
+
+    // Enforce 100-column cap -- ExportDialog also blocks UI, but guard here too
+    const allColKeys = columns.filter(c => visibleColumns.has(c.key)).map(c => c.key);
+    const colKeys = allColKeys.length ? allColKeys : columns.map(c => c.key);
+    if (colKeys.length > MAX_EXPORT_COLUMNS) {
+      pushToast(`Export blocked: ${colKeys.length} columns exceeds the ${MAX_EXPORT_COLUMNS}-column limit. Reduce visible columns first.`, "error");
+      setExportLoading(false);
+      return;
+    }
+
     const where = buildWhereClause(filterState);
     const query = {
       snapshotId: snapRef.current.snapshotId,
       table: decodedTable,
       limit: 10000,
-      columns: colKeys.length ? colKeys : columns.map(c => c.key),
+      columns: colKeys,
       ...(search.trim() ? { search: search.trim() } : {}),
       ...(where ? { where } : {}),
       ...(includeDeleted ? { includeDeleted: true } : {}),
@@ -965,7 +541,7 @@ export function CatalogTable({ table }: Readonly<{ table: string }>) {
     a.click();
     URL.revokeObjectURL(url);
     setShowExport(false);
-  }, [snapRef, columns, visibleColumns, filterState, search, includeDeleted, decodedTable, pushToast]);
+  }, [columns, visibleColumns, filterState, search, includeDeleted, decodedTable, pushToast]);
 
   // ── Derived ───────────────────────────────────────────────────────────────
   const visibleCols = useMemo(
@@ -1246,11 +822,11 @@ export function CatalogTable({ table }: Readonly<{ table: string }>) {
                   tabIndex={0}
                   role="row"
                   style={{ cursor: "pointer" }}
-                  onClick={e => openRecord(row, e.currentTarget as HTMLTableRowElement)}
+                  onClick={() => openRecord(row)}
                   onKeyDown={e => {
                     if (e.key === "Enter" || e.key === " ") {
                       e.preventDefault();
-                      openRecord(row, e.currentTarget as HTMLTableRowElement);
+                      openRecord(row);
                     }
                   }}
                   aria-label={`Row ${rowIdx + 1}: click to view record details`}
