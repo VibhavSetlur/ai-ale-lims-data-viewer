@@ -8,6 +8,7 @@
  */
 
 import Link from "next/link";
+import { HomeSnapshotStrip } from "@/components/home/HomeSnapshotStrip";
 
 // ---- Workflow cards ----
 
@@ -73,6 +74,8 @@ export default function HomePage() {
           is read-only. Navigate to a workflow to begin.
         </p>
       </div>
+
+      <HomeSnapshotStrip />
 
       <div className="workflow-grid" role="list">
         {WORKFLOW_CARDS.map((card) => (

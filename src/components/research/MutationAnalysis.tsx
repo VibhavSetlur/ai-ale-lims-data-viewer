@@ -18,6 +18,7 @@ import {
   buildAnalysisFigure,
   downloadHref,
 } from "./analysis-exports";
+import { AnalysisChart } from "./AnalysisChart";
 import {
   loadCohortSelection,
   saveCohortSelection,
@@ -44,8 +45,7 @@ type Kind =
 
 function KindSpecificFigure({ kind, rows, title }: Readonly<{ kind: Exclude<Kind, "cohort">; rows: Record<string, unknown>[]; title: string }>) {
   const figure = buildAnalysisFigure(kind, title, rows);
-  const maximum = Math.max(1, ...figure.bars.map(({ value }) => value));
-  return <figure className="analysis-figure"><svg aria-labelledby="analysis-figure-title analysis-figure-description" role="img" viewBox="0 0 540 210"><title id="analysis-figure-title">{figure.title}</title><desc id="analysis-figure-description">{figure.description}</desc>{figure.bars.map((item, index) => <g key={`${item.label}-${index}`}><text x="20" y={30 + index * 15}>{item.label}: {item.value}</text><rect x="230" y={18 + index * 15} width={Math.round((item.value / maximum) * 280)} height="10" /></g>)}</svg><figcaption>{figure.description} Up to 12 active result rows are shown; the table contains the complete active result.</figcaption></figure>;
+  return <AnalysisChart figure={figure} kind={kind} />;
 }
 
 export function MutationAnalysis({
