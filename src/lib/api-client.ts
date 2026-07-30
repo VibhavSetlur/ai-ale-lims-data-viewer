@@ -145,22 +145,31 @@ export const apiClient = {
     return call<CurrentCatalog>("/api/v1/catalog/current");
   },
 
-  /** GET /api/v1/catalog/rows */
-  rows(query: Record<string, string>): Promise<ApiResult<unknown>> {
-    const qs = new URLSearchParams(query).toString();
-    return call<unknown>(`/api/v1/catalog/rows?${qs}`);
+  /** POST /api/v1/catalog/rows */
+  rows(query: unknown): Promise<ApiResult<unknown>> {
+    return call<unknown>("/api/v1/catalog/rows", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(query),
+    });
   },
 
-  /** GET /api/v1/catalog/facets */
-  facets(query: Record<string, string>): Promise<ApiResult<unknown>> {
-    const qs = new URLSearchParams(query).toString();
-    return call<unknown>(`/api/v1/catalog/facets?${qs}`);
+  /** POST /api/v1/catalog/facets */
+  facets(query: unknown): Promise<ApiResult<unknown>> {
+    return call<unknown>("/api/v1/catalog/facets", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(query),
+    });
   },
 
-  /** GET /api/v1/catalog/export */
-  export(query: Record<string, string>): Promise<ApiResult<unknown>> {
-    const qs = new URLSearchParams(query).toString();
-    return call<unknown>(`/api/v1/catalog/export?${qs}`);
+  /** POST /api/v1/catalog/export */
+  export(query: unknown): Promise<ApiResult<unknown>> {
+    return call<unknown>("/api/v1/catalog/export", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(query),
+    });
   },
 
   /** GET /api/v1/catalog/snapshots */

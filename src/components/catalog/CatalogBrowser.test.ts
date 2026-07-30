@@ -3,7 +3,7 @@ import { filterLabel, noValue, rowsQuery, schemaDescription } from "./catalog-st
 
 describe("catalog browser query controls", () => {
   it("creates a bounded rows query with the active catalog state", () => {
-    expect(rowsQuery("samples", "snapshot-1", { search: "abc", includeDeleted: true, sort: [{ column: "id", direction: "desc" }] })).toMatchObject({ table: "samples", snapshotId: "snapshot-1", limit: 50, search: "abc", includeDeleted: true });
+    expect(rowsQuery("samples", "snapshot-1", { search: "abc", includeDeleted: true, sort: [{ column: "id", direction: "desc" }] })).toMatchObject({ table: "samples", snapshotId: "snapshot-1", limit: 100, search: "abc", includeDeleted: true });
   });
   it("recognizes filters without values and preserves readable chips", () => {
     expect(noValue("isNull")).toBe(true);

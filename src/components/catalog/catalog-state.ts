@@ -1,6 +1,6 @@
 import type { ColumnDescriptor, Filter, RowsQuery } from "@/shared/contracts/catalog";
 
-export const pageSize = 50;
+export const pageSize = 100;
 export const firstPageCursor = "";
 export const noValue = (operator: Filter["operator"]) => operator === "isNull" || operator === "isNotNull";
 export const filterLabel = (filter: Filter) => `${filter.column} ${filter.operator}${filter.value === undefined ? "" : ` ${String(filter.value)}`}`;
