@@ -19,6 +19,10 @@ import {
   downloadHref,
 } from "./analysis-exports";
 import { AnalysisChart } from "./AnalysisChart";
+import { MutationHeatmap } from "./MutationHeatmap";
+import { GrowthExplorer } from "./GrowthExplorer";
+import { LibraryVariantExplorer } from "./LibraryVariantExplorer";
+import { CopyNumberExplorer } from "./CopyNumberExplorer";
 import {
   loadCohortSelection,
   saveCohortSelection,
@@ -44,6 +48,9 @@ type Kind =
   "cohort" | "compare" | "growth" | "library-variants" | "copy-number";
 
 function KindSpecificFigure({ kind, rows, title }: Readonly<{ kind: Exclude<Kind, "cohort">; rows: Record<string, unknown>[]; title: string }>) {
+  if (kind === "compare") {
+    return <MutationHeatmap rows={rows} title={title} />;
+  }
   const figure = buildAnalysisFigure(kind, title, rows);
   return <AnalysisChart figure={figure} kind={kind} />;
 }
@@ -162,6 +169,26 @@ export function MutationAnalysis({
       setSampleKeys={setSampleKeys}
     />
   );
+  if (kind === "growth" || kind === "library-variants" || kind === "copy-number") {
+    const ledes: Record<"growth" | "library-variants" | "copy-number", string> = {
+      growth:
+        "Track optical density over time for each sample and transfer in an experiment.",
+      "library-variants":
+        "Compare verA and verB barcode composition across the samples of an experiment.",
+      "copy-number":
+        "Follow copy number per region across transfers, measured against a reference of 1.",
+    };
+    return (
+      <section className="research-workspace">
+        <PageHeader eyebrow="RESEARCH" title={title}>
+          <p className="lede">{ledes[kind]}</p>
+        </PageHeader>
+        {kind === "growth" && <GrowthExplorer title={title} />}
+        {kind === "library-variants" && <LibraryVariantExplorer title={title} />}
+        {kind === "copy-number" && <CopyNumberExplorer title={title} />}
+      </section>
+    );
+  }
   if (kind === "cohort")
     return (
       <section className="research-workspace">
