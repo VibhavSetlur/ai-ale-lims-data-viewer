@@ -1,9 +1,34 @@
 "use client";
 
 import { useState } from "react";
+import { usePathname } from "next/navigation";
 import type { StatusData } from "@/lib/api-client";
 import { AccountControl } from "./AccountControl";
 import { ProvenanceDialog } from "./ProvenanceDialog";
+import { ThemeToggle } from "./ThemeToggle";
+
+const PAGE_TITLES: Readonly<Record<string, string>> = {
+  "/": "Overview",
+  "/tables": "Tables",
+  "/mutations/cohort": "Cohort builder",
+  "/mutations/compare/mutations": "Mutation comparison",
+  "/mutations/compare/growth": "Growth comparison",
+  "/mutations/compare/library-variants": "Library variants",
+  "/mutations/compare/copy-number": "Copy number",
+  "/plates": "Plate designs",
+  "/workspaces": "Workspaces",
+  "/guide": "Guide",
+  "/changelog": "Changelog",
+  "/help": "Help",
+  "/login": "Sign in",
+};
+
+function pageTitle(pathname: string): string {
+  if (PAGE_TITLES[pathname]) return PAGE_TITLES[pathname];
+  if (pathname.startsWith("/tables/")) return "Table";
+  if (pathname.startsWith("/plates/")) return "Plate design";
+  return "Research viewer";
+}
 
 type AppHeaderProps = {
   status: StatusData | null;
@@ -19,6 +44,7 @@ export function AppHeader({
   showHamburger = false,
 }: Readonly<AppHeaderProps>) {
   const [provenanceOpen, setProvenanceOpen] = useState(false);
+  const pathname = usePathname();
 
   const channel = status?.profile.channel;
   const snapshotLabel = status?.provenance?.label;
@@ -48,6 +74,10 @@ export function AppHeader({
             </svg>
           </button>
         )}
+
+        <h1 className="topbar-title">{pageTitle(pathname)}</h1>
+
+        <div className="topbar-spacer" />
 
         {/* Channel/env pill */}
         {channel ? (
@@ -84,7 +114,7 @@ export function AppHeader({
               : "Snapshot unavailable"}
         </button>
 
-        <div className="topbar-spacer" />
+        <ThemeToggle />
         <AccountControl />
       </header>
 
