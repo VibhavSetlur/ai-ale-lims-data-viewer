@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { GET as live } from "./live/route";
 import { GET as ready } from "./ready/route";
+import { GET as compatibility } from "../../health/route";
 import { resetScientificRepositoryForTests } from "../../../../server/db/scientific";
 
 const directories: string[] = [];
@@ -44,5 +45,18 @@ describe("health routes", () => {
     const response = await ready(new Request("http://localhost/api/v1/health/ready"));
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({ ok: true, data: { status: "ready", profile: "legacy" } });
+  });
+
+  it("adapts readiness to a safe legacy health payload", async () => {
+    process.env.LEGACY_SQLITE_PATH = legacySnapshot();
+    const response = await compatibility();
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ status: "ok", db: { driver: "sqlite", ok: true } });
+  });
+
+  it("returns a safe service-unavailable payload when the SQLite snapshot is missing", async () => {
+    const response = await compatibility();
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({ status: "unavailable", db: { ok: false } });
   });
 });
