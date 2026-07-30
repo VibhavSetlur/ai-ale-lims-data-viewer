@@ -3,10 +3,12 @@ import { optionalHttpUrl, optionalPort, requiredText } from "../../shared/valida
 
 export type AppProfile = "legacy" | "planes";
 export type IdentityMode = "disabled" | "fake";
+export type ScientificBackend = "sqlite" | "mysql";
 
 export interface AppConfig {
   profile: AppProfile;
   identityMode: IdentityMode;
+  scientificBackend: ScientificBackend;
   appOrigin?: string;
   appPort?: number;
   orcidRedirectUri?: string;
@@ -31,9 +33,13 @@ export function parseConfig(env: Environment): AppConfig {
   const identityMode = env.IDENTITY_MODE?.trim() || "disabled";
   if (identityMode !== "disabled" && identityMode !== "fake") throw new AppError("INVALID_CONFIG", "IDENTITY_MODE must be disabled or fake.");
   if (identityMode === "fake" && env.NODE_ENV === "production") throw new AppError("INVALID_CONFIG", "IDENTITY_MODE=fake is not allowed in production.");
+  const scientificBackend = env.SCIENTIFIC_BACKEND?.trim() || (profileValue === "planes" ? "mysql" : "sqlite");
+  if (scientificBackend !== "sqlite" && scientificBackend !== "mysql") throw new AppError("INVALID_CONFIG", "SCIENTIFIC_BACKEND must be sqlite or mysql.");
+  if (profileValue === "planes" && scientificBackend !== "mysql") throw new AppError("INVALID_CONFIG", "APP_PROFILE=planes requires SCIENTIFIC_BACKEND=mysql.");
   const config: AppConfig = {
     profile: profileValue,
     identityMode,
+    scientificBackend,
     appOrigin: optionalHttpUrl(env.APP_ORIGIN, "APP_ORIGIN"),
     appPort: optionalPort(env.APP_PORT),
     orcidRedirectUri: optionalHttpUrl(env.ORCID_REDIRECT_URI, "ORCID_REDIRECT_URI"),

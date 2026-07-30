@@ -10,7 +10,11 @@
     "start": "next start",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
-    "test": "vitest run"
+    "test": "vitest run",
+    "ingest:inspect": "node scripts/ingest/inspect.mjs",
+    "ingest:stage": "node scripts/ingest/stage.mjs",
+    "ingest:reconcile": "node scripts/ingest/reconcile.mjs",
+    "migrate:operational": "node scripts/migrate-operational.mjs"
   },
   "dependencies": {
     "better-sqlite3": "^12.11.1",

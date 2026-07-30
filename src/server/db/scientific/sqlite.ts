@@ -3,7 +3,8 @@ import { AppError } from "../../../shared/errors/AppError";
 import type { ExportQuery, FacetsQuery, Filter, RowsQuery, RowsResult } from "../../../shared/contracts/catalog";
 import type { AnalysisResult, CohortQuery, CohortResult, MutationReadRequest } from "../../../shared/contracts/mutations";
 import { deriveCopyNumberComparison, deriveGrowthComparison, deriveLibraryVariants, deriveMutationComparison } from "../../../modules/mutations/derivations";
-import { CURRENT_SNAPSHOT_ID } from "../../../modules/snapshots/catalog/repository";
+import { createHash } from "node:crypto";
+import { getCurrentSnapshot, CURRENT_SNAPSHOT_ID } from "../../../modules/snapshots/catalog/repository";
 import type { ScientificRepository, TableDescriptor } from "./types";
 
 const IDENTIFIER = /^[A-Za-z][A-Za-z0-9_]*$/;
@@ -39,7 +40,7 @@ export class SqliteScientificRepository implements ScientificRepository {
   }
 
   public probe() { this.db.prepare("SELECT 1").get(); return { available: true as const }; }
-  public provenance() { return { snapshotId: CURRENT_SNAPSHOT_ID, label: "legacy SQLite", sourceSystem: "SQLite snapshot", sourceRevision: null, sourceSha256: "0".repeat(64), sourceUpdatedAt: null, receivedAt: new Date(0).toISOString(), materializedAt: null, schemaVersion: "legacy", schemaFingerprint: "legacy", manifestDigest: null }; }
+  public provenance() { const snapshot = getCurrentSnapshot(); const schemaFingerprint = createHash("sha256").update([...this.tables.values()].map((table) => `${table.name}:${table.columns.map((column) => `${column.key}:${column.type}:${column.nullable}`).join(",")}`).join("\\n")).digest("hex"); return { snapshotId: snapshot.snapshotId, label: snapshot.label, sourceSystem: snapshot.sourceSystem, sourceRevision: null, sourceSha256: snapshot.sha256, sourceUpdatedAt: null, receivedAt: snapshot.createdAt, materializedAt: null, schemaVersion: String(snapshot.schemaVersion), schemaFingerprint, manifestDigest: snapshot.manifestDigest }; }
   public capabilities() { const barcodeTable = this.tables.get("verAB_barcodes"); const hasBarcodes = barcodeTable !== undefined && Number((this.db.prepare(`SELECT COUNT(*) AS count FROM ${quote(barcodeTable.name)}`).get() as { count: number }).count) > 0; return { snapshotId: CURRENT_SNAPSHOT_ID, hasBarcodes, capabilities: { catalog: { available: true }, barcodes: hasBarcodes ? { available: true } : { available: false, reason: "No barcode records are available in this snapshot." } } }; }
   public listTables() { return [...this.tables.values()]; }
 

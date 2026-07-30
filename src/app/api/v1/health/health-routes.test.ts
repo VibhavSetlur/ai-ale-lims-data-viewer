@@ -34,14 +34,14 @@ describe("health routes", () => {
   });
 
   it("fails readiness when the scientific SQLite snapshot is unavailable", async () => {
-    const response = ready(new Request("http://localhost/api/v1/health/ready", { headers: { "x-request-id": "ready-1" } }));
+    const response = await ready(new Request("http://localhost/api/v1/health/ready", { headers: { "x-request-id": "ready-1" } }));
     expect(response.status).toBe(503);
     await expect(response.json()).resolves.toEqual({ ok: false, error: { code: "DEPENDENCY_UNAVAILABLE", message: "Scientific catalog is unavailable.", retryable: true }, request: { requestId: "ready-1", correlationId: "ready-1" } });
   });
 
   it("does not require an operational database for legacy SQLite readiness", async () => {
     process.env.LEGACY_SQLITE_PATH = legacySnapshot();
-    const response = ready(new Request("http://localhost/api/v1/health/ready"));
+    const response = await ready(new Request("http://localhost/api/v1/health/ready"));
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({ ok: true, data: { status: "ready", profile: "legacy" } });
   });

@@ -13,18 +13,20 @@ export interface FacetValue {
   count: number;
 }
 
+type Async<T> = T | Promise<T>;
+
 export interface ScientificRepository {
-  probe(): { available: true };
-  provenance(): SnapshotProvenance;
-  capabilities(): CapabilityManifest;
-  listTables(): TableDescriptor[];
-  getRows(query: RowsQuery): RowsResult;
-  getFacets(query: FacetsQuery): Record<string, FacetValue[]>;
-  exportRows(query: ExportQuery): { columns: ColumnDescriptor[]; csv: string };
-  cohort(query: CohortQuery): CohortResult;
-  compareMutations(query: MutationReadRequest): AnalysisResult;
-  compareGrowth(query: MutationReadRequest): AnalysisResult;
-  compareLibraryVariants(query: MutationReadRequest): AnalysisResult;
-  compareCopyNumber(query: MutationReadRequest): AnalysisResult;
-  factors(snapshotId: string): { experiments: string[]; factors: Record<string, string[]>; warnings: string[]; provenance: SnapshotProvenance };
+  probe(): Async<{ available: true }>;
+  provenance(): Async<SnapshotProvenance>;
+  capabilities(): Async<CapabilityManifest>;
+  listTables(): Async<TableDescriptor[]>;
+  getRows(query: RowsQuery): Async<RowsResult>;
+  getFacets(query: FacetsQuery): Async<Record<string, FacetValue[]>>;
+  exportRows(query: ExportQuery): Async<{ columns: ColumnDescriptor[]; csv: string }>;
+  cohort(query: CohortQuery): Async<CohortResult>;
+  compareMutations(query: MutationReadRequest): Async<AnalysisResult>;
+  compareGrowth(query: MutationReadRequest): Async<AnalysisResult>;
+  compareLibraryVariants(query: MutationReadRequest): Async<AnalysisResult>;
+  compareCopyNumber(query: MutationReadRequest): Async<AnalysisResult>;
+  factors(snapshotId: string): Async<{ experiments: string[]; factors: Record<string, string[]>; warnings: string[]; provenance: SnapshotProvenance }>;
 }

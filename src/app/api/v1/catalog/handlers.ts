@@ -6,12 +6,12 @@ export async function readJson(request: Request): Promise<unknown> {
   try { return await request.json(); } catch { throw new AppError("INVALID_INPUT", "Request body must be valid JSON."); }
 }
 
-export async function handle<T>(request: Request, parse: (value: unknown) => { success: boolean; data?: T }, action: (value: T) => unknown) {
+export async function handle<T>(request: Request, parse: (value: unknown) => { success: boolean; data?: T }, action: (value: T) => unknown | Promise<unknown>) {
   const context = requestContext(request.headers);
   try {
     const parsed = parse(await readJson(request));
     if (!parsed.success || parsed.data === undefined) throw new AppError("INVALID_INPUT", "Request body is invalid.");
-    return jsonSuccess(action(parsed.data), context);
+    return jsonSuccess(await action(parsed.data), context);
   } catch (error) { return jsonError(error, context); }
 }
 
