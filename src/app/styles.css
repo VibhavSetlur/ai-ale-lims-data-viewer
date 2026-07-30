@@ -224,6 +224,22 @@ summary:focus-visible,
   overflow-wrap: anywhere;
   font-size: 0.85rem;
 }
+.assistant-panel {
+  display: grid;
+  gap: 10px;
+  margin-top: var(--space-3);
+  border-top: 1px solid var(--line);
+  padding-top: var(--space-3);
+}
+.assistant-panel h2,
+.assistant-panel p { margin: 0; }
+.assistant-panel h2 { font-size: 1rem; }
+.assistant-panel label { font-size: 0.82rem; font-weight: 700; }
+.assistant-input,
+.assistant-actions { display: flex; gap: var(--space-1); }
+.assistant-input input { min-width: 0; width: 100%; border: 1px solid var(--line-strong); border-radius: var(--radius); background: var(--surface-raised); padding: 8px; }
+.assistant-proposal { display: grid; gap: 6px; border: 1px solid var(--line-strong); border-radius: var(--radius); background: var(--surface-raised); padding: var(--space-2); }
+.assistant-proposal span { font-family: ui-monospace, monospace; font-size: 0.82rem; overflow-wrap: anywhere; }
 
 .page-header {
   max-width: 900px;

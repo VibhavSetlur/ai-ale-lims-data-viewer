@@ -2,6 +2,8 @@ import type { ReactNode } from "react";
 import Link from "next/link";
 import { mockProvenance } from "@/lib/research/mock-service";
 import { issueReportUrl } from "@/lib/support/support-content";
+import { assistantMode } from "@/modules/assistant/contracts";
+import { AssistantPanel } from "@/components/assistant/AssistantPanel";
 import { IdentityControl } from "./IdentityControl";
 import { PrimaryNavigation } from "./PrimaryNavigation";
 
@@ -29,6 +31,7 @@ export function AppShell({ children }: Readonly<{ children: ReactNode }>) {
         <div><dt>Source</dt><dd>{mockProvenance.label}</dd></div>
         <div><dt>Snapshot</dt><dd>{mockProvenance.snapshotId}</dd></div>
       </dl>
+      <AssistantPanel mode={assistantMode()} />
     </aside>
   </div>;
 }
