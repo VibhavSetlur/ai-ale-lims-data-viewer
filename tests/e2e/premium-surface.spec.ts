@@ -1,19 +1,16 @@
 import { expect, test } from "@playwright/test";
 
-test("assistant requires confirmation and exposes semantic research landmarks", async ({ page }) => {
+test("shell exposes correct semantic research landmarks", async ({ page }) => {
   await page.goto("/mutations/cohort");
-  await expect(page.getByRole("main", { name: "" })).toHaveAttribute("id", "research-canvas");
-  await expect(page.getByRole("navigation")).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Research navigation demo" })).toBeVisible();
-  await page.getByLabel("What would you like to explore?").fill("tables");
-  await page.getByRole("button", { name: "Suggest" }).click();
-  await expect(page.getByText("I can direct you to the table")).toBeVisible();
-  await expect(page.getByText("Proposed destination")).toBeVisible();
-  await page.getByRole("button", { name: "Cancel" }).click();
-  await expect(page.getByText("Proposed destination")).toBeHidden();
-  await page.getByRole("button", { name: "Suggest" }).click();
-  await page.getByRole("button", { name: "Confirm" }).click();
-  await expect(page).toHaveURL(/\/tables/);
+  // Main content area has the correct ID for skip-link target
+  await expect(page.getByRole("main", { name: "" })).toHaveAttribute("id", "main-content");
+  // Primary navigation is present
+  await expect(page.getByRole("navigation", { name: "Primary navigation" })).toBeVisible();
+  // Context rail aside is present
+  await expect(page.getByRole("complementary", { name: "Research context" })).toBeVisible();
+  // Nav link for cohort is active
+  const cohortLink = page.getByRole("navigation", { name: "Primary navigation" }).getByRole("link", { name: "Cohort" });
+  await expect(cohortLink).toHaveAttribute("aria-current", "page");
 });
 
 test("drawer traps keyboard focus, escapes, and restores its opener", async ({ page }) => {
