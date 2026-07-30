@@ -1,0 +1,4 @@
+import { identityService } from "@/modules/identity/service";
+import { loggedJsonError, loggedJsonSuccess, requestContext } from "@/shared/http/api";
+const attributes = () => `viewer2_session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=28800${process.env.NODE_ENV === "development" ? "" : "; Secure"}`;
+export async function POST(request: Request) { const context = requestContext(request.headers); try { let input: unknown; try { input = await request.json(); } catch { input = undefined; } const result = await identityService().login(input); const response = loggedJsonSuccess({ session: result.session }, request, context); response.headers.set("Set-Cookie", attributes().replace("viewer2_session=", `viewer2_session=${result.sessionId}`)); return response; } catch (error) { return loggedJsonError(error, request, context); } }

@@ -1,33 +1,100 @@
-import Dashboard from '@/components/Dashboard';
-import { getBuildInfo } from '@/lib/buildInfo';
+/**
+ * Home dashboard -- entry point for AI-ALE Research Viewer.
+ *
+ * Renders six workflow cards. Context rail snapshot info is provided
+ * by the AppShell itself (which fetches /api/v1/status on mount).
+ *
+ * Navigation to workflow cards does NOT depend on status load.
+ */
 
-// In the STATIC build there is no server/DB at render time, so we skip the
-// server-side table fetch entirely and let the client hydrate from the pre-baked
-// artifacts. In SERVER mode we keep the original SSR fast-path (initial table
-// list rendered on the server). The flag is set by scripts/build-static.sh.
-const IS_STATIC = process.env.NEXT_PUBLIC_STATIC === '1';
+import Link from "next/link";
+import { HomeSnapshotStrip } from "@/components/home/HomeSnapshotStrip";
 
-async function getInitialTables(): Promise<string[]> {
-  if (IS_STATIC) return [];
-  try {
-    // Imported lazily so the static build never pulls the server-only DB module
-    // (better-sqlite3 + fs) into its trace.
-    const { getTables } = await import('@/lib/db');
-    return await getTables();
-  } catch (error) {
-    console.error('Failed to get tables from DB:', error);
-    return [];
-  }
+// ---- Workflow cards ----
+
+interface WorkflowCard {
+  href: string;
+  group: string;
+  title: string;
+  description: string;
 }
 
-export default async function Home() {
-  const tables = await getInitialTables();
-  // Counts are populated by the client after mount (via the data source) — keeps
-  // initial render fast on large DBs.
-  const buildInfo = getBuildInfo();
+const WORKFLOW_CARDS: readonly WorkflowCard[] = [
+  {
+    href: "/tables",
+    group: "Explore",
+    title: "Browse tables",
+    description:
+      "Filter, sort, and export raw scientific snapshot data. Start here to understand available records.",
+  },
+  {
+    href: "/mutations/cohort",
+    group: "Analyze",
+    title: "Build a cohort",
+    description:
+      "Select samples and experimental conditions to define a cohort for downstream analysis.",
+  },
+  {
+    href: "/mutations/compare/mutations",
+    group: "Analyze",
+    title: "Compare mutations",
+    description:
+      "Summarize observed mutation annotations across the selected cohort and compare conditions.",
+  },
+  {
+    href: "/mutations/compare/growth",
+    group: "Analyze",
+    title: "Growth series",
+    description:
+      "Visualize growth trajectories over experimental transfers. Review caveats in the guide before interpreting results.",
+  },
+  {
+    href: "/plates",
+    group: "Design",
+    title: "Design plates",
+    description:
+      "Build and export plate layouts locally in your browser. Drafts never write to LIMS.",
+  },
+  {
+    href: "/workspaces",
+    group: "Workspace",
+    title: "Resume work",
+    description:
+      "Return to a saved workspace or start a new analysis session from where you left off.",
+  },
+] as const;
+
+export default function HomePage() {
   return (
-    <main className="h-screen w-full flex flex-col overflow-hidden">
-      <Dashboard initialTables={tables} buildInfo={buildInfo} />
-    </main>
+    <div className="home-page">
+      <div className="home-headline">
+        <h1 className="home-title">AI-ALE Research Viewer</h1>
+        <p className="home-subtitle">
+          Explore scientific snapshots from the AI-ALE LIMS. All data shown here
+          is read-only. Navigate to a workflow to begin.
+        </p>
+      </div>
+
+      <HomeSnapshotStrip />
+
+      <div className="workflow-grid" role="list">
+        {WORKFLOW_CARDS.map((card) => (
+          <Link
+            key={card.href}
+            href={card.href}
+            className="workflow-card"
+            role="listitem"
+            data-testid={`workflow-card-${card.href.replace(/\//g, "-").replace(/^-/, "")}`}
+          >
+            <p className="workflow-card-label">{card.group}</p>
+            <p className="workflow-card-title">{card.title}</p>
+            <p className="workflow-card-desc">{card.description}</p>
+            <p className="workflow-card-arrow" aria-hidden="true">
+              Open &rarr;
+            </p>
+          </Link>
+        ))}
+      </div>
+    </div>
   );
 }

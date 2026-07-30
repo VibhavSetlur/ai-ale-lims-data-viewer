@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { adjacentWell, allWellIds, createCondition, createPlate, createPlateDocument, validatePlateDocument } from './document';
 import { createPlateState, exportCsv, exportDocument, importDocument, plateReducer } from './state';
+import { reviewPlateDocument } from './validation-review';
 
 describe('PlateDocumentV1', () => {
   it('validates a complete 96-well document and preserves deterministic exports', () => {
@@ -13,6 +14,10 @@ describe('PlateDocumentV1', () => {
     const document = createPlateDocument(); document.run.name = 'Run'; const plate = createPlate(); (plate.wells as Record<string, unknown>).Z1 = null; document.plates = [plate];
     const errors = validatePlateDocument(document).errors.map(error => error.message);
     expect(errors).toContain('Invalid 96-well coordinate.');
+  });
+  it('summarizes canonical validation errors for workspace review', () => {
+    const document = createPlateDocument();
+    expect(reviewPlateDocument(document)).toMatchObject({ summary: '1 issue needs review before export or use.', errors: [{ path: 'run.name', message: 'Run name is required.' }] });
   });
   it('models all 96 wells and keyboard edges correctly', () => {
     expect(allWellIds()).toHaveLength(96); expect(adjacentWell('A1', 'ArrowLeft')).toBeUndefined(); expect(adjacentWell('A1', 'ArrowUp')).toBeUndefined(); expect(adjacentWell('A1', 'ArrowRight')).toBe('A2'); expect(adjacentWell('A1', 'ArrowDown')).toBe('B1'); expect(adjacentWell('H12', 'ArrowRight')).toBeUndefined();
