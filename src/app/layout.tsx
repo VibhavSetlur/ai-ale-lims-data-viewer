@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { Inter, JetBrains_Mono } from "next/font/google";
+import "./tailwind.css";
 import "./styles.css";
+import "./legacy-design.css";
 import { AppShell } from "@/components/app-shell/AppShell";
 import { themeInitScript } from "@/components/app-shell/ThemeProvider";
 

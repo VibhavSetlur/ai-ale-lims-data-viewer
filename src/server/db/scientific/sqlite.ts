@@ -6,6 +6,10 @@ import { deriveCopyNumberComparison, deriveGrowthComparison, deriveLibraryVarian
 import { createHash } from "node:crypto";
 import { getCurrentSnapshot, CURRENT_SNAPSHOT_ID } from "../../../modules/snapshots/catalog/repository";
 import type { ScientificRepository, TableDescriptor } from "./types";
+import type { MutationDataset, MutationDatasetQuery } from "../../../shared/contracts/mutation-dataset";
+import type { GrowthSeriesDataset, GrowthSeriesQuery } from "../../../shared/contracts/growth-series";
+import type { LibraryVariantDataset, LibraryVariantsQuery } from "../../../shared/contracts/library-variants-dataset";
+import { buildMutationDataset, buildGrowthSeries, buildLibraryVariantsDataset } from "./mutation-dataset";
 
 const IDENTIFIER = /^[A-Za-z][A-Za-z0-9_]*$/;
 
@@ -94,7 +98,7 @@ export class SqliteScientificRepository implements ScientificRepository {
   private cursor(offset: number, query: RowsQuery): string { return Buffer.from(JSON.stringify({ offset, signature: this.cursorSignature(query) })).toString("base64url"); }
   public getRows(query: RowsQuery): RowsResult {
     if (query.snapshotId !== CURRENT_SNAPSHOT_ID) throw new AppError("SNAPSHOT_NOT_FOUND", "Snapshot not found.");
-    const table = this.table(query.table); const conditions = this.conditions(table, query); const offset = this.offset(query.cursor, query);
+    const table = this.table(query.table); const conditions = this.conditions(table, query); const offset = query.offset ?? this.offset(query.cursor, query);
     const totalCount = Number((this.db.prepare(`SELECT COUNT(*) AS count FROM ${quote(table.name)}${conditions.sql}`).get(...conditions.values) as { count: number }).count);
     const rows = this.db.prepare(`SELECT * FROM ${quote(table.name)}${conditions.sql}${this.ordered(table, query)} LIMIT ? OFFSET ?`).all(...conditions.values, query.limit, offset) as Record<string, unknown>[];
     const nextOffset = offset + rows.length;
@@ -155,5 +159,22 @@ export class SqliteScientificRepository implements ScientificRepository {
   public compareGrowth(query: MutationReadRequest) { return this.analysis(query, "growth"); }
   public compareLibraryVariants(_query: MutationReadRequest): AnalysisResult { throw new AppError("SEMANTIC_INVALID", "Library variants cannot be scoped truthfully to the requested experiment or registry."); }
   public compareCopyNumber(_query: MutationReadRequest): AnalysisResult { throw new AppError("SEMANTIC_INVALID", "Copy-number records cannot be scoped truthfully to the requested experiment."); }
+  public mutationDataset(query: MutationDatasetQuery): MutationDataset {
+    this.snapshot(query.snapshotId);
+    const run = <T>(sql: string, params: unknown[]) => this.db.prepare(sql).all(...params) as T[];
+    const base = buildMutationDataset(run, (table, ...columns) => this.has(table, ...columns), { experimentKey: query.experimentKey, registryKey: query.registryKey });
+    return { ...base, source: { driver: "sqlite", table: "Mutations", rowsScanned: base.samples.length } };
+  }
+  public growthSeries(query: GrowthSeriesQuery): GrowthSeriesDataset {
+    this.snapshot(query.snapshotId);
+    const run = <T>(sql: string, params: unknown[]) => this.db.prepare(sql).all(...params) as T[];
+    const { dataset, rowsScanned } = buildGrowthSeries(run, { experimentKey: query.experimentKey });
+    return { ...dataset, source: { driver: "sqlite", table: "Robotic_OD", rowsScanned } };
+  }
+  public libraryVariantsDataset(query: LibraryVariantsQuery): LibraryVariantDataset {
+    this.snapshot(query.snapshotId);
+    const run = <T>(sql: string, params: unknown[]) => this.db.prepare(sql).all(...params) as T[];
+    return buildLibraryVariantsDataset(run, (table, ...columns) => this.has(table, ...columns), (table) => this.tables.get(table)?.columns.map((column) => column.key));
+  }
   public factors(snapshotId: string) { this.snapshot(snapshotId); const warnings: string[] = []; const experiments = this.has("Mutations", "Experiment") ? (this.db.prepare(`SELECT DISTINCT "Experiment" AS value FROM "Mutations" WHERE "Experiment" IS NOT NULL ORDER BY "Experiment"`).all() as { value: string }[]).map((row) => row.value) : []; if (!experiments.length) warnings.push("Experiment factors are unavailable."); return { experiments, factors: { experiment: experiments, media: [], strain: [], transformingDNA: [] }, warnings, provenance: this.provenance() }; }
 }

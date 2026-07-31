@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 
 type ChatRole = "user" | "assistant";
 type ChatTurn = { role: ChatRole; content: string };
@@ -19,23 +19,46 @@ const MODELS: readonly ArgoModel[] = [
 const MODEL_KEY = "aiale.assistant.model";
 const USER_KEY = "aiale.assistant.user";
 
+// Navigation targets the assistant is allowed to open. Maps a stable name to a
+// concrete in-app route. The four mutation views live behind the single
+// Mutation Explorer page with a ?tab query.
+const NAV_TARGETS: Readonly<Record<string, string>> = {
+  tables: "/tables",
+  "data-tables": "/tables",
+  mutations: "/mutations?tab=compare",
+  "compare-mutations": "/mutations?tab=compare",
+  "sample-selection": "/mutations?tab=samples",
+  samples: "/mutations?tab=samples",
+  growth: "/mutations?tab=growth",
+  "compare-growth": "/mutations?tab=growth",
+  "library-variants": "/mutations?tab=libraryVariants",
+  "copy-number": "/mutations?tab=copynumber",
+  plates: "/plates",
+  "plate-design": "/plates",
+  workspaces: "/workspaces",
+  guide: "/guide",
+  changelog: "/changelog",
+  help: "/help",
+  home: "/",
+};
+
+const NAV_PATTERN = /\[\[\s*navigate\s*:\s*([a-z0-9-]+)\s*\]\]/gi;
+
 const PAGE_HINTS: Readonly<Record<string, string>> = {
   "/": "the home overview",
-  "/tables": "the table catalog browser",
-  "/mutations/cohort": "the cohort builder",
-  "/mutations/compare/mutations": "the mutation comparison view",
-  "/mutations/compare/growth": "the growth curve comparison view",
-  "/mutations/compare/library-variants": "the library variant comparison view",
-  "/mutations/compare/copy-number": "the copy number comparison view",
+  "/tables": "the data table browser",
+  "/mutations": "the Mutation Explorer (Sample Selection, Compare Mutations, Compare Growth, Compare Library Variants, Copy Number tabs)",
   "/plates": "the 96-well plate designer",
-  "/workspaces": "saved local workspaces",
+  "/workspaces": "saved local plate designs",
   "/guide": "the guide",
+  "/changelog": "the changelog",
   "/help": "the help center",
 };
 
 function pageHint(pathname: string): string {
   if (PAGE_HINTS[pathname]) return PAGE_HINTS[pathname];
   if (pathname.startsWith("/tables/")) return "a data table view";
+  if (pathname.startsWith("/mutations")) return PAGE_HINTS["/mutations"];
   return "the research viewer";
 }
 
@@ -49,11 +72,30 @@ function systemPrompt(pathname: string): string {
     "Be concise, accurate, and scientific. When you are unsure about specific numbers in",
     "this snapshot, say so and suggest which view or table would contain the answer.",
     "Never invent data values. Prefer short paragraphs and bullet points.",
+    "When it would help the user to see a specific page, you may direct them there by",
+    "including a token of the form [[navigate:TARGET]] on its own at the end of your reply.",
+    "Valid TARGET values: tables, sample-selection, compare-mutations, compare-growth,",
+    "library-variants, copy-number, plates, workspaces, guide, changelog, help, home.",
+    "Only navigate when the user asks to see or open something. The token is hidden from",
+    "the user, so still describe what they will see in words.",
   ].join(" ");
+}
+
+function extractNavigation(reply: string): { text: string; target: string | null } {
+  let target: string | null = null;
+  const text = reply
+    .replace(NAV_PATTERN, (_match, name: string) => {
+      const key = name.toLowerCase();
+      if (!target && NAV_TARGETS[key]) target = NAV_TARGETS[key];
+      return "";
+    })
+    .trim();
+  return { text: text.length > 0 ? text : reply.trim(), target };
 }
 
 export function ChatPanel() {
   const pathname = usePathname();
+  const router = useRouter();
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
@@ -63,6 +105,8 @@ export function ChatPanel() {
   const [argoUser, setArgoUser] = useState("");
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  const hasKey = argoUser.trim().length > 0;
 
   useEffect(() => {
     // Hydrate persisted preferences once on mount; intentional post-mount state set.
@@ -105,7 +149,13 @@ export function ChatPanel() {
 
   const send = useCallback(async () => {
     const trimmed = input.trim();
+    const key = argoUser.trim();
     if (!trimmed || busy) return;
+    if (!key) {
+      setShowSettings(true);
+      setError("Enter your Argo key in settings to use the assistant.");
+      return;
+    }
     setError(null);
     const nextTurns: ChatTurn[] = [...turns, { role: "user", content: trimmed }];
     setTurns(nextTurns);
@@ -121,11 +171,7 @@ export function ChatPanel() {
       const res = await fetch("/api/v1/assistant/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model,
-          messages,
-          user: argoUser || undefined,
-        }),
+        body: JSON.stringify({ model, messages, user: key }),
       });
       const payload = (await res.json().catch(() => ({}))) as {
         ok?: boolean;
@@ -135,7 +181,12 @@ export function ChatPanel() {
       if (!res.ok || !payload.ok || !payload.data?.reply) {
         setError(payload.error?.message ?? "The assistant is unavailable right now.");
       } else {
-        setTurns((prev) => [...prev, { role: "assistant", content: payload.data!.reply! }]);
+        const { text, target } = extractNavigation(payload.data.reply);
+        setTurns((prev) => [...prev, { role: "assistant", content: text }]);
+        if (target) {
+          // Give the reply a moment to render before moving the user.
+          window.setTimeout(() => router.push(target), 400);
+        }
       }
     } catch {
       setError("Could not reach the assistant.");
@@ -143,7 +194,7 @@ export function ChatPanel() {
       setBusy(false);
       inputRef.current?.focus();
     }
-  }, [input, busy, turns, pathname, model, argoUser]);
+  }, [input, argoUser, busy, turns, pathname, model, router]);
 
   const onKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -193,19 +244,20 @@ export function ChatPanel() {
       {showSettings && (
         <div className="chat-settings">
           <label className="chat-settings-label" htmlFor="chat-argo-user">
-            Argo user id (optional)
+            Your Argo key (required)
           </label>
           <input
             id="chat-argo-user"
             className="chat-settings-input"
             type="text"
-            placeholder="Use server default"
+            placeholder="Enter your Argo key"
             value={argoUser}
             onChange={(e) => persistUser(e.target.value)}
           />
           <p className="chat-settings-hint">
-            Requests route through the Argo gateway. Leave blank to use the server
-            configured user. Your id is stored only in this browser.
+            The assistant routes through the Argo gateway using your own key. The
+            server never supplies one. Your key is stored only in this browser and
+            sent with each request you make.
           </p>
           {turns.length > 0 && (
             <button
@@ -227,8 +279,17 @@ export function ChatPanel() {
           <div className="chat-empty">
             <p className="chat-empty-title">Ask about this dataset</p>
             <p className="chat-empty-hint">
-              Try: &ldquo;What does the mutation comparison view show?&rdquo; or
-              &ldquo;How do I build a cohort for experiment TFMN1?&rdquo;
+              {hasKey ? (
+                <>
+                  Try: &ldquo;What does the Compare Mutations view show?&rdquo; or
+                  &ldquo;Open the growth curves for me.&rdquo;
+                </>
+              ) : (
+                <>
+                  Add your Argo key in settings (gear icon) to start chatting. Your
+                  key stays in this browser.
+                </>
+              )}
             </p>
           </div>
         )}
@@ -262,7 +323,7 @@ export function ChatPanel() {
           ref={inputRef}
           className="chat-input"
           rows={2}
-          placeholder="Ask about the data..."
+          placeholder={hasKey ? "Ask about the data..." : "Add your Argo key in settings first"}
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={onKeyDown}
@@ -272,7 +333,7 @@ export function ChatPanel() {
           type="button"
           className="button button-primary button-sm chat-send"
           onClick={() => void send()}
-          disabled={busy || !input.trim()}
+          disabled={busy || !input.trim() || !hasKey}
         >
           Send
         </button>

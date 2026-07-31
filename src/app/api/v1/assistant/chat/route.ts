@@ -54,11 +54,14 @@ export async function POST(request: Request) {
 
     // User-supplied Argo user id takes precedence, else server env.
     const suppliedUser = typeof body.user === "string" ? body.user.trim() : "";
-    const argoUser = suppliedUser || process.env.ARGO_API_KEY || "";
+    // The server never supplies an Argo identity. Each user must enter their own
+    // Argo key in the assistant settings; it is sent per-request and never stored
+    // server-side.
+    const argoUser = suppliedUser;
     if (!argoUser) {
       throw new AppError(
         "DEPENDENCY_UNAVAILABLE",
-        "No Argo user configured. Set ARGO_API_KEY on the server or supply your own Argo user in the assistant settings.",
+        "No Argo key provided. Enter your own Argo key in the assistant settings to use the chat.",
       );
     }
 

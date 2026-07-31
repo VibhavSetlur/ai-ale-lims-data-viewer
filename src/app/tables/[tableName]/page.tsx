@@ -1,4 +1,4 @@
-import { CatalogTable } from "@/components/catalog/CatalogBrowser";
+import DataTableView from "./DataTableView";
 
 type Props = Readonly<{ params: Promise<{ tableName: string }> }>;
 
@@ -11,5 +11,5 @@ export async function generateMetadata({ params }: Props) {
 
 export default async function TablePage({ params }: Props) {
   const { tableName } = await params;
-  return <CatalogTable table={tableName} />;
+  return <DataTableView tableName={decodeURIComponent(tableName)} />;
 }

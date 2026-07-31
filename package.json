@@ -20,11 +20,16 @@
     "migrate:operational": "node scripts/migrate-operational.mjs"
   },
   "dependencies": {
+    "@tailwindcss/postcss": "^4.3.3",
     "better-sqlite3": "^12.11.1",
+    "clsx": "^2.1.1",
+    "lucide-react": "^1.28.0",
     "mysql2": "^3.23.2",
     "next": "16.2.6",
     "react": "19.2.4",
     "react-dom": "19.2.4",
+    "tailwind-merge": "^3.6.0",
+    "tailwindcss": "^4.3.3",
     "umzug": "^3.8.3",
     "zod": "^4.4.3"
   },

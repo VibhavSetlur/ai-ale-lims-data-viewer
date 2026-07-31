@@ -46,7 +46,13 @@ const failure = (error: unknown): StorageResult<never> => ({ ok: false, code: er
 export function loadStore(storage: Storage): StorageResult<LocalWorkspaceStoreV1> {
   let raw: string | null;
   try { raw = storage.getItem(WORKSPACE_STORAGE_KEY); } catch (error) { return failure(error); }
-  if (raw !== null) { try { const store = parseStore(JSON.parse(raw)); return store ? { ok: true, value: store } : { ok: false, code: "STORAGE_UNAVAILABLE", message: "Saved workspace data is unreadable. It was not changed.", value: emptyStore() }; } catch { return { ok: false, code: "STORAGE_UNAVAILABLE", message: "Saved workspace data is unreadable. It was not changed.", value: emptyStore() }; } }
+  if (raw !== null) {
+    const unreadable = (): StorageResult<LocalWorkspaceStoreV1> => {
+      try { storage.setItem(`${WORKSPACE_STORAGE_KEY}.bak`, raw as string); } catch { /* backup is best effort */ }
+      return { ok: false, code: "STORAGE_UNAVAILABLE", message: "Saved workspace data is unreadable. It was not changed.", value: emptyStore() };
+    };
+    try { const store = parseStore(JSON.parse(raw)); return store ? { ok: true, value: store } : unreadable(); } catch { return unreadable(); }
+  }
   let legacy: string | null;
   try { legacy = storage.getItem(LEGACY_KEY); } catch (error) { return failure(error); }
   const store = emptyStore();

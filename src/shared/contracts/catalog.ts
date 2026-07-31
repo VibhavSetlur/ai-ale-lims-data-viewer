@@ -26,6 +26,7 @@ export const rowsQuerySchema = z.object({
   sort: z.array(z.object({ column: identifier, direction: z.enum(["asc", "desc"]) })).max(10).optional(),
   includeDeleted: z.boolean().optional(),
   cursor: z.string().min(1).max(2048).optional(),
+  offset: z.number().int().min(0).optional(),
   limit: z.number().int().min(1).max(1000),
 });
 

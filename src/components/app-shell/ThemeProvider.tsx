@@ -19,6 +19,8 @@ function applyTheme(mode: ThemeMode): void {
   if (typeof document === "undefined") return;
   document.documentElement.setAttribute("data-theme", mode);
   document.documentElement.style.colorScheme = mode;
+  // Also drive the legacy .dark class so ported aiale-dev components follow the theme.
+  document.documentElement.classList.toggle("dark", mode === "dark");
 }
 
 export function ThemeProvider({ children }: Readonly<{ children: ReactNode }>) {
@@ -88,4 +90,4 @@ export function useTheme(): ThemeContextValue {
  * Inline script that sets the theme attribute before paint to avoid a flash.
  * Rendered in <head> via layout.
  */
-export const themeInitScript = `(function(){try{var k='aiale.theme';var s=localStorage.getItem(k);var m=(s==='light'||s==='dark')?s:(window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');document.documentElement.setAttribute('data-theme',m);document.documentElement.style.colorScheme=m;}catch(e){}})();`;
+export const themeInitScript = `(function(){try{var k='aiale.theme';var s=localStorage.getItem(k);var m=(s==='light'||s==='dark')?s:(window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');document.documentElement.setAttribute('data-theme',m);document.documentElement.style.colorScheme=m;if(m==='dark'){document.documentElement.classList.add('dark');}}catch(e){}})();`;

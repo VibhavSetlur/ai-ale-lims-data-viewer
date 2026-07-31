@@ -9,6 +9,9 @@
 import type { ResponseMeta } from "@/shared/contracts/envelope";
 import type { SnapshotProvenance } from "@/shared/contracts/provenance";
 import type { CapabilityManifest } from "@/shared/contracts/capability";
+import type { MutationDataset } from "@/shared/contracts/mutation-dataset";
+import type { GrowthSeriesDataset } from "@/shared/contracts/growth-series";
+import type { LibraryVariantDataset } from "@/shared/contracts/library-variants-dataset";
 import { staticApiEnvelope, StaticApiError } from "@/lib/static-data";
 import type { ResponseMeta as EnvelopeMeta } from "@/shared/contracts/envelope";
 
@@ -229,6 +232,52 @@ export const apiClient = {
   /** POST /api/v1/mutations/copy-number */
   copyNumber(body: AnalysisRequest): Promise<ApiResult<unknown>> {
     return call<unknown>("/api/v1/mutations/copy-number", { method: "POST", body: JSON.stringify(body) });
+  },
+
+  /** GET /api/v1/mutations/dataset (ported flagship MutationExplorer feed) */
+  mutationDataset(query?: {
+    snapshotId?: string;
+    experimentKey?: string;
+    registryKey?: string;
+  }): Promise<ApiResult<MutationDataset>> {
+    const params = new URLSearchParams();
+    if (query?.snapshotId) params.set("snapshotId", query.snapshotId);
+    if (query?.experimentKey) params.set("experimentKey", query.experimentKey);
+    if (query?.registryKey) params.set("registryKey", query.registryKey);
+    const qs = params.toString();
+    return call<MutationDataset>(
+      qs ? `/api/v1/mutations/dataset?${qs}` : "/api/v1/mutations/dataset",
+    );
+  },
+
+  /** GET /api/v1/mutations/growth-series */
+  growthSeries(query?: {
+    snapshotId?: string;
+    experimentKey?: string;
+  }): Promise<ApiResult<GrowthSeriesDataset>> {
+    const params = new URLSearchParams();
+    if (query?.snapshotId) params.set("snapshotId", query.snapshotId);
+    if (query?.experimentKey) params.set("experimentKey", query.experimentKey);
+    const qs = params.toString();
+    return call<GrowthSeriesDataset>(
+      qs
+        ? `/api/v1/mutations/growth-series?${qs}`
+        : "/api/v1/mutations/growth-series",
+    );
+  },
+
+  /** GET /api/v1/mutations/library-variants-dataset */
+  libraryVariantsDataset(query?: {
+    snapshotId?: string;
+  }): Promise<ApiResult<LibraryVariantDataset>> {
+    const params = new URLSearchParams();
+    if (query?.snapshotId) params.set("snapshotId", query.snapshotId);
+    const qs = params.toString();
+    return call<LibraryVariantDataset>(
+      qs
+        ? `/api/v1/mutations/library-variants-dataset?${qs}`
+        : "/api/v1/mutations/library-variants-dataset",
+    );
   },
 
   /** GET /api/v1/plates/factors */

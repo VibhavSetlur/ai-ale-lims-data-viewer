@@ -1,0 +1,6 @@
+/* Tailwind v4 utilities for the ported legacy flagship components.
+   The dark variant follows BOTH the legacy .dark class and viewer-2's
+   [data-theme="dark"] attribute so ThemeProvider drives everything. */
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *, [data-theme="dark"], [data-theme="dark"] *));

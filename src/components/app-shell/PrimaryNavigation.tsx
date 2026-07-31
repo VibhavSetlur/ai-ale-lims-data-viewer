@@ -18,30 +18,24 @@ interface NavGroup {
 
 const NAV_GROUPS: readonly NavGroup[] = [
   {
-    label: "Explore",
-    id: "explore",
-    links: [{ href: "/tables", label: "Tables" }],
-  },
-  {
     label: "Analyze",
     id: "analyze",
-    links: [
-      { href: "/mutations/cohort", label: "Cohort" },
-      { href: "/mutations/compare/mutations", label: "Mutations" },
-      { href: "/mutations/compare/growth", label: "Growth" },
-      { href: "/mutations/compare/library-variants", label: "Library variants" },
-      { href: "/mutations/compare/copy-number", label: "Copy number" },
-    ],
+    links: [{ href: "/mutations", label: "Mutation Explorer" }],
+  },
+  {
+    label: "Explore",
+    id: "explore",
+    links: [{ href: "/tables", label: "Data Tables" }],
   },
   {
     label: "Design",
     id: "design",
-    links: [{ href: "/plates", label: "Plates" }],
+    links: [{ href: "/plates", label: "Plate Design" }],
   },
   {
     label: "Workspace",
     id: "workspace",
-    links: [{ href: "/workspaces", label: "Workspaces" }],
+    links: [{ href: "/workspaces", label: "Saved plates" }],
   },
   {
     label: "Reference",
@@ -55,17 +49,12 @@ const NAV_GROUPS: readonly NavGroup[] = [
 ] as const;
 
 function isActive(pathname: string, href: string): boolean {
-  // Exact match for top-level routes
   if (href === "/tables") {
     return pathname === href || pathname.startsWith("/tables/");
   }
-  // /mutations/compare/* -- each sub-route is a distinct active link
-  if (href.startsWith("/mutations/compare/")) {
-    return pathname === href || pathname.startsWith(`${href}/`);
-  }
-  // /mutations/cohort is active only at that exact prefix
-  if (href === "/mutations/cohort") {
-    return pathname === href || pathname.startsWith("/mutations/cohort/");
+  // Mutation Explorer owns /mutations and all legacy /mutations/* redirects.
+  if (href === "/mutations") {
+    return pathname === href || pathname.startsWith("/mutations/");
   }
   return pathname === href || pathname.startsWith(`${href}/`);
 }
