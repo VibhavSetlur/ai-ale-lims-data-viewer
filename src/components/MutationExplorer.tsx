@@ -13,6 +13,7 @@ import LibraryVariantComparison from './LibraryVariantComparison';
 import { fetchData, IS_STATIC } from '../lib/dataSource';
 import ExportFigureMenu from './ExportFigureMenu';
 import type { FigureSpec } from '../lib/figureSpec';
+import type { MutationRouteTab } from '../lib/routes';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
@@ -130,7 +131,9 @@ interface MutationDataset {
   };
 }
 
-type Tab = 'samples' | 'compare' | 'growth' | 'libraryVariants' | 'copynumber';
+// Kept as a local alias of the canonical route tab union so every internal
+// usage below stays literally in sync with `src/lib/routes.ts`.
+type Tab = MutationRouteTab;
 
 const SELECTED_KEY = 'lims:mutation:selected';
 const TAB_KEY = 'lims:mutation:tab';
@@ -481,8 +484,17 @@ function sortSamples(samples: MutationSample[]): MutationSample[] {
   });
 }
 
-export default function MutationExplorer() {
-  const [tab, setTab] = useState<Tab>('samples');
+interface MutationExplorerProps {
+  // When supplied, the URL (via the parent route) is authoritative for the
+  // active tab and overrides the persisted localStorage restore below. When
+  // omitted (the static-mode root landing default), prior standalone
+  // behavior, localStorage restore, no callback, is unchanged.
+  activeTab?: MutationRouteTab;
+  onTabChange?: (tab: MutationRouteTab) => void;
+}
+
+export default function MutationExplorer({ activeTab, onTabChange }: MutationExplorerProps = {}) {
+  const [tab, setTab] = useState<Tab>(activeTab ?? 'samples');
   const [data, setData] = useState<MutationDataset | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -518,26 +530,51 @@ export default function MutationExplorer() {
         // eslint-disable-next-line react-hooks/set-state-in-effect -- Restores browser-local selection.
         setSelected(new Set(JSON.parse(s)));
       }
-      const t = localStorage.getItem(TAB_KEY);
-      if (t === 'compare' || t === 'samples' || t === 'growth' || t === 'libraryVariants' || t === 'copynumber') setTab(t);
+      // A supplied activeTab (route-driven) overrides the persisted restore;
+      // it is applied by the sync effect below instead.
+      if (activeTab === undefined) {
+        const t = localStorage.getItem(TAB_KEY);
+        if (t === 'compare' || t === 'samples' || t === 'growth' || t === 'libraryVariants' || t === 'copynumber') setTab(t);
+      }
       const e = localStorage.getItem(EXPERIMENT_KEY);
       if (e !== null) setExperiment(e);
       const r = localStorage.getItem(REGISTRY_KEY);
       if (r !== null) setRegistry(r);
     } catch {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- Runs once at mount; activeTab is read intentionally as a one-time initial override.
   }, []);
 
   useEffect(() => { try { localStorage.setItem(SELECTED_KEY, JSON.stringify([...selected])); } catch {} }, [selected]);
   useEffect(() => { try { localStorage.setItem(TAB_KEY, tab); } catch {} }, [tab]);
-  // If the active dataset has no barcode data (e.g. the TFMN1 publication snapshot
-  // DB omits verAB_barcodes), the Compare Library Variants tab is hidden; make sure
-  // we are not stranded ON it (e.g. restored from a prior session) showing a blank pane.
+
+  // Route-driven sync: whenever the parent supplies a tab (canonical URL
+  // navigation, Back/Forward), mirror it into local state. If the requested
+  // tab is Library Variants but the loaded dataset has no barcode data, fall
+  // back to Sample Selection and tell the parent so the URL is corrected too
+  // Never render a fabricated/blank barcode view.
   useEffect(() => {
+    if (activeTab === undefined) return;
+    if (activeTab === 'libraryVariants' && data && data.stats && !data.stats.hasBarcodes) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- Requested tab is unavailable in this snapshot.
+      setTab('samples');
+      onTabChange?.('samples');
+      return;
+    }
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- Mirrors the route-supplied tab into local state.
+    setTab(activeTab);
+  }, [activeTab, data, onTabChange]);
+
+  // Standalone (no route control, e.g. the static-mode root default) gating:
+  // if the active dataset has no barcode data (e.g. the TFMN1 publication
+  // snapshot DB omits verAB_barcodes) and a persisted tab restored us onto
+  // Library Variants, move to Sample Selection rather than show a blank pane.
+  useEffect(() => {
+    if (activeTab !== undefined) return;
     if (tab === 'libraryVariants' && data && data.stats && !data.stats.hasBarcodes) {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- Restored tab is unavailable in this snapshot.
-      setTab('compare');
+      setTab('samples');
     }
-  }, [tab, data]);
+  }, [tab, data, activeTab]);
   useEffect(() => { try { localStorage.setItem(EXPERIMENT_KEY, experiment); } catch {} }, [experiment]);
   useEffect(() => { try { localStorage.setItem(REGISTRY_KEY, registry); } catch {} }, [registry]);
 
@@ -567,6 +604,16 @@ export default function MutationExplorer() {
   // to the modal-registry warning every time.
   const onExperimentChange = (next: string) => { setRegistry(''); setExperiment(next); };
 
+  // Single entry point for every internal tab switch (tab bar clicks and the
+  // in-panel shortcut buttons below). Updates local state immediately for a
+  // responsive UI, then notifies the parent so canonical routes / Back-
+  // Forward stay in sync. Persistence (TAB_KEY effect above) and the
+  // `aiale:navigate` event listener are unaffected.
+  const selectTab = (next: Tab) => {
+    setTab(next);
+    onTabChange?.(next);
+  };
+
   // Prune selected IDs that no longer exist in the dataset.
   useEffect(() => {
     if (!data) return;
@@ -588,18 +635,18 @@ export default function MutationExplorer() {
     <div className="flex flex-col h-full min-h-0 bg-[var(--surface)] rounded-lg border border-[var(--border)] overflow-hidden" style={{ boxShadow: 'var(--shadow-sm)' }}>
       <div className="flex items-center justify-between border-b border-[var(--border)] px-2">
         <div className="flex min-w-0 items-stretch overflow-x-auto">
-          <TabButton active={tab === 'samples'} onClick={() => setTab('samples')} icon={<FlaskConical className="w-3.5 h-3.5" />} tour="tab-samples">
+          <TabButton active={tab === 'samples'} onClick={() => selectTab('samples')} icon={<FlaskConical className="w-3.5 h-3.5" />} tour="tab-samples">
             Sample Selection
             <span className="ml-1.5 px-1.5 py-0.5 rounded text-[10px] bg-[var(--surface-3)] text-[var(--text-soft)] tabular-nums">{data?.samples.length ?? 0}</span>
           </TabButton>
-          <TabButton active={tab === 'compare'} onClick={() => setTab('compare')} icon={<GitCompare className="w-3.5 h-3.5" />} tour="tab-compare">
+          <TabButton active={tab === 'compare'} onClick={() => selectTab('compare')} icon={<GitCompare className="w-3.5 h-3.5" />} tour="tab-compare">
             Compare Mutations
             <span className={cn(
               "ml-1.5 px-1.5 py-0.5 rounded text-[10px] tabular-nums",
               selected.size > 0 ? "bg-[var(--accent-600)] text-white" : "bg-[var(--surface-3)] text-[var(--text-soft)]"
             )}>{selected.size}</span>
           </TabButton>
-          <TabButton active={tab === 'growth'} onClick={() => setTab('growth')} icon={<TrendingUp className="w-3.5 h-3.5" />} tour="tab-growth-curves">
+          <TabButton active={tab === 'growth'} onClick={() => selectTab('growth')} icon={<TrendingUp className="w-3.5 h-3.5" />} tour="tab-growth-curves">
             Compare Growth Curves
             <span className={cn(
               "ml-1.5 px-1.5 py-0.5 rounded text-[10px] tabular-nums",
@@ -607,7 +654,7 @@ export default function MutationExplorer() {
             )}>{selected.size}</span>
           </TabButton>
           {data?.stats?.hasBarcodes && (
-            <TabButton active={tab === 'libraryVariants'} onClick={() => setTab('libraryVariants')} icon={<Sparkles className="w-3.5 h-3.5" />} tour="tab-library-variants">
+            <TabButton active={tab === 'libraryVariants'} onClick={() => selectTab('libraryVariants')} icon={<Sparkles className="w-3.5 h-3.5" />} tour="tab-library-variants">
               Compare Library Variants
               <span className={cn(
                 "ml-1.5 px-1.5 py-0.5 rounded text-[10px] tabular-nums",
@@ -615,7 +662,7 @@ export default function MutationExplorer() {
               )}>{selected.size}</span>
             </TabButton>
           )}
-          <TabButton active={tab === 'copynumber'} onClick={() => setTab('copynumber')} icon={<Dna className="w-3.5 h-3.5" />} tour="tab-copynumber">
+          <TabButton active={tab === 'copynumber'} onClick={() => selectTab('copynumber')} icon={<Dna className="w-3.5 h-3.5" />} tour="tab-copynumber">
             Copy Number
             {(data?.stats?.cnRegionCount ?? 0) > 0 && (
               <span className="ml-1.5 px-1.5 py-0.5 rounded text-[10px] tabular-nums lims-pill-cn">{data!.stats!.cnRegionCount}</span>
@@ -665,7 +712,7 @@ export default function MutationExplorer() {
             </select>
           </label>
           {tab === 'samples' && selected.size > 0 && (
-            <button onClick={() => setTab('compare')} className="lims-btn lims-btn-primary" title="Compare the selected samples">
+            <button onClick={() => selectTab('compare')} className="lims-btn lims-btn-primary" title="Compare the selected samples">
               Compare {selected.size} →
             </button>
           )}
@@ -705,7 +752,7 @@ export default function MutationExplorer() {
           )}
           {data.stats.cnRegionCount > 0 && tab !== 'copynumber' && (
             <button
-              onClick={() => { setTab('copynumber'); }}
+              onClick={() => { selectTab('copynumber'); }}
               className="ml-auto flex items-center gap-1.5 px-2 py-0.5 rounded bg-emerald-600 text-white hover:bg-emerald-700 text-[10.5px] font-medium"
               title="Open the dedicated copy-number trend view"
             >
@@ -752,7 +799,7 @@ export default function MutationExplorer() {
             search={search}
             setSearch={setSearch}
             loading={loading}
-            onCompareSelected={() => setTab('compare')}
+            onCompareSelected={() => selectTab('compare')}
             hasBarcodes={data?.stats?.hasBarcodes === true}
           />
         </div>
@@ -762,7 +809,7 @@ export default function MutationExplorer() {
             mutations={data?.mutations ?? []}
             selected={selected}
             setSelected={setSelected}
-            onJumpToSelection={() => setTab('samples')}
+            onJumpToSelection={() => selectTab('samples')}
             loading={loading}
             forceMetric={forceMetric}
           />
@@ -774,7 +821,7 @@ export default function MutationExplorer() {
             loading={loading}
             experiment={experiment}
             setSelected={setSelected}
-            setTab={setTab}
+            setTab={selectTab}
             hasBarcodes={data?.stats?.hasBarcodes === true}
           />
         </div>
@@ -796,9 +843,9 @@ export default function MutationExplorer() {
             onLoadExperiment={onExperimentChange}
             onCompareCN={() => {
               setForceMetric({ metric: 'copy_number', nonce: Date.now() });
-              setTab('compare');
+              selectTab('compare');
             }}
-            onPickSamples={() => setTab('samples')}
+            onPickSamples={() => selectTab('samples')}
           />
         </div>
 

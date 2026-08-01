@@ -5,6 +5,7 @@ import {
   X, Search, Compass, ArrowRight, Copy, Check, Download, ExternalLink,
   MousePointerClick, Layers, TrendingUp, FlaskConical, Download as DownloadIcon,
 } from 'lucide-react';
+import { TABLES_PATH, PLATES_PATH, mutationTabPath } from '../lib/routes';
 
 /* ---------------------------------------------------------------------------
    GuideAssistant: a context-aware, rule-based in-app helper.
@@ -18,7 +19,10 @@ import {
    approved assistant (clearly labelled as an external tool, not "the app's AI").
 --------------------------------------------------------------------------- */
 
-export type GuideAction = { kind: 'navigate'; view?: 'mutations' | 'tables' | 'plateDesign'; tab?: 'samples' | 'compare' | 'copynumber'; tour?: string };
+// The Guide always drives real navigation, so `path` is a canonical app route
+// (see src/lib/routes.ts) and is never optional. `tour` is an optional hint
+// for an on-screen walkthrough step at the destination.
+export type GuideAction = { kind: 'navigate'; path: string; tour?: string };
 
 export type GuideContext = {
   view: string;
@@ -50,7 +54,7 @@ const ANSWERS: Answer[] = [
       'Review the local layout, then download JSON or a pipeline layout CSV for hand-off.',
       'Drafts stay in this browser. Downloads do not create LIMS records, runs, plates, conditions, or samples.',
     ],
-    takeMeThere: { label: 'Open Plate Design', action: { kind: 'navigate', view: 'plateDesign' } },
+    takeMeThere: { label: 'Open Plate Design', action: { kind: 'navigate', path: PLATES_PATH } },
     keywords: 'plate design robotic run layout wells pipeline csv local draft',
   },
   {
@@ -64,7 +68,7 @@ const ANSWERS: Answer[] = [
       'Click a legend entry to isolate one lineage and read its trajectory cleanly.',
       'Use the legend search to jump to a specific lineage or background.',
     ],
-    takeMeThere: { label: 'Open Copy Number', action: { kind: 'navigate', view: 'mutations', tab: 'copynumber', tour: 'tab-copynumber' } },
+    takeMeThere: { label: 'Open Copy Number', action: { kind: 'navigate', path: mutationTabPath('copynumber'), tour: 'tab-copynumber' } },
     keywords: 'dgoa amplification copy number gene dosage convergent',
   },
   {
@@ -77,7 +81,7 @@ const ANSWERS: Answer[] = [
       'Tick the samples you want; the filters cross-narrow so impossible combinations are hidden.',
       'Then open Comparative View or Copy Number to analyze just those samples.',
     ],
-    takeMeThere: { label: 'Open Sample Selection', action: { kind: 'navigate', view: 'mutations', tab: 'samples', tour: 'tab-samples' } },
+    takeMeThere: { label: 'Open Sample Selection', action: { kind: 'navigate', path: mutationTabPath('samples'), tour: 'tab-samples' } },
     keywords: 'select filter lineage replicate background condition experiment',
   },
   {
@@ -90,7 +94,7 @@ const ANSWERS: Answer[] = [
       'Frequency colors use a FIXED 0% to 100% scale; copy-number rows use a row-local min/max scale.',
       'Click a mutation name for genome context; click the mutation-class pills to focus on missense, nonsense, indel, or deletion.',
     ],
-    takeMeThere: { label: 'Open Comparative View', action: { kind: 'navigate', view: 'mutations', tab: 'compare', tour: 'tab-compare' } },
+    takeMeThere: { label: 'Open Comparative View', action: { kind: 'navigate', path: mutationTabPath('compare'), tour: 'tab-compare' } },
     keywords: 'heatmap frequency mutation comparative grid color scale',
   },
   {
@@ -103,7 +107,7 @@ const ANSWERS: Answer[] = [
       'A mutation that arose during evolution (no outline) is spontaneous (e.g. secondary fba alleles, or fba arising in a tpiA background).',
       'Open a mutation detail popup to see exactly which samples provided it.',
     ],
-    takeMeThere: { label: 'Open Comparative View', action: { kind: 'navigate', view: 'mutations', tab: 'compare', tour: 'tab-compare' } },
+    takeMeThere: { label: 'Open Comparative View', action: { kind: 'navigate', path: mutationTabPath('compare'), tour: 'tab-compare' } },
     keywords: 'provided spontaneous donor dna integration secondary fba outline amber',
   },
   {
@@ -116,7 +120,7 @@ const ANSWERS: Answer[] = [
       'Metrics (max OD/K, mu, doubling, lag, AUC) are DESCRIPTIVE point-to-point estimates from the observed OD600 points, not model fits.',
       'If a sample has no numeric series, the popup says so; it never invents a curve.',
     ],
-    takeMeThere: { label: 'Open Sample Selection', action: { kind: 'navigate', view: 'mutations', tab: 'samples', tour: 'tab-samples' } },
+    takeMeThere: { label: 'Open Sample Selection', action: { kind: 'navigate', path: mutationTabPath('samples'), tour: 'tab-samples' } },
     keywords: 'growth curve od600 rate doubling mu lag auc robotic_od computed',
   },
 
@@ -141,7 +145,7 @@ const ANSWERS: Answer[] = [
       'Pick a table, then search, sort, filter, and paginate; soft-deleted rows are hidden by default.',
       'Export the filtered table as CSV to audit provenance.',
     ],
-    takeMeThere: { label: 'Open Database Tables', action: { kind: 'navigate', view: 'tables' } },
+    takeMeThere: { label: 'Open Database Tables', action: { kind: 'navigate', path: TABLES_PATH } },
     keywords: 'raw tables database browse sql audit provenance csv',
   },
 ];

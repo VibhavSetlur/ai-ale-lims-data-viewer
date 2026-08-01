@@ -319,11 +319,12 @@ function sectionMatches(s: Section, q: string): boolean {
 }
 
 export default function HelpCenter({
-  onClose, onGuide, guideUrl,
+  onClose, onGuide, guideUrl, embedded = false,
 }: {
-  onClose: () => void;
+  onClose?: () => void;
   onGuide: () => void;
-  guideUrl?: string;
+  guideUrl: string;
+  embedded?: boolean;
 }) {
   const [query, setQuery] = useState('');
   const [active, setActive] = useState<string>(SECTIONS[0].id);
@@ -331,6 +332,7 @@ export default function HelpCenter({
   const sectionRefs = useRef<Record<string, HTMLElement | null>>({});
 
   useEffect(() => {
+    if (!onClose) return;
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -346,9 +348,10 @@ export default function HelpCenter({
     }
   };
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" role="dialog" aria-modal="true">
-      <div className="bg-[var(--surface)] text-[var(--text)] border border-[var(--border)] rounded-xl shadow-2xl w-full max-w-6xl h-[88vh] flex flex-col overflow-hidden">
+  const panel = (
+    <div className={embedded
+      ? "bg-[var(--surface)] text-[var(--text)] border border-[var(--border)] rounded-xl h-full flex flex-col overflow-hidden"
+      : "bg-[var(--surface)] text-[var(--text)] border border-[var(--border)] rounded-xl shadow-2xl w-full max-w-6xl h-[88vh] flex flex-col overflow-hidden"}>
         {/* Header */}
         <div className="px-5 py-3 border-b border-[var(--border)] flex items-center gap-3 shrink-0">
           <BookOpen className="w-5 h-5 text-[var(--accent-600)]" />
@@ -359,7 +362,9 @@ export default function HelpCenter({
           <button onClick={onGuide} className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[12px] font-medium border border-[var(--border)] hover:bg-[var(--surface-3)]">
             <Compass className="w-4 h-4 text-[var(--accent-600)]" /> Open Guide
           </button>
-          <button onClick={onClose} className="p-1 rounded hover:bg-[var(--surface-3)]" title="Close (Esc)"><X className="w-5 h-5" /></button>
+          {!embedded && onClose && (
+            <button onClick={onClose} className="p-1 rounded hover:bg-[var(--surface-3)]" title="Close (Esc)"><X className="w-5 h-5" /></button>
+          )}
         </div>
 
         <div className="flex-1 min-h-0 flex overflow-hidden">
@@ -430,6 +435,13 @@ export default function HelpCenter({
           </div>
         </div>
       </div>
+  );
+
+  if (embedded) return panel;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" role="dialog" aria-modal="true">
+      {panel}
     </div>
   );
 }

@@ -2,25 +2,42 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import dynamic from 'next/dynamic';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { fetchData, IS_STATIC, BASE_PATH } from '../lib/dataSource';
 import { DEPLOYMENT_CHANNELS, type BuildInfo } from '../lib/buildInfo';
 import { releaseNotes } from '../lib/releaseNotes';
 import {
+  type RouteView,
+  type MutationRouteTab,
+  mutationTabPath,
+  tablePath,
+  TABLES_PATH,
+  PLATES_PATH,
+  WORKSPACES_PATH,
+  ISSUES_PATH,
+} from '../lib/routes';
+import {
   Database, Search, Sun, Moon, Table2, Dna,
-  Server, HardDrive, RefreshCw, AlertCircle,
+  Server, HardDrive, AlertCircle,
   ChevronLeft, ChevronRight, X, Clock, GitBranch,
-  BookOpen, Compass, ScrollText, Bug, ExternalLink, Grid3X3,
+  BookOpen, Compass, ScrollText, Bug, ExternalLink, Grid3X3, BriefcaseBusiness,
+  PanelRightOpen, PanelRightClose, Settings, Bot,
 } from 'lucide-react';
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
 import HelpCenter from './HelpCenter';
 import GuideAssistant, { type GuideAction } from './GuideAssistant';
+import UserWorkspace from './UserWorkspace';
+import RoutePlaceholder from './RoutePlaceholder';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
 const ISSUES_NEW_URL = 'https://github.com/VibhavSetlur/ai-ale-lims-data-viewer/issues/new/choose';
+const ISSUES_LIST_URL = 'https://github.com/VibhavSetlur/ai-ale-lims-data-viewer/issues';
+const SAFE_ISSUE_ID = /^\d{1,10}$/;
 
 interface TableInfo {
   name: string;
@@ -41,15 +58,17 @@ const isLegacyTable = (name: string) => LEGACY_TABLES.has(name);
 interface DashboardProps {
   initialTables: string[];
   buildInfo: BuildInfo;
+  view: RouteView;
 }
 
 type DbType = 'sqlite' | 'mysql';
 
 const ACTIVE_TABLE_KEY = 'lims:activeTable';
 const SIDEBAR_COLLAPSED_KEY = 'lims:sidebarCollapsed';
-const ACTIVE_VIEW_KEY = 'lims:activeView';
 
-type ActiveView = 'tables' | 'mutations' | 'plateDesign';
+// Coarse nav grouping used only to highlight the active sidebar item. The URL
+// (via `view`) is the source of truth; this is a derived label, not state.
+type NavKind = 'tables' | 'mutations' | 'plates' | 'workspaces' | 'issues' | 'help';
 
 const MutationExplorer = dynamic(() => import('./MutationExplorer'), { ssr: false, loading: () => <div className="p-4 text-sm text-[var(--text-soft)]">Loading Mutation Explorer…</div> });
 const PlateDesignWorkspace = dynamic(() => import('./PlateDesignWorkspace'), { ssr: false, loading: () => <div className="p-4 text-sm text-[var(--text-soft)]">Loading Plate Design…</div> });
@@ -82,7 +101,8 @@ function formatCount(n: number): string {
   return n.toLocaleString();
 }
 
-export default function Dashboard({ initialTables, buildInfo }: DashboardProps) {
+export default function Dashboard({ initialTables, buildInfo, view }: DashboardProps) {
+  const router = useRouter();
   const [activeTable, setActiveTable] = useState<string>('');
   const [searchQuery, setSearchQuery] = useState('');
   const [dark, setDark] = useState(false);
@@ -110,9 +130,21 @@ export default function Dashboard({ initialTables, buildInfo }: DashboardProps) 
   const [, setSwitching] = useState(false);
   const [switchError, setSwitchError] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState(false);
-  // In the public static build the raw table browser is unavailable, so default
-  // to the Mutation Explorer (the curated public view).
-  const [activeView, setActiveView] = useState<ActiveView>(IS_STATIC ? 'mutations' : 'tables');
+  const [assistantOpen, setAssistantOpen] = useState(false);
+  // The URL (`view`) is authoritative for navigation. `navKind` only derives
+  // which sidebar item to highlight and which legacy default applies at root.
+  // In the public static build the raw table browser is unavailable, so the
+  // root default is the Mutation Explorer (the curated public view).
+  const navKind: NavKind = useMemo(() => {
+    switch (view.kind) {
+      case 'home': return IS_STATIC ? 'mutations' : 'tables';
+      case 'table': return 'tables';
+      case 'plate': return 'plates';
+      case 'workspace': return 'workspaces';
+      case 'issue': return 'issues';
+      default: return view.kind;
+    }
+  }, [view]);
   const [mirrorInfo, setMirrorInfo] = useState<MirrorInfo | null>(null);
   const [showMirror, setShowMirror] = useState(false);
   const mirrorRef = useRef<HTMLDivElement>(null);
@@ -131,32 +163,21 @@ export default function Dashboard({ initialTables, buildInfo }: DashboardProps) 
   // workspaces and report provenance consistently.
   const [showHelp, setShowHelp] = useState(false);
   const [showGuide, setShowGuide] = useState(false);
-  // Drive cross-component navigation: switch the workspace here, then broadcast
-  // a tab change that MutationExplorer listens for. A small delay lets the view
-  // mount before the tab event arrives.
+  // The Guide now navigates using canonical routes (router.push) instead of
+  // switching local view state and dispatching a cross-component event.
   const navigate = (a: GuideAction) => {
-    if (a.view) setActiveView(a.view);
-    if (a.tab) {
-      setTimeout(() => window.dispatchEvent(new CustomEvent('aiale:navigate', { detail: { tab: a.tab } })), 80);
-    }
+    router.push(a.path);
   };
 
-  // Restore persisted UI state
+  // Restore persisted UI state. The URL is authoritative for the active view,
+  // so only sidebar-local preferences (not the workspace) are restored here.
   useEffect(() => {
     try {
       const c = localStorage.getItem(SIDEBAR_COLLAPSED_KEY);
       // eslint-disable-next-line react-hooks/set-state-in-effect -- Restores browser-local sidebar state.
       if (c === '1') setCollapsed(true);
-      const v = localStorage.getItem(ACTIVE_VIEW_KEY);
-      const oldTab = localStorage.getItem('lims:mutation:tab');
-       if (oldTab === 'plateDesign') { localStorage.setItem('lims:mutation:tab', 'samples'); setActiveView('plateDesign'); }
-       else if (v === 'mutations' || v === 'tables' || v === 'plateDesign') setActiveView(v);
     } catch {}
   }, []);
-
-  useEffect(() => {
-    try { localStorage.setItem(ACTIVE_VIEW_KEY, activeView); } catch {}
-  }, [activeView]);
 
   // Persist sidebar state
   useEffect(() => {
@@ -183,6 +204,14 @@ export default function Dashboard({ initialTables, buildInfo }: DashboardProps) 
     if (!activeTable) return;
     try { localStorage.setItem(ACTIVE_TABLE_KEY, activeTable); } catch {}
   }, [activeTable]);
+
+  // Also record the table named by a direct /tables/[tableName] visit, so the
+  // root landing page's legacy fallback reflects the most recently viewed
+  // table. This only writes; it never overrides a direct deep link.
+  useEffect(() => {
+    if (view.kind !== 'table') return;
+    try { localStorage.setItem(ACTIVE_TABLE_KEY, view.tableName); } catch {}
+  }, [view]);
 
   // Load tables + counts + db config
   const refreshTables = async () => {
@@ -498,12 +527,13 @@ export default function Dashboard({ initialTables, buildInfo }: DashboardProps) 
 
           <div className="h-5 w-px bg-[var(--border)] mx-0.5" />
 
-          <button onClick={refreshTables} className="lims-btn lims-btn-ghost p-1.5" title="Refresh tables">
-            <RefreshCw className={cn("w-4 h-4", tablesLoading && "animate-spin")} />
-          </button>
           <button onClick={toggleTheme} className="lims-btn lims-btn-ghost p-1.5"
             title={mounted ? (dark ? 'Switch to light mode' : 'Switch to dark mode') : 'Toggle theme'}>
             {mounted ? (dark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />) : <div className="w-4 h-4" />}
+          </button>
+          <button onClick={() => setAssistantOpen(open => !open)} className="lims-btn lims-btn-ghost p-1.5"
+            title={assistantOpen ? 'Hide AI-ALE Assistant' : 'Show AI-ALE Assistant'} aria-expanded={assistantOpen}>
+            {assistantOpen ? <PanelRightClose className="w-4 h-4" /> : <PanelRightOpen className="w-4 h-4" />}
           </button>
         </div>
       </header>
@@ -525,15 +555,16 @@ export default function Dashboard({ initialTables, buildInfo }: DashboardProps) 
                     <ChevronLeft className="w-3.5 h-3.5" />
                   </button>
                 </div>
-                <button onClick={() => setActiveView('tables')} data-active={activeView === 'tables'} data-tour="nav-tables" className="lims-nav mb-0.5">
+                <Link href={TABLES_PATH} data-active={navKind === 'tables'} data-tour="nav-tables" className="lims-nav mb-0.5">
                   <Database className="w-4 h-4 shrink-0" />
                   <span className="flex-1">Database Tables</span>
-                </button>
-                <button onClick={() => setActiveView('mutations')} data-active={activeView === 'mutations'} data-tour="nav-mutations" className="lims-nav"><Dna className="w-4 h-4 shrink-0" /><span className="flex-1">Mutation Explorer</span></button>
-                <button onClick={() => setActiveView('plateDesign')} data-active={activeView === 'plateDesign'} className="lims-nav"><Grid3X3 className="w-4 h-4 shrink-0" /><span className="flex-1">Plate Design</span></button>
+                </Link>
+                <Link href={mutationTabPath('samples')} data-active={navKind === 'mutations'} data-tour="nav-mutations" className="lims-nav"><Dna className="w-4 h-4 shrink-0" /><span className="flex-1">Mutation Explorer</span></Link>
+                <Link href={PLATES_PATH} data-active={navKind === 'plates'} className="lims-nav"><Grid3X3 className="w-4 h-4 shrink-0" /><span className="flex-1">Plate Design</span></Link>
+                <Link href={WORKSPACES_PATH} data-active={navKind === 'workspaces'} className="lims-nav"><BriefcaseBusiness className="w-4 h-4 shrink-0" /><span className="flex-1">User Workspace</span></Link>
               </div>
 
-              {activeView === 'tables' ? (
+              {navKind === 'tables' ? (
                 <>
                   <div className="p-2.5 border-b border-[var(--border)]">
                     <div className="flex items-center gap-2 mb-2 px-1">
@@ -552,10 +583,10 @@ export default function Dashboard({ initialTables, buildInfo }: DashboardProps) 
                   </div>
                   <div className="flex-1 overflow-y-auto p-1">
                     {filteredTables.map((table) => {
-                      const isActive = activeTable === table.name;
+                      const isActive = (view.kind === 'table' && view.tableName === table.name) || (view.kind === 'home' && activeTable === table.name);
                       const legacy = isLegacyTable(table.name);
                       return (
-                        <button key={table.name} onClick={() => setActiveTable(table.name)}
+                        <Link key={table.name} href={tablePath(table.name)}
                           data-active={isActive} className="lims-nav !py-1.5"
                           title={legacy
                             ? `${table.name} — ${table.rowCount.toLocaleString()} rows (legacy / superseded table)`
@@ -568,7 +599,7 @@ export default function Dashboard({ initialTables, buildInfo }: DashboardProps) 
                           <span className="text-[10px] font-medium tabular-nums shrink-0 text-[var(--text-faint)]">
                             {table.rowCount > 0 ? formatCount(table.rowCount) : ''}
                           </span>
-                        </button>
+                        </Link>
                       );
                     })}
                     {filteredTables.length === 0 && (
@@ -626,17 +657,18 @@ export default function Dashboard({ initialTables, buildInfo }: DashboardProps) 
               <button onClick={() => setCollapsed(false)} className="lims-btn lims-btn-ghost p-1.5" title="Expand sidebar">
                 <ChevronRight className="w-4 h-4" />
               </button>
-              <button onClick={() => setActiveView('tables')}
-                className={cn("p-1.5 rounded-md", activeView === 'tables' ? "text-[var(--accent-700)] bg-[var(--accent-50)]" : "text-[var(--text-faint)] hover:bg-[var(--surface-3)]")}
+              <Link href={TABLES_PATH}
+                className={cn("p-1.5 rounded-md", navKind === 'tables' ? "text-[var(--accent-700)] bg-[var(--accent-50)]" : "text-[var(--text-faint)] hover:bg-[var(--surface-3)]")}
                 title="Database Tables">
                 <Database className="w-4 h-4" />
-              </button>
-              <button onClick={() => setActiveView('mutations')}
-                className={cn("p-1.5 rounded-md", activeView === 'mutations' ? "text-[var(--accent-700)] bg-[var(--accent-50)]" : "text-[var(--text-faint)] hover:bg-[var(--surface-3)]")}
+              </Link>
+              <Link href={mutationTabPath('samples')}
+                className={cn("p-1.5 rounded-md", navKind === 'mutations' ? "text-[var(--accent-700)] bg-[var(--accent-50)]" : "text-[var(--text-faint)] hover:bg-[var(--surface-3)]")}
                 title="Mutation Explorer">
                 <Dna className="w-4 h-4" />
-              </button>
-              <button onClick={() => setActiveView('plateDesign')} className={cn("p-1.5 rounded-md", activeView === 'plateDesign' ? "text-[var(--accent-700)] bg-[var(--accent-50)]" : "text-[var(--text-faint)] hover:bg-[var(--surface-3)]")} title="Plate Design"><Grid3X3 className="w-4 h-4" /></button>
+              </Link>
+              <Link href={PLATES_PATH} className={cn("p-1.5 rounded-md", navKind === 'plates' ? "text-[var(--accent-700)] bg-[var(--accent-50)]" : "text-[var(--text-faint)] hover:bg-[var(--surface-3)]")} title="Plate Design"><Grid3X3 className="w-4 h-4" /></Link>
+              <Link href={WORKSPACES_PATH} className={cn("p-1.5 rounded-md", navKind === 'workspaces' ? "text-[var(--accent-700)] bg-[var(--accent-50)]" : "text-[var(--text-faint)] hover:bg-[var(--surface-3)]")} title="User Workspace"><BriefcaseBusiness className="w-4 h-4" /></Link>
               <div className="mt-auto flex flex-col items-center gap-1 pb-2">
                 <button onClick={() => setShowGuide(true)} className="p-1.5 rounded-md text-[var(--text-faint)] hover:bg-[var(--surface-3)]" title="Guide"><Compass className="w-4 h-4" /></button>
                 <button onClick={() => setShowChangesPanel(true)} className="p-1.5 rounded-md text-[var(--text-faint)] hover:bg-[var(--surface-3)]" title="Changelog"><ScrollText className="w-4 h-4" /></button>
@@ -649,20 +681,86 @@ export default function Dashboard({ initialTables, buildInfo }: DashboardProps) 
 
         <div className="flex-1 min-w-0 p-3 flex flex-col overflow-hidden bg-[var(--surface-2)] relative">
           <div className="flex-1 min-h-0">
-            {activeView === 'mutations' ? <MutationExplorer /> : activeView === 'plateDesign' ? <PlateDesignWorkspace /> : activeTable ? (
-              <DataTable key={activeTable} tableName={activeTable} />
-            ) : (
+            {view.kind === 'table' ? (
+              <DataTable key={view.tableName} tableName={view.tableName} />
+            ) : view.kind === 'tables' ? (
               <div className="flex flex-col items-center justify-center h-full bg-[var(--surface)] rounded-lg border border-[var(--border)] text-[var(--text-soft)] text-sm gap-2" style={{ boxShadow: 'var(--shadow-sm)' }}>
                 <Database className="w-10 h-10 text-[var(--ink-300)]" />
-                <p>
-                  {tables.length === 0
-                    ? 'No tables found. Check the database connection.'
-                    : 'Select a table from the sidebar to view data.'}
-                </p>
+                <p>{tables.length === 0 ? 'No tables found. Check the database connection.' : 'Select a table from the sidebar to view data.'}</p>
               </div>
+            ) : view.kind === 'mutations' ? (
+              <MutationExplorer
+                activeTab={view.tab}
+                onTabChange={(tab) => router.push(mutationTabPath(tab))}
+              />
+            ) : view.kind === 'plates' ? (
+              <PlateDesignWorkspace />
+            ) : view.kind === 'plate' ? (
+              <PlateDesignWorkspace designId={view.designId} />
+            ) : view.kind === 'workspaces' ? (
+              <UserWorkspace />
+            ) : view.kind === 'workspace' ? (
+              <RoutePlaceholder
+                icon={BriefcaseBusiness}
+                title={`Workspace: ${view.workspaceId}`}
+                message="Shared, per-ID workspaces are not implemented yet. This ID is only a URL label; no server record backs it."
+                backHref={WORKSPACES_PATH}
+                backLabel="Back to User Workspace"
+              />
+            ) : view.kind === 'issues' ? (
+              <RoutePlaceholder
+                icon={Bug}
+                title="Issues"
+                message="Issue tracking lives on GitHub, not in this viewer. Browse or file issues there."
+                backHref={TABLES_PATH}
+                backLabel="Back to Database Tables"
+                externalHref={ISSUES_LIST_URL}
+                externalLabel="Open GitHub Issues"
+              />
+            ) : view.kind === 'issue' ? (
+              <RoutePlaceholder
+                icon={Bug}
+                title={`Issue #${view.issueId}`}
+                message="This viewer does not fetch or store individual issue records. Open the issue on GitHub for current status."
+                backHref={ISSUES_PATH}
+                backLabel="Back to Issues"
+                externalHref={SAFE_ISSUE_ID.test(view.issueId) ? `${ISSUES_LIST_URL}/${view.issueId}` : undefined}
+                externalLabel="Open on GitHub"
+              />
+            ) : view.kind === 'help' ? (
+              <HelpCenter embedded onGuide={() => setShowGuide(true)} guideUrl={`${BASE_PATH}/help/researcher-guide.md`} />
+            ) : (
+              // Root landing: non-breaking legacy default (unchanged behavior).
+              IS_STATIC ? <MutationExplorer /> : activeTable ? (
+                <DataTable key={activeTable} tableName={activeTable} />
+              ) : (
+                <div className="flex flex-col items-center justify-center h-full bg-[var(--surface)] rounded-lg border border-[var(--border)] text-[var(--text-soft)] text-sm gap-2" style={{ boxShadow: 'var(--shadow-sm)' }}>
+                  <Database className="w-10 h-10 text-[var(--ink-300)]" />
+                  <p>
+                    {tables.length === 0
+                      ? 'No tables found. Check the database connection.'
+                      : 'Select a table from the sidebar to view data.'}
+                  </p>
+                </div>
+              )
             )}
           </div>
         </div>
+
+        {assistantOpen && (
+          <aside className="w-80 bg-[var(--surface)] border-l border-[var(--border)] flex flex-col shrink-0 z-10">
+            <div className="p-3 border-b border-[var(--border)] flex items-center gap-2">
+              <Bot className="w-4 h-4 text-[var(--accent-600)]" />
+              <h2 className="flex-1 text-sm font-semibold text-[var(--text)]">AI-ALE Assistant</h2>
+              <button className="lims-btn lims-btn-ghost p-1" title="Assistant settings" aria-label="Assistant settings">
+                <Settings className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="flex-1 p-4 flex items-center justify-center text-sm text-[var(--text-soft)]">
+              <p>Under construction.</p>
+            </div>
+          </aside>
+        )}
       </div>
 
       {showChangesPanel && (
@@ -753,7 +851,7 @@ export default function Dashboard({ initialTables, buildInfo }: DashboardProps) 
       )}
       {showGuide && (
         <GuideAssistant
-          ctx={{ view: activeView === 'mutations' ? 'Mutation Explorer' : activeView === 'plateDesign' ? 'Plate Design' : 'Database Tables' }}
+          ctx={{ view: navKind === 'mutations' ? 'Mutation Explorer' : navKind === 'plates' ? 'Plate Design' : navKind === 'workspaces' ? 'User Workspace' : 'Database Tables' }}
           onClose={() => setShowGuide(false)}
           onAction={navigate}
         />
