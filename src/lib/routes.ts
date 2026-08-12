@@ -17,7 +17,8 @@ export type RouteView =
   | { kind: 'workspace'; workspaceId: string }
   | { kind: 'issues' }
   | { kind: 'issue'; issueId: string }
-  | { kind: 'help' };
+  | { kind: 'help' }
+  | { kind: 'login' };
 
 const MUTATION_TAB_TO_PATH: Record<MutationRouteTab, string> = {
   samples: '/mutations/compare/samples',
@@ -48,6 +49,7 @@ export const PLATES_PATH = '/plates';
 export const WORKSPACES_PATH = '/workspaces';
 export const ISSUES_PATH = '/issues';
 export const HELP_PATH = '/help';
+export const LOGIN_PATH = '/login';
 
 export function tablePath(name: string): string {
   return `${TABLES_PATH}/${encodeURIComponent(name)}`;

@@ -30,6 +30,10 @@ import HelpCenter from './HelpCenter';
 import GuideAssistant, { type GuideAction } from './GuideAssistant';
 import UserWorkspace from './UserWorkspace';
 import RoutePlaceholder from './RoutePlaceholder';
+import LoginScreen from './ops/LoginScreen';
+import WorkspaceDetail from './ops/WorkspaceDetail';
+import AuthControl from './ops/AuthControl';
+import AssistantPanel from './ops/AssistantPanel';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -142,6 +146,7 @@ export default function Dashboard({ initialTables, buildInfo, view }: DashboardP
       case 'plate': return 'plates';
       case 'workspace': return 'workspaces';
       case 'issue': return 'issues';
+      case 'login': return 'workspaces';
       default: return view.kind;
     }
   }, [view]);
@@ -535,6 +540,7 @@ export default function Dashboard({ initialTables, buildInfo, view }: DashboardP
             title={assistantOpen ? 'Hide AI-ALE Assistant' : 'Show AI-ALE Assistant'} aria-expanded={assistantOpen}>
             {assistantOpen ? <PanelRightClose className="w-4 h-4" /> : <PanelRightOpen className="w-4 h-4" />}
           </button>
+          <AuthControl />
         </div>
       </header>
 
@@ -697,16 +703,12 @@ export default function Dashboard({ initialTables, buildInfo, view }: DashboardP
               <PlateDesignWorkspace />
             ) : view.kind === 'plate' ? (
               <PlateDesignWorkspace designId={view.designId} />
+            ) : view.kind === 'login' ? (
+              <LoginScreen />
             ) : view.kind === 'workspaces' ? (
               <UserWorkspace />
             ) : view.kind === 'workspace' ? (
-              <RoutePlaceholder
-                icon={BriefcaseBusiness}
-                title={`Workspace: ${view.workspaceId}`}
-                message="Shared, per-ID workspaces are not implemented yet. This ID is only a URL label; no server record backs it."
-                backHref={WORKSPACES_PATH}
-                backLabel="Back to User Workspace"
-              />
+              <WorkspaceDetail workspaceId={view.workspaceId} />
             ) : view.kind === 'issues' ? (
               <RoutePlaceholder
                 icon={Bug}
@@ -756,9 +758,7 @@ export default function Dashboard({ initialTables, buildInfo, view }: DashboardP
                 <Settings className="w-4 h-4" />
               </button>
             </div>
-            <div className="flex-1 p-4 flex items-center justify-center text-sm text-[var(--text-soft)]">
-              <p>Under construction.</p>
-            </div>
+            <AssistantPanel />
           </aside>
         )}
       </div>

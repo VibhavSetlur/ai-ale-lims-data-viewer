@@ -86,6 +86,11 @@ public/data/manifest.json
 /ops/auto-refresh-live.lock
 /ops/live-db-source.mtime
 
+# ops "live" slice (port 3458): isolated build dir + log, never committed
+/.next-live/
+ops/live.log
+ops/live.log.*
+
 # local agent rules and private writing handoffs (not for publication)
 CLAUDE.md
 AGENTS.md
@@ -94,3 +99,7 @@ GEMINI.md
 
 # operator prompt shortcuts (session starters, not for publication)
 docs/prompts/
+
+# python bytecode from the local argo proxy helper
+__pycache__/
+*.pyc

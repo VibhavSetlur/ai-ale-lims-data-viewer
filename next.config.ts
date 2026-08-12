@@ -21,7 +21,10 @@ const nextConfig: NextConfig = isStatic
       trailingSlash: true,
     }
   : {
-      /* server mode: defaults */
+      // distDir isolates a second server-mode build (e.g. the live ops slice on
+      // port 3458, NEXT_DIST_DIR=.next-live) from the default `.next` used by
+      // the primary 3457 instance. Unset -> `.next`, byte-identical to before.
+      distDir: process.env.NEXT_DIST_DIR || ".next",
     };
 
 export default nextConfig;

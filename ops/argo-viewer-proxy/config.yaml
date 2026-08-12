@@ -1,0 +1,39 @@
+# Config for the viewer's own Argo pass-through proxy on 127.0.0.1:3459.
+# This is a separate, independent service from the reference proxy on
+# 127.0.0.1:4000 (/scratch/vsetlur/argo-proxy). It holds no credential.
+# Safe to commit: no key, no default user, no secret of any kind below.
+
+upstream:
+  prod: https://apps.inside.anl.gov/argoapi
+  staging: https://apps-stage.inside.anl.gov/argoapi
+
+defaults:
+  timeout: 300
+  max_concurrency: 16
+
+# Client-facing model alias -> upstream Argo model id. Only ids listed here
+# are ever forwarded. A caller sending anything else gets a 400.
+models:
+  opus: claudeopus48
+  opus48: claudeopus48
+  claudeopus48: claudeopus48
+  claudesonnet46: claudesonnet46
+  claudesonnet45: claudesonnet45
+  claudehaiku45: claudehaiku45
+  gpt55: gpt55
+  gpt54: gpt54
+  gpt54mini: gpt54mini
+  gpt54nano: gpt54nano
+  gpt52: gpt52
+  gpt51: gpt51
+  gpt5: gpt5
+  gpt5mini: gpt5mini
+  gpt5nano: gpt5nano
+  gpt41: gpt41
+  gpt41mini: gpt41mini
+  gpt41nano: gpt41nano
+  gpt4o: gpt4o
+  gpto4mini: gpto4mini
+  gpto3: gpto3
+  gpto3mini: gpto3mini
+  gpto1: gpto1
