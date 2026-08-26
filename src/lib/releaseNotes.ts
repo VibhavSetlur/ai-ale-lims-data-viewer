@@ -5,6 +5,7 @@ export interface ReleaseNote {
 }
 
 export const releaseNotes: readonly ReleaseNote[] = [
+  { version: '1.12.1', date: '2026-08-26', summary: 'The Plate Design workspace now suggests registered experiments, strains, media, and donor DNA even before sequencing data exists for them.' },
   { version: '1.12.0', date: '2026-07-28', summary: 'Plate Design is now a top-level browser-local workspace with independent read-only snapshot suggestions, a responsive accessible multi-plate workflow up to 24 fixed 96-well plates, and JSON or CSV hand-off. It does not write to LIMS.' },
   {
     version: '1.11.0',
