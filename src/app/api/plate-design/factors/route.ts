@@ -71,11 +71,25 @@ export async function GET() {
     const experimentRows = await hasTable('Experiments')
       ? await runQuery<Pick<FactorRow, 'experiment'>>('SELECT "Name" AS experiment FROM Experiments WHERE deleted = 0')
       : [];
+    const strainRows = await hasTable('Strains')
+      ? await runQuery<Pick<FactorRow, 'strain'>>('SELECT "Name" AS strain FROM Strains WHERE deleted = 0')
+      : [];
+    const mediaRows = await hasTable('Conditions')
+      ? await runQuery<Pick<FactorRow, 'media'>>('SELECT "Name" AS media FROM Conditions WHERE deleted = 0')
+      : [];
+    const transformingDnaRows = await hasTable('DNA_constructs')
+      ? await runQuery<Pick<FactorRow, 'transformingDNA'>>('SELECT "Name" AS transformingDNA FROM DNA_constructs WHERE deleted = 0')
+      : [];
     const rows = [...sequencingRows, ...registrationRows];
     const experiment = values([...rows.map(row => row.experiment), ...experimentRows.map(row => row.experiment)]);
     const response: PlateDesignSuggestionsResponse = {
       experiments: experiment,
-      factors: { experiment, media: values(rows.map(row => row.media)), strain: values(rows.map(row => row.strain)), transformingDNA: values(rows.map(row => donorDna(row.sampleName, row.transformingDNA))) },
+      factors: {
+        experiment,
+        media: values([...rows.map(row => row.media), ...mediaRows.map(row => row.media)]),
+        strain: values([...rows.map(row => row.strain), ...strainRows.map(row => row.strain)]),
+        transformingDNA: values([...rows.map(row => donorDna(row.sampleName, row.transformingDNA)), ...transformingDnaRows.map(row => row.transformingDNA)]),
+      },
     };
     return NextResponse.json(response);
   } catch (error) {
