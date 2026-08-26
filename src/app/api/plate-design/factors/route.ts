@@ -71,6 +71,9 @@ export async function GET() {
     const experimentRows = await hasTable('Experiments')
       ? await runQuery<Pick<FactorRow, 'experiment'>>('SELECT "Name" AS experiment FROM Experiments WHERE deleted = 0')
       : [];
+    const seqSampleExperimentRows = await hasTable('Seq_samples')
+      ? await runQuery<Pick<FactorRow, 'experiment'>>('SELECT DISTINCT "Experiment" AS experiment FROM Seq_samples WHERE deleted = 0')
+      : [];
     const strainRows = await hasTable('Strains')
       ? await runQuery<Pick<FactorRow, 'strain'>>('SELECT "Name" AS strain FROM Strains WHERE deleted = 0')
       : [];
@@ -81,7 +84,7 @@ export async function GET() {
       ? await runQuery<Pick<FactorRow, 'transformingDNA'>>('SELECT "Name" AS transformingDNA FROM DNA_constructs WHERE deleted = 0')
       : [];
     const rows = [...sequencingRows, ...registrationRows];
-    const experiment = values([...rows.map(row => row.experiment), ...experimentRows.map(row => row.experiment)]);
+    const experiment = values([...rows.map(row => row.experiment), ...experimentRows.map(row => row.experiment), ...seqSampleExperimentRows.map(row => row.experiment)]);
     const response: PlateDesignSuggestionsResponse = {
       experiments: experiment,
       factors: {
