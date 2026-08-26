@@ -28,7 +28,7 @@ type Manifest = { generatedAt: string; source: string; files: Record<string, Man
 let manifestPromise: Promise<Manifest> | null = null;
 function loadManifest(): Promise<Manifest> {
   if (!manifestPromise) {
-    manifestPromise = fetch(`${DATA_DIR}/manifest.json`).then(r => {
+    manifestPromise = fetch(`${DATA_DIR}/manifest.json`, { cache: 'no-cache' }).then(r => {
       if (!r.ok) throw new Error(`manifest.json -> HTTP ${r.status}`);
       return r.json();
     });
@@ -93,5 +93,6 @@ export async function fetchData(apiUrl: string, init?: RequestInit): Promise<Res
   }
   // Prefer plain .json (universally served). The .gz exists for hosts that map
   // Content-Encoding; we fetch the plain file to avoid double-decompression bugs.
-  return fetch(`${DATA_DIR}/${entry.file}`);
+  const version = entry.hash ? `?v=${entry.hash}` : '';
+  return fetch(`${DATA_DIR}/${entry.file}${version}`);
 }
