@@ -29,26 +29,7 @@ import path from 'node:path';
 const BASE = process.env.BASE || 'http://localhost:3457';
 const OUT = path.resolve(process.cwd(), 'public', 'data');
 
-const EXPERIMENTS = ['TFMN1', 'TFMN2', 'TFMN3', 'TFMN4', 'strain_stocks'];
-const curatedTargets = [
-  { key: 'mutations__all', url: '/api/mutations' },
-  ...EXPERIMENTS.map(e => ({
-    key: `mutations__experiment_${e}`,
-    url: `/api/mutations?experiment=${encodeURIComponent(e)}`,
-  })),
-  { key: 'growth-series__all', url: '/api/growth-series' },
-  ...EXPERIMENTS.map(e => ({
-    key: `growth-series__experiment_${e}`,
-    url: `/api/growth-series?experiment=${encodeURIComponent(e)}`,
-  })),
-  { key: 'mutations-stats', url: '/api/mutations-stats' },
-  { key: 'barcode-counts', url: '/api/barcode-counts' },
-  { key: 'library-variants', url: '/api/library-variants' },
-  { key: 'plate-design-factors', url: '/api/plate-design/factors' },
-  { key: 'tables', url: '/api/tables?withCounts=1' },
-  { key: 'mirror-info', url: '/api/mirror-info' },
-  { key: 'config', url: '/api/config' },
-];
+const FLOOR_EXPERIMENTS = ['TFMN1', 'TFMN2', 'TFMN3', 'TFMN4', 'strain_stocks'];
 
 async function fetchJson(url) {
   const res = await fetch(BASE + url, { headers: { accept: 'application/json' } });
@@ -56,8 +37,37 @@ async function fetchJson(url) {
   return res.json();
 }
 
+async function getCuratedTargets() {
+  const mutations = await fetchJson('/api/mutations');
+  const derivedExperiments = Array.isArray(mutations.experiments) && mutations.experiments.length
+    ? mutations.experiments
+    : FLOOR_EXPERIMENTS;
+  const experiments = [...new Set([...FLOOR_EXPERIMENTS, ...derivedExperiments])].sort();
+  console.log(`experiments: ${experiments.join(', ')}`);
+  return [
+    { key: 'mutations__all', url: '/api/mutations' },
+    ...experiments.map(e => ({
+      key: `mutations__experiment_${e}`,
+      url: `/api/mutations?experiment=${encodeURIComponent(e)}`,
+    })),
+    { key: 'growth-series__all', url: '/api/growth-series' },
+    ...experiments.map(e => ({
+      key: `growth-series__experiment_${e}`,
+      url: `/api/growth-series?experiment=${encodeURIComponent(e)}`,
+    })),
+    { key: 'mutations-stats', url: '/api/mutations-stats' },
+    { key: 'barcode-counts', url: '/api/barcode-counts' },
+    { key: 'library-variants', url: '/api/library-variants' },
+    { key: 'plate-design-factors', url: '/api/plate-design/factors' },
+    { key: 'tables', url: '/api/tables?withCounts=1' },
+    { key: 'mirror-info', url: '/api/mirror-info' },
+    { key: 'config', url: '/api/config' },
+  ];
+}
+
 async function main() {
   await mkdir(OUT, { recursive: true });
+  const curatedTargets = await getCuratedTargets();
   const manifest = { generatedAt: new Date().toISOString(), source: BASE, files: {} };
   let totalRaw = 0, totalGz = 0;
 
