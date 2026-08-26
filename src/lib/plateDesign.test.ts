@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { addCondition, addPlate, allWellIds, assignWell, createEmptyDesign, MAX_PLATES, parsePipelineCsv, serializePipelineCsv, validateDesign } from './plateDesign';
+import { addCondition, addPlate, allWellIds, assignWell, createEmptyDesign, filterFactorOptions, MAX_PLATES, parsePipelineCsv, serializePipelineCsv, validateDesign } from './plateDesign';
 
 describe('plate design boundaries', () => {
   it('allows 24 local safety-cap plates and refuses a 25th', () => { let design = createEmptyDesign(); for (let i=0;i<MAX_PLATES;i++) design=addPlate(design,`P${i}`); expect(design.plates).toHaveLength(MAX_PLATES); expect(addPlate(design,'too many')).toBe(design); });
+  it('assigns distinct color indexes beyond ten conditions', () => { let design=createEmptyDesign(); for (let i=0;i<13;i++) design=addCondition(design,{experiment:`E${i}`,strain:`S${i}`,media:`M${i}`,transformingDNA:`D${i}`}); const colors=design.conditions.map(condition=>condition.colorIndex); expect(new Set(colors).size).toBe(13); expect(colors).toEqual(Array.from({length:13},(_,i)=>i)); expect(colors[10]).not.toBe(0); });
+  it('filters factor options case-insensitively while preserving order', () => { const options=['Alpha','beta','Alphabet','gamma']; expect(filterFactorOptions(options,'')).toEqual(options); expect(filterFactorOptions(options,'ALP')).toEqual(['Alpha','Alphabet']); expect(filterFactorOptions(options,'delta')).toEqual([]); });
   it('keeps deterministic global assignment ordering and CSV round trips', () => { let design=createEmptyDesign(); design={...design,runName:'run'}; design=addCondition(design,{experiment:'E',strain:'S',media:'M',transformingDNA:'D'}); design=addPlate(design,'P1'); for (const well of allWellIds()) design=assignWell(design,design.plates[0].id,well,design.conditions[0].id); const csv=serializePipelineCsv(design); expect(parsePipelineCsv(csv).plates[0].wells).toHaveProperty('A1'); expect(validateDesign(design).filter(issue=>issue.severity==='error')).toEqual([]); });
 });
