@@ -323,10 +323,23 @@ function mutationKey(r: MutationRawRow): string {
 
 // Build SAMPLES SQL on demand so the registry/experiment filters can be pushed
 // inside the CTE — a sample only appears if it had calls under the selected
-// registry/experiment. Params are appended in (experiment?, registry?) order.
+// registry/experiment. Params are appended in (direct experiment?, associated
+// experiment?, registry?, barcode experiment?) order.
 function buildSamplesSql(opts: { experiment: boolean; registry: boolean; barcodeSamples: boolean }): string {
   const inner: string[] = ['deleted = 0'];
-  if (opts.experiment) inner.push('"Experiment" = ?');
+  if (opts.experiment) inner.push(`(
+    ("Experiment" IS NOT NULL AND "Experiment" != '' AND "Experiment" = ?)
+    OR (
+      ("Experiment" IS NULL OR "Experiment" = '')
+      AND EXISTS (
+        SELECT 1
+        FROM Seq_samples ss_scope
+        WHERE ss_scope."Sequencing_sample" = Mutations."Seq_sample"
+          AND ss_scope.deleted = 0
+          AND ss_scope."Experiment" = ?
+      )
+    )
+  )`);
   if (opts.registry)   inner.push('"Breseq_registry_ID" = ?');
   const barcodeWhere: string[] = ['v.deleted = 0', 'COALESCE(v."Count", 0) > 0'];
   if (opts.experiment) barcodeWhere.push('ss_filter."Experiment" = ?');
@@ -469,8 +482,22 @@ const MUTATIONS_SQL = `
     "genes_inactivated" AS genes_inactivated,
     "genes_overlapping" AS genes_overlapping,
     "genes_promoter"    AS genes_promoter
-  FROM Mutations
+  FROM Mutations m
   WHERE deleted = 0
+`;
+
+const EXPERIMENT_SCOPE_SQL = `
+  (m."Experiment" IS NOT NULL AND m."Experiment" != '' AND m."Experiment" = ?)
+  OR (
+    (m."Experiment" IS NULL OR m."Experiment" = '')
+    AND EXISTS (
+      SELECT 1
+      FROM Seq_samples ss_scope
+      WHERE ss_scope."Sequencing_sample" = m."Seq_sample"
+        AND ss_scope.deleted = 0
+        AND ss_scope."Experiment" = ?
+    )
+  )
 `;
 
 function buildAllExperimentsSql(hasBarcodeTable: boolean): string {
@@ -480,6 +507,15 @@ function buildAllExperimentsSql(hasBarcodeTable: boolean): string {
       SELECT Experiment AS name
       FROM Mutations
       WHERE deleted = 0 AND Experiment IS NOT NULL AND Experiment != ''
+      UNION
+      SELECT ss."Experiment" AS name
+      FROM Mutations m
+      JOIN Seq_samples ss
+        ON ss."Sequencing_sample" = m."Seq_sample" AND ss.deleted = 0
+      WHERE m.deleted = 0
+        AND (m."Experiment" IS NULL OR m."Experiment" = '')
+        AND ss."Experiment" IS NOT NULL
+        AND ss."Experiment" != ''
       ${hasBarcodeTable ? `
       UNION
       SELECT ss."Experiment" AS name
@@ -609,9 +645,9 @@ export async function GET(req: NextRequest) {
     // registries per Seq_sample (different breseq parameter runs); silently
     // merging them — what the original API did — hides genuine call differences.
     const regCountsSql = experimentFilter
-      ? `${REGISTRY_COUNTS_SQL} AND m."Experiment" = ? GROUP BY m."Breseq_registry_ID", r."polymorphism_frequency_cutoff", r."limit_fold_coverage", r."reference" ORDER BY count DESC`
+      ? `${REGISTRY_COUNTS_SQL} AND (${EXPERIMENT_SCOPE_SQL}) GROUP BY m."Breseq_registry_ID", r."polymorphism_frequency_cutoff", r."limit_fold_coverage", r."reference" ORDER BY count DESC`
       : `${REGISTRY_COUNTS_SQL} GROUP BY m."Breseq_registry_ID", r."polymorphism_frequency_cutoff", r."limit_fold_coverage", r."reference" ORDER BY count DESC`;
-    const regParams: (string | number | null)[] = experimentFilter ? [experimentFilter] : [];
+    const regParams: (string | number | null)[] = experimentFilter ? [experimentFilter, experimentFilter] : [];
     const registries = await runQuery<RegistrySummary>(regCountsSql, regParams);
 
     // Flag registries that mutations reference but Breseq_registry has no row for:
@@ -672,7 +708,7 @@ export async function GET(req: NextRequest) {
     // still scopes normally (the per-experiment best registry is correct there).
     const usePerSampleRegistry = !experimentFilter && !registryParam;
     const mutParams: (string | number | null)[] = [];
-    if (experimentFilter) mutParams.push(experimentFilter);
+    if (experimentFilter) mutParams.push(experimentFilter, experimentFilter);
     if (selectedRegistry && !usePerSampleRegistry) mutParams.push(selectedRegistry);
 
     // The SAMPLE LIST must NOT be silently scoped to a single breseq registry.
@@ -685,7 +721,7 @@ export async function GET(req: NextRequest) {
     // selectable. The experiment filter still applies to both.
     const scopeSamplesByRegistry = !!registryParam && !!selectedRegistry;
     const sampleParams: (string | number | null)[] = [];
-    if (experimentFilter) sampleParams.push(experimentFilter);
+    if (experimentFilter) sampleParams.push(experimentFilter, experimentFilter);
     if (scopeSamplesByRegistry) sampleParams.push(selectedRegistry);
     if (hasBarcodeTable && experimentFilter) sampleParams.push(experimentFilter);
 
@@ -695,7 +731,7 @@ export async function GET(req: NextRequest) {
       barcodeSamples: hasBarcodeTable,
     });
     const mutSql = MUTATIONS_SQL
-      + (experimentFilter ? ' AND "Experiment" = ?' : '')
+      + (experimentFilter ? ` AND (${EXPERIMENT_SCOPE_SQL})` : '')
       + ((selectedRegistry && !usePerSampleRegistry) ? ' AND "Breseq_registry_ID" = ?' : '');
 
     const [sampleRows, mutRows, allExperiments, odRows, curveRows, cnRows] = await Promise.all([
