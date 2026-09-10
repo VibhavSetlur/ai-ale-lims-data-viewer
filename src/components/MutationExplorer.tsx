@@ -788,6 +788,7 @@ export default function MutationExplorer() {
         <div className={cn('flex-1 min-h-0 flex flex-col', tab === 'copynumber' ? '' : 'hidden')}>
           <CopyNumberPanel
             samples={data?.samples ?? []}
+            selected={selected}
             mutations={data?.mutations ?? []}
             loading={loading}
             cnRegionCount={data?.stats?.cnRegionCount ?? 0}
@@ -4553,10 +4554,11 @@ const CN_LINE_COLORS = [
 ];
 
 function CopyNumberPanel({
-  samples, mutations, loading, cnRegionCount, onCompareCN, onPickSamples,
+  samples, selected, mutations, loading, cnRegionCount, onCompareCN, onPickSamples,
   currentExperiment, availableExperiments, onLoadExperiment,
 }: {
   samples: MutationSample[];
+  selected: Set<string>;
   mutations: MutationRow[];
   loading: boolean;
   cnRegionCount: number;
@@ -4587,7 +4589,7 @@ function CopyNumberPanel({
     if (!activeRow) return [];
     const byLineage = new Map<string, { transfer: number; value: number; name: string }[]>();
     for (const [sid, value] of Object.entries(activeRow.values)) {
-      if (typeof value !== 'number' || Number.isNaN(value)) continue;
+      if (!selected.has(sid) || typeof value !== 'number' || Number.isNaN(value)) continue;
       const s = sampleById.get(sid);
       const lineage = lineageOf(s?.name ?? sid);
       const transfer = typeof s?.transfer === 'number' ? s.transfer : NaN;
@@ -4606,7 +4608,7 @@ function CopyNumberPanel({
       }))
       .sort((a, b) => a.lineage.localeCompare(b.lineage));
     return out.map((s, i) => ({ ...s, color: CN_LINE_COLORS[i % CN_LINE_COLORS.length] }));
-  }, [activeRow, sampleById]);
+  }, [activeRow, sampleById, selected]);
 
   const allValues = useMemo(() => series.flatMap(s => s.points.map(p => p.value)), [series]);
   const hasTransfers = useMemo(() => series.some(s => s.points.some(p => !Number.isNaN(p.transfer))), [series]);
@@ -4785,6 +4787,7 @@ function CopyNumberChart({
   logScale?: boolean;
   showPoints?: boolean;
 }) {
+  const sampleLabel = (entry: (typeof series)[number]) => [...new Set(entry.points.map(point => point.name))].join(', ');
   const W = 760, H = 380, padL = 52, padR = 18, padT = 16, padB = 44;
   const plotW = W - padL - padR;
   const plotH = H - padT - padB;
@@ -4871,7 +4874,7 @@ function CopyNumberChart({
   // top of the list; apply the search filter on top of that.
   const legendEntries = series
     .map(s => ({ s, last: s.points[s.points.length - 1] }))
-    .filter(({ s }) => !legendQuery || s.lineage.toLowerCase().includes(legendQuery.toLowerCase()))
+    .filter(({ s }) => !legendQuery || sampleLabel(s).toLowerCase().includes(legendQuery.toLowerCase()))
     .sort((a, b) => (b.last?.value ?? 0) - (a.last?.value ?? 0));
 
   // Nearest-point lookup for the crosshair tooltip.
@@ -4913,16 +4916,16 @@ function CopyNumberChart({
             buildSpec={() => ({
               kind: 'lineChart',
               title: `Copy number trend for ${regionLabel}`,
-              subtitle: `${series.length} lineage${series.length === 1 ? '' : 's'}${logScale ? '; log-scaled y axis' : ''}.`,
+              subtitle: `${series.length} selected sample trace${series.length === 1 ? '' : 's'}${logScale ? '; log-scaled y axis' : ''}.`,
               xTitle: hasTransfers ? 'Transfer' : 'Sample (ordinal)',
               yTitle: `Copy number${logScale ? ' (log)' : ''}`,
-              legendTitle: 'Lineages',
+              legendTitle: 'Samples',
               caption: 'AI-ALE LIMS viewer copy-number export from the selected region. Each line is one lineage across available transfers.',
               logY: logScale,
               showPoints,
               series: series.map(s => ({
                 id: s.lineage,
-                label: s.lineage,
+                label: sampleLabel(s),
                 color: s.color,
                 points: s.points.map((p, i) => ({ x: hasTransfers && !Number.isNaN(p.transfer) ? p.transfer : i, y: p.value, label: p.name })),
                 emphasis: isolated === s.lineage || hovered === s.lineage,
@@ -5079,7 +5082,7 @@ function CopyNumberChart({
                 title={active ? 'Click to clear' : 'Click to isolate this lineage'}
               >
                 <span className="inline-block w-3 h-0.5 rounded shrink-0" style={{ backgroundColor: s.color }} />
-                <span className="font-mono truncate flex-1">{s.lineage}</span>
+                <span className="font-mono flex-1 break-words">{sampleLabel(s)}</span>
                 {last && <span className="text-[var(--text-faint)] tabular-nums shrink-0">{last.value.toFixed(2)}×</span>}
               </button>
             );

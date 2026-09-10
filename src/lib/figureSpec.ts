@@ -780,16 +780,19 @@ function drawBarcodeLegend(parts: string[], panels: BarcodeChartPanelSpec[], opt
 }
 
 function renderLineChartSvg(spec: LineChartFigureSpec, options: FigureRenderOptions): string {
-  const width = Math.max(620, Math.round(options.width));
-  const height = Math.max(460, Math.round(options.height));
   const fs = Math.max(0.6, Math.min(1.8, options.fontScale || 1));
+  const legendWidth = options.showLegend
+    ? Math.max(250, Math.ceil(Math.max(0, ...spec.series.map(series => series.label.length)) * 6.5 * fs) + 58)
+    : 42;
+  const width = Math.max(620, Math.round(options.width), 78 + 160 + legendWidth);
+  const height = Math.max(460, Math.round(options.height), options.showLegend ? 118 + 26 + spec.series.length * 20 + (options.caption ? 114 : 78) : 0);
   const titleSize = 24 * fs;
   const subtitleSize = 13 * fs;
   const labelSize = 12 * fs;
   const tickSize = 10.5 * fs;
   const captionSize = 10.5 * fs;
   const padLeft = 78;
-  const padRight = options.showLegend ? 250 : 42;
+  const padRight = legendWidth;
   const padTop = 118;
   const padBottom = options.caption ? 114 : 78;
   const plotW = Math.max(160, width - padLeft - padRight);
@@ -1029,15 +1032,12 @@ function drawLineLegendItems(parts: string[], seriesList: FigureLineSeries[], op
   const labelSize = 12 * fs;
   parts.push(`<text x="${x}" y="${y}" font-family="${FONT_SANS}" font-size="${labelSize}" font-weight="750" fill="${escapeAttr(options.textColor)}">${escapeXml(title)}</text>`);
   const ly = y + 26;
-  seriesList.slice(0, 14).forEach((series, idx) => {
+  seriesList.forEach((series, idx) => {
     const rowY = ly + idx * 20;
     parts.push(`<line x1="${x}" x2="${x + 16}" y1="${rowY - 4}" y2="${rowY - 4}" stroke="${escapeAttr(normalizeColorForSvg(series.color))}" stroke-width="${series.emphasis ? 3.2 : 2}" stroke-linecap="round"/>`);
     parts.push(`<circle cx="${x + 8}" cy="${rowY - 4}" r="3" fill="${escapeAttr(normalizeColorForSvg(series.color))}" stroke="#ffffff" stroke-width="1"/>`);
-    parts.push(`<text x="${x + 26}" y="${rowY}" font-family="${FONT_MONO}" font-size="${10.5 * fs}" fill="${escapeAttr(options.textColor)}">${escapeXml(truncateLabel(series.label, 22))}</text>`);
+    parts.push(`<text x="${x + 26}" y="${rowY}" font-family="${FONT_MONO}" font-size="${10.5 * fs}" fill="${escapeAttr(options.textColor)}">${escapeXml(series.label)}</text>`);
   });
-  if (seriesList.length > 14) {
-    parts.push(`<text x="${x}" y="${ly + 14 * 20 + 6}" font-family="${FONT_SANS}" font-size="${10.5 * fs}" fill="${escapeAttr(options.mutedTextColor)}">+ ${seriesList.length - 14} more lineages</text>`);
-  }
 }
 
 function drawVariantLegend(parts: string[], spec: LibraryBarsFigureSpec | LibraryHeatmapFigureSpec, options: FigureRenderOptions, x: number, y: number, maxWidth: number, fs: number) {
