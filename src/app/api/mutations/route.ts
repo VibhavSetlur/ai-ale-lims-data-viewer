@@ -5,6 +5,7 @@ export interface MutationSample {
   id: string;
   name: string;
   experiment: string;
+  breseq_registry_id?: string;
   experiment_type?: string;
   seqorder?: string;
   seqorders?: string[];
@@ -754,6 +755,24 @@ export async function GET(req: NextRequest) {
       cnBySampleRegion.set(r.seq_sample, byRegion);
     }
 
+    const registryBySample = new Map<string, string>();
+    const sampleRowIds = new Set(sampleRows.map(r => r.seq_sample));
+    const registryCountsBySample = new Map<string, Map<string, number>>();
+    for (const r of mutRows) {
+      const registry = r.breseq_registry_id ?? '';
+      if (!registry || !sampleRowIds.has(r.seq_sample)) continue;
+      const counts = registryCountsBySample.get(r.seq_sample) ?? new Map<string, number>();
+      counts.set(registry, (counts.get(registry) ?? 0) + 1);
+      registryCountsBySample.set(r.seq_sample, counts);
+    }
+    for (const [sample, counts] of registryCountsBySample) {
+      let registry = ''; let count = -1;
+      for (const [candidate, n] of counts) {
+        if (n > count || (n === count && candidate < registry)) { registry = candidate; count = n; }
+      }
+      if (registry) registryBySample.set(sample, registry);
+    }
+
     const samples: MutationSample[] = sampleRows.map(r => {
       const { transfer, selection } = parseSeqSampleSuffix(r.seq_sample);
       const replicate = deriveReplicate(r.sample_name);
@@ -773,6 +792,7 @@ export async function GET(req: NextRequest) {
         id: r.seq_sample,
         name: r.seq_sample,
         experiment: r.experiment_from_mutations ?? r.experiment_from_seq ?? '',
+        breseq_registry_id: registryBySample.get(r.seq_sample),
         experiment_type: r.experiment_type ?? undefined,
         seqorder: (r.seqorder && String(r.seqorder).trim()) || undefined,
         seqorders: (() => {

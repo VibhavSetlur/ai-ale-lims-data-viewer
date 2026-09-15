@@ -835,6 +835,7 @@ export default function MutationExplorer({ activeTab, onTabChange }: MutationExp
         <div className={cn('flex-1 min-h-0 flex flex-col', tab === 'copynumber' ? '' : 'hidden')}>
           <CopyNumberPanel
             samples={data?.samples ?? []}
+            selected={selected}
             mutations={data?.mutations ?? []}
             loading={loading}
             cnRegionCount={data?.stats?.cnRegionCount ?? 0}
@@ -865,7 +866,7 @@ function TabButton({ active, onClick, icon, children, tour }: { active: boolean;
 
 /* ---------------- Sample Selection panel ---------------- */
 
-type ChipKey = 'experiment' | 'replicate' | 'donor_dna' | 'strain' | 'condition' | 'seqorder' | 'verab';
+type ChipKey = 'experiment' | 'breseq_registry_id' | 'replicate' | 'donor_dna' | 'strain' | 'condition' | 'seqorder' | 'verab';
 
 type SampleFilters = {
   chips: Record<ChipKey, string[]>;
@@ -875,7 +876,7 @@ type SampleFilters = {
 };
 
 const EMPTY_SAMPLE_FILTERS: SampleFilters = {
-  chips: { experiment: [], replicate: [], donor_dna: [], strain: [], condition: [], seqorder: [], verab: [] },
+  chips: { experiment: [], breseq_registry_id: [], replicate: [], donor_dna: [], strain: [], condition: [], seqorder: [], verab: [] },
   selectedOnly: false,
   transferMin: null,
   transferMax: null,
@@ -951,6 +952,7 @@ function SampleSelectionPanel({
         setFilters({
           chips: {
             experiment: f.chips?.experiment ?? [],
+            breseq_registry_id: f.chips?.breseq_registry_id ?? [],
             replicate: f.chips?.replicate ?? [],
             donor_dna: f.chips?.donor_dna ?? [],
             strain: f.chips?.strain ?? [],
@@ -995,9 +997,10 @@ function SampleSelectionPanel({
   // hides now-irrelevant choices in the others. A facet never hides its own
   // siblings, and a currently-selected value is always kept visible.
   const chipOptions = useMemo(() => {
-    const keys: ChipKey[] = ['experiment', 'replicate', 'donor_dna', 'strain', 'condition', 'seqorder', 'verab'];
+    const keys: ChipKey[] = ['experiment', 'breseq_registry_id', 'replicate', 'donor_dna', 'strain', 'condition', 'seqorder', 'verab'];
     const sel: Record<ChipKey, Set<string>> = {
       experiment: new Set(filters.chips.experiment),
+      breseq_registry_id: new Set(filters.chips.breseq_registry_id),
       replicate: new Set(filters.chips.replicate),
       donor_dna: new Set(filters.chips.donor_dna),
       strain: new Set(filters.chips.strain),
@@ -1007,6 +1010,7 @@ function SampleSelectionPanel({
     };
     const fieldVal = (s: MutationSample, k: ChipKey): string =>
       k === 'experiment' ? s.experiment
+      : k === 'breseq_registry_id' ? (s.breseq_registry_id ?? '')
       : k === 'replicate' ? (s.replicate ?? '')
       : k === 'donor_dna' ? (s.donor_dna ?? '')
       : k === 'strain' ? (s.strain ?? '')
@@ -1051,6 +1055,7 @@ function SampleSelectionPanel({
     };
     return {
       experiment: toList('experiment'),
+      breseq_registry_id: toList('breseq_registry_id'),
       replicate: toList('replicate'),
       donor_dna: toList('donor_dna'),
       strain: toList('strain'),
@@ -1065,6 +1070,7 @@ function SampleSelectionPanel({
     const sorted = sortSamples(samples);
       const chipSet = {
       experiment: new Set(filters.chips.experiment),
+      breseq_registry_id: new Set(filters.chips.breseq_registry_id),
       replicate: new Set(filters.chips.replicate),
       donor_dna: new Set(filters.chips.donor_dna),
       strain: new Set(filters.chips.strain),
@@ -1075,6 +1081,7 @@ function SampleSelectionPanel({
     return sorted.filter(s => {
       if (filters.selectedOnly && !selected.has(s.id)) return false;
       if (chipSet.experiment.size > 0 && !chipSet.experiment.has(s.experiment)) return false;
+      if (chipSet.breseq_registry_id.size > 0 && !chipSet.breseq_registry_id.has(s.breseq_registry_id ?? '')) return false;
       if (chipSet.replicate.size > 0 && !chipSet.replicate.has(s.replicate ?? '')) return false;
       if (chipSet.donor_dna.size > 0 && !chipSet.donor_dna.has(s.donor_dna ?? '')) return false;
       if (chipSet.strain.size > 0 && !chipSet.strain.has(s.strain ?? '')) return false;
@@ -1084,7 +1091,7 @@ function SampleSelectionPanel({
       if (filters.transferMin !== null && (s.transfer ?? -Infinity) < filters.transferMin) return false;
       if (filters.transferMax !== null && (s.transfer ?? Infinity) > filters.transferMax) return false;
       if (q) {
-        const hay = `${s.name} ${s.experiment} ${s.strain ?? ''} ${s.donor_dna ?? ''} ${s.condition ?? ''} ${s.replicate ?? ''} ${seqorderVals(s).join(' ')} ${s.has_barcodes ? 'verAB barcode' : ''}`.toLowerCase();
+        const hay = `${s.name} ${s.experiment} ${s.breseq_registry_id ?? ''} ${s.strain ?? ''} ${s.donor_dna ?? ''} ${s.condition ?? ''} ${s.replicate ?? ''} ${seqorderVals(s).join(' ')} ${s.has_barcodes ? 'verAB barcode' : ''}`.toLowerCase();
         if (!hay.includes(q)) return false;
       }
       return true;
@@ -1283,6 +1290,8 @@ function SampleSelectionPanel({
         <div className="px-3 py-2 border-b border-slate-200 dark:border-gray-700 bg-slate-50/60 dark:bg-gray-800/60 space-y-1.5">
           <ChipRow label="Experiment" options={chipOptions.experiment} active={new Set(filters.chips.experiment)}
                    onToggle={v => toggleChip('experiment', v)} onClear={() => clearChip('experiment')} />
+          <ChipRow label="Breseq run" options={chipOptions.breseq_registry_id} active={new Set(filters.chips.breseq_registry_id)}
+                   onToggle={v => toggleChip('breseq_registry_id', v)} onClear={() => clearChip('breseq_registry_id')} />
           <ChipRow label="Replicate" options={chipOptions.replicate} active={new Set(filters.chips.replicate)}
                    onToggle={v => toggleChip('replicate', v)} onClear={() => clearChip('replicate')} />
           <ChipRow label="Donor DNA" options={chipOptions.donor_dna} active={new Set(filters.chips.donor_dna)}
@@ -1330,6 +1339,7 @@ function SampleSelectionPanel({
               </th>
               <th className="px-2 py-1.5 font-semibold">Sample</th>
               <th className="px-2 py-1.5 font-semibold">Experiment</th>
+              <th className="px-2 py-1.5 font-semibold">Breseq run</th>
               <th className="px-2 py-1.5 font-semibold">Replicate</th>
               <th className="px-2 py-1.5 font-semibold">Donor DNA</th>
               <th className="px-2 py-1.5 font-semibold">Strain</th>
@@ -1344,10 +1354,10 @@ function SampleSelectionPanel({
           </thead>
           <tbody>
             {loading && (
-              <tr><td colSpan={hasBarcodes ? 11 : 10} className="px-4 py-8 text-center text-slate-400 dark:text-gray-500">Loading…</td></tr>
+              <tr><td colSpan={hasBarcodes ? 12 : 11} className="px-4 py-8 text-center text-slate-400 dark:text-gray-500">Loading…</td></tr>
             )}
             {!loading && filtered.length === 0 && (
-              <tr><td colSpan={hasBarcodes ? 11 : 10} className="px-4 py-8 text-center text-slate-400 dark:text-gray-500">
+              <tr><td colSpan={hasBarcodes ? 12 : 11} className="px-4 py-8 text-center text-slate-400 dark:text-gray-500">
                 {samples.length === 0
                   ? 'No mutation samples available.'
                   : anyFilterActive
@@ -1376,7 +1386,7 @@ function SampleSelectionPanel({
                             : <Square className="w-3.5 h-3.5 text-[var(--text-faint)]" />}
                       </button>
                     </td>
-                    <td colSpan={hasBarcodes ? 10 : 9} className="px-1 py-1">
+                    <td colSpan={hasBarcodes ? 11 : 10} className="px-1 py-1">
                       <button
                         onClick={() => toggleCollapse(group.key)}
                         className="flex items-center gap-1 font-semibold hover:text-[var(--text)]"
@@ -1419,6 +1429,7 @@ function SampleSelectionPanel({
                           )}
                         </td>
                         <td className="px-2 py-1 text-[var(--text-soft)]">{s.experiment}</td>
+                        <td className="px-2 py-1 font-mono text-[var(--text-soft)]">{s.breseq_registry_id ?? ''}</td>
                         <td className="px-2 py-1 text-[var(--text-soft)]">{s.replicate ?? ''}</td>
                         <td className="px-2 py-1 text-[var(--text-soft)]">
                           {s.donor_dna ? (
@@ -2283,6 +2294,19 @@ function ComparativePanel({
                 </th>
               ))}
             </tr>
+            {/* Breseq registry (hidden in compact mode) */}
+            {!compactHeaders && (
+            <tr>
+              <th className="sticky left-0 z-40 bg-white dark:bg-gray-800 border-b border-r border-slate-200 dark:border-gray-700 px-2 py-1 text-left text-[10px] uppercase tracking-wider text-slate-500 dark:text-gray-400">
+                Breseq run
+              </th>
+              {visibleSamples.map(s => (
+                <th key={s.id} className="border-b border-l border-slate-200 dark:border-gray-700 px-1.5 py-1 text-[10.5px] font-mono font-normal text-slate-500 dark:text-gray-400 text-center bg-white dark:bg-gray-800 whitespace-nowrap">
+                  {s.breseq_registry_id ?? ''}
+                </th>
+              ))}
+            </tr>
+            )}
             {/* Condition (hidden in compact mode) */}
             {!compactHeaders && (
             <tr>
@@ -4600,10 +4624,11 @@ const CN_LINE_COLORS = [
 ];
 
 function CopyNumberPanel({
-  samples, mutations, loading, cnRegionCount, onCompareCN, onPickSamples,
+  samples, selected, mutations, loading, cnRegionCount, onCompareCN, onPickSamples,
   currentExperiment, availableExperiments, onLoadExperiment,
 }: {
   samples: MutationSample[];
+  selected: Set<string>;
   mutations: MutationRow[];
   loading: boolean;
   cnRegionCount: number;
@@ -4634,7 +4659,7 @@ function CopyNumberPanel({
     if (!activeRow) return [];
     const byLineage = new Map<string, { transfer: number; value: number; name: string }[]>();
     for (const [sid, value] of Object.entries(activeRow.values)) {
-      if (typeof value !== 'number' || Number.isNaN(value)) continue;
+      if (!selected.has(sid) || typeof value !== 'number' || Number.isNaN(value)) continue;
       const s = sampleById.get(sid);
       const lineage = lineageOf(s?.name ?? sid);
       const transfer = typeof s?.transfer === 'number' ? s.transfer : NaN;
@@ -4653,7 +4678,7 @@ function CopyNumberPanel({
       }))
       .sort((a, b) => a.lineage.localeCompare(b.lineage));
     return out.map((s, i) => ({ ...s, color: CN_LINE_COLORS[i % CN_LINE_COLORS.length] }));
-  }, [activeRow, sampleById]);
+  }, [activeRow, sampleById, selected]);
 
   const allValues = useMemo(() => series.flatMap(s => s.points.map(p => p.value)), [series]);
   const hasTransfers = useMemo(() => series.some(s => s.points.some(p => !Number.isNaN(p.transfer))), [series]);
@@ -4832,6 +4857,7 @@ function CopyNumberChart({
   logScale?: boolean;
   showPoints?: boolean;
 }) {
+  const sampleLabel = (entry: (typeof series)[number]) => entry.lineage;
   const W = 760, H = 380, padL = 52, padR = 18, padT = 16, padB = 44;
   const plotW = W - padL - padR;
   const plotH = H - padT - padB;
@@ -4918,7 +4944,7 @@ function CopyNumberChart({
   // top of the list; apply the search filter on top of that.
   const legendEntries = series
     .map(s => ({ s, last: s.points[s.points.length - 1] }))
-    .filter(({ s }) => !legendQuery || s.lineage.toLowerCase().includes(legendQuery.toLowerCase()))
+    .filter(({ s }) => !legendQuery || sampleLabel(s).toLowerCase().includes(legendQuery.toLowerCase()))
     .sort((a, b) => (b.last?.value ?? 0) - (a.last?.value ?? 0));
 
   // Nearest-point lookup for the crosshair tooltip.
@@ -4960,16 +4986,16 @@ function CopyNumberChart({
             buildSpec={() => ({
               kind: 'lineChart',
               title: `Copy number trend for ${regionLabel}`,
-              subtitle: `${series.length} lineage${series.length === 1 ? '' : 's'}${logScale ? '; log-scaled y axis' : ''}.`,
+              subtitle: `${series.length} selected sample trace${series.length === 1 ? '' : 's'}${logScale ? '; log-scaled y axis' : ''}.`,
               xTitle: hasTransfers ? 'Transfer' : 'Sample (ordinal)',
               yTitle: `Copy number${logScale ? ' (log)' : ''}`,
-              legendTitle: 'Lineages',
+              legendTitle: 'Samples',
               caption: 'AI-ALE LIMS viewer copy-number export from the selected region. Each line is one lineage across available transfers.',
               logY: logScale,
               showPoints,
               series: series.map(s => ({
                 id: s.lineage,
-                label: s.lineage,
+                label: sampleLabel(s),
                 color: s.color,
                 points: s.points.map((p, i) => ({ x: hasTransfers && !Number.isNaN(p.transfer) ? p.transfer : i, y: p.value, label: p.name })),
                 emphasis: isolated === s.lineage || hovered === s.lineage,
@@ -5126,7 +5152,7 @@ function CopyNumberChart({
                 title={active ? 'Click to clear' : 'Click to isolate this lineage'}
               >
                 <span className="inline-block w-3 h-0.5 rounded shrink-0" style={{ backgroundColor: s.color }} />
-                <span className="font-mono truncate flex-1">{s.lineage}</span>
+                <span className="font-mono flex-1 break-words">{sampleLabel(s)}</span>
                 {last && <span className="text-[var(--text-faint)] tabular-nums shrink-0">{last.value.toFixed(2)}×</span>}
               </button>
             );
