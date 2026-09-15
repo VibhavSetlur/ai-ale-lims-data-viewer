@@ -33,6 +33,7 @@ interface MutationSample {
   donor_dna?: string;
   has_barcodes?: boolean;
   verab_combinations?: number;
+  breseq_registry_id?: string;
   selection_note?: string;
   growth_curve?: { t: number; od: number }[];
   growth_curve_source?: {
