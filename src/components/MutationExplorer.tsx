@@ -4810,7 +4810,7 @@ function CopyNumberChart({
   logScale?: boolean;
   showPoints?: boolean;
 }) {
-  const sampleLabel = (entry: (typeof series)[number]) => [...new Set(entry.points.map(point => point.name))].join(', ');
+  const sampleLabel = (entry: (typeof series)[number]) => entry.lineage;
   const W = 760, H = 380, padL = 52, padR = 18, padT = 16, padB = 44;
   const plotW = W - padL - padR;
   const plotH = H - padT - padB;
