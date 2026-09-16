@@ -28,14 +28,19 @@ async function getDb(): Promise<WorkerHttpvfs> {
       // actually opens the Database Tables browser, not on first paint.
       const { createDbWorker } = await import('sql.js-httpvfs');
       const base = `${BASE_PATH}/db`;
+      const response = await fetch(`${base}/config.json`, { cache: 'no-store' });
+      if (!response.ok) throw new Error(`HTTPVFS config -> HTTP ${response.status}`);
+      const config = await response.json() as {
+        serverMode: 'full'; url: string; requestChunkSize: number; databaseLengthBytes: number;
+      };
       const worker = await createDbWorker(
         [
           {
             from: 'inline',
             config: {
-              serverMode: 'full',
-              url: `${base}/lims.db`,
-              requestChunkSize: 65536,
+              serverMode: config.serverMode,
+              url: `${base}/${config.url}`,
+              requestChunkSize: config.requestChunkSize,
             },
           },
         ],
