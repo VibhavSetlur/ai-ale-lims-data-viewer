@@ -25,9 +25,14 @@ PAGE_SIZE="${PAGE_SIZE:-65536}"   # 64KB pages: far fewer range requests for big
 if [ ! -f "$SRC" ]; then echo "source DB not found: $SRC" >&2; exit 1; fi
 
 mkdir -p "$DBDIR"
-echo "re-paging $SRC -> $DBDIR/lims.db at page_size=$PAGE_SIZE ..."
+SOURCE_SHA256=$(sha256sum "$SRC" | awk '{print $1}')
+DB_NAME="lims.${SOURCE_SHA256}.db"
+DB_PATH="$DBDIR/$DB_NAME"
+rm -f "$DBDIR"/lims.db "$DBDIR"/lims.*.db
+
+echo "re-paging $SRC -> $DB_PATH at page_size=$PAGE_SIZE ..."
 # Use Python sqlite3 (the sqlite3 CLI is not installed on this host).
-python3 - "$SRC" "$DBDIR/lims.db" "$PAGE_SIZE" <<'PY'
+python3 - "$SRC" "$DB_PATH" "$PAGE_SIZE" <<'PY'
 import sqlite3, sys, os
 src, dst, page = sys.argv[1], sys.argv[2], int(sys.argv[3])
 if os.path.exists(dst): os.remove(dst)
@@ -49,14 +54,16 @@ echo "copying sql.js-httpvfs worker + wasm ..."
 cp node_modules/sql.js-httpvfs/dist/sqlite.worker.js "$DBDIR/"
 cp node_modules/sql.js-httpvfs/dist/sql-wasm.wasm "$DBDIR/"
 
-# config.json: serverMode = the whole DB is one file we range-request.
-BYTES=$(stat -c %s "$DBDIR/lims.db")
+# config.json ties the HTTPVFS URL to the authoritative source identity, so a
+# refreshed database cannot reuse browser-cached byte ranges from an older one.
+BYTES=$(stat -c %s "$DB_PATH")
 cat > "$DBDIR/config.json" <<JSON
 {
   "serverMode": "full",
   "requestChunkSize": $PAGE_SIZE,
   "databaseLengthBytes": $BYTES,
-  "url": "lims.db"
+  "sourceSha256": "$SOURCE_SHA256",
+  "url": "$DB_NAME"
 }
 JSON
 
