@@ -1,0 +1,12 @@
+[project]
+name = "ai-ale-lims-viewer-kind"
+version = "0.0.0"
+description = "Local-only KIND adapter tooling for ai-ale-lims-data-viewer"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.scripts]
+ai-ale-lims-viewer-kind = "kind.cli:main"
+
+[tool.setuptools]
+packages = ["kind"]
