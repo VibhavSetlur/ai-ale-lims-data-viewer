@@ -7,10 +7,17 @@
 // the `X-Argo-Key` header on the send-message request only, never written to
 // browser storage, a cookie, or a URL, and never logged.
 import { useEffect, useRef, useState } from 'react';
-import { AlertCircle, KeyRound, LogIn, Send, Trash2 } from 'lucide-react';
+import { AlertCircle, Download, KeyRound, LogIn, Send, Trash2, Upload } from 'lucide-react';
 import { fetchData, IS_STATIC } from '../../lib/dataSource';
 import { LOGIN_PATH } from '../../lib/routes';
 import { useOpsIdentity } from '../../lib/ops/useOpsIdentity';
+import {
+  type ArtifactFormat,
+  type LocalArtifactInput,
+  createResearchArtifact,
+  serializeResearchArtifact,
+  validateLocalArtifactInput,
+} from '../../lib/ops/researchArtifacts';
 
 type StatusBody = {
   enabled: boolean;
@@ -72,6 +79,9 @@ export default function AssistantPanel() {
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
+  const [localInputs, setLocalInputs] = useState<LocalArtifactInput[]>([]);
+  const pendingLocalInputBytes = useRef(0);
+  const [artifactError, setArtifactError] = useState<string | null>(null);
 
   const threadRef = useRef<HTMLDivElement | null>(null);
 
@@ -239,6 +249,39 @@ export default function AssistantPanel() {
     } catch (err) {
       setConversationsError(err instanceof Error ? err.message : 'Could not delete conversation.');
     }
+  }
+
+  async function addLocalInput(file: File) {
+    const currentTotalBytes = localInputs.reduce((total, input) => total + input.size, 0) + pendingLocalInputBytes.current;
+    const validationError = validateLocalArtifactInput(file, currentTotalBytes);
+    if (validationError) {
+      setArtifactError(validationError);
+      return;
+    }
+    pendingLocalInputBytes.current += file.size;
+    try {
+      const text = await file.text();
+      setLocalInputs((inputs) => [...inputs, { name: file.name, type: file.type, size: file.size, text }]);
+      setArtifactError(null);
+    } catch {
+      setArtifactError('Could not read that local file.');
+    } finally {
+      pendingLocalInputBytes.current -= file.size;
+    }
+  }
+
+  function downloadResearchArtifact(format: ArtifactFormat) {
+    const artifact = createResearchArtifact(
+      messages.map(({ role, content, created_at }) => ({ role, content, createdAt: created_at })),
+      localInputs,
+    );
+    const serialized = serializeResearchArtifact(artifact, format);
+    const url = URL.createObjectURL(new Blob([serialized.text], { type: serialized.type }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = serialized.filename;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1_000);
   }
 
   async function sendMessage() {
@@ -525,6 +568,23 @@ export default function AssistantPanel() {
           </div>
 
           <div className="p-3 border-t border-[var(--border)]">
+            <section className="mb-2 rounded border border-[var(--border)] p-2 text-xs text-[var(--text-soft)]" aria-label="Research artifact workspace">
+              <p><strong className="text-[var(--text)]">Research artifact workspace</strong> stays in this browser tab only. Uploads are never sent to the server, and downloads are not retained or available in another session.</p>
+              <p className="mt-1">Supported inputs: CSV, TSV, JSON, TXT, and Markdown. Files are capped at 2 MiB each and 50 MiB per tab. Downloads include source input and assistant tool-result context.</p>
+              {localInputs.length > 0 && <p className="mt-1">Local inputs: {localInputs.map((input) => input.name).join(', ')}</p>}
+              {artifactError && <p role="alert" className="mt-1 text-red-600">{artifactError}</p>}
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                <label className="lims-btn lims-btn-secondary cursor-pointer">
+                  <Upload className="w-3.5 h-3.5" /> Add local input
+                  <input className="sr-only" type="file" accept=".csv,.tsv,.json,.txt,.md,text/csv,text/tab-separated-values,application/json,text/plain,text/markdown" onChange={(event) => { const file = event.target.files?.[0]; if (file) void addLocalInput(file); event.currentTarget.value = ''; }} />
+                </label>
+                {(['json', 'markdown', 'csv'] as const).map((format) => (
+                  <button key={format} className="lims-btn lims-btn-ghost" type="button" onClick={() => downloadResearchArtifact(format)}>
+                    <Download className="w-3.5 h-3.5" /> Download {format.toUpperCase()}
+                  </button>
+                ))}
+              </div>
+            </section>
             {sendError && <p className="text-xs text-red-600 mb-1.5">{sendError}</p>}
             <div className="flex items-end gap-1.5">
               <textarea

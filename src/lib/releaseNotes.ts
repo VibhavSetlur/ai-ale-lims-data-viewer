@@ -5,6 +5,7 @@ export interface ReleaseNote {
 }
 
 export const releaseNotes: readonly ReleaseNote[] = [
+  { version: '1.15.0', date: '2026-09-17', summary: 'Added a dynamic Assistant research artifact workspace for browser-session-only local inputs and transparent JSON, Markdown, or CSV downloads. Artifacts display their lifecycle and provenance, never upload local inputs, and protect CSV downloads against formula injection.' },
   { version: '1.14.2', date: '2026-09-16', summary: 'Dev static refresh now gives the Database Explorer a database URL keyed to the full LIMS mirror hash, preventing stale cached HTTP range pages after a data refresh. Mutation Explorer was rebuilt from the same mirror.' },
   { version: '1.14.1', date: '2026-09-15', summary: 'Dev static refresh. Rebuilt the Mutation Explorer snapshot from the full LIMS mirror and restored the HTTPVFS database, worker, and WebAssembly assets required by Database Explorer.' },
   { version: '1.14.0', date: '2026-09-15', summary: 'Mutation Explorer now shows and filters Breseq registry runs with correctly typed sample fields. Copy Number comparisons retain the selected samples, show every available condition, use concise lineage legends, and preserve the full legend in PNG and SVG exports.' },
