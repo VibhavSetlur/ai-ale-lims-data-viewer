@@ -29,7 +29,7 @@ class KindCliTests(unittest.TestCase):
                 cli.validate_manifest(data)
 
     def test_invalid_root_paths_are_rejected(self):
-        for value in ("/", "relative", "/bad/", "/two//slashes", "/white space"):
+        for value in ("/", "relative", "/bad/", "/two//slashes", "/white space", "/../escape", "/./current", "/path?query", "/path#fragment", "/percent%2Fencoded"):
             with self.assertRaises(SystemExit):
                 cli.main(["serve", "--port", "9000", "--root-path", value, "--no-king"])
 

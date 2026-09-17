@@ -52,8 +52,17 @@ def validate_manifest(data: dict) -> None:
 
 
 def validate_root_path(value: str) -> str:
-    if not value.startswith("/") or value == "/" or value.endswith("/") or "//" in value or any(c.isspace() for c in value):
-        raise argparse.ArgumentTypeError("root path must be an absolute, non-root path without a trailing slash")
+    segments = value.split("/")
+    if (
+        not value.startswith("/")
+        or value == "/"
+        or value.endswith("/")
+        or "//" in value
+        or any(c.isspace() for c in value)
+        or any(segment in {".", ".."} for segment in segments)
+        or any(character in value for character in "\\?#%")
+    ):
+        raise argparse.ArgumentTypeError("root path must be an absolute, normalized path without a trailing slash")
     return value
 
 
