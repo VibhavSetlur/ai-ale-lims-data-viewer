@@ -12,7 +12,7 @@ python3 -m kind doctor
 
 `kind-install` validates and prints the local manifest. `--output` is deliberately limited to a path beneath this repository's `kind/` directory. It never writes `~/.king` and never invokes KIND.
 
-The provisional local manifest id and console name are `ai-ale-lims-viewer-kind`. Its documented command is `ai-ale-lims-viewer-kind serve --port {port} --root-path {proxy_path} --no-king`. The id is unregistered and must not be catalog registered without owner approval.
+The provisional local manifest id and console name are `ai-ale-lims-viewer-kind`. Its documented command is `ai-ale-lims-viewer-kind serve --port {port} --root-path {proxy_path} --no-king`. `pyproject.toml` supplies that console only when this local package is installed by an owner-approved packaging path; this repository does not install it or claim that it is already on `PATH`. The id is unregistered and must not be catalog registered without owner approval.
 
 ## Serving locally
 
