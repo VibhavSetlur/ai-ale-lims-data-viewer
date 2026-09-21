@@ -9,6 +9,7 @@ const BASE = process.env.BASE;
 const SOURCE_DB = path.resolve(ROOT, process.env.SRC || 'data/lims_indexed.db');
 const DATA_DIR = path.join(ROOT, 'public', 'data');
 const DB_DIR = path.join(ROOT, 'public', 'db');
+const DASHBOARD_SOURCE = path.join(ROOT, 'src', 'components', 'Dashboard.tsx');
 
 function sha256(value) {
   return createHash('sha256').update(value).digest('hex');
@@ -33,6 +34,12 @@ async function fetchJson(endpoint) {
 }
 
 async function main() {
+  const dashboard = await readFile(DASHBOARD_SOURCE, 'utf8');
+  if (!dashboard.includes("const PlateDesignWorkspace = dynamic(() => import('./PlateDesignWorkspace')")) throw new Error('static Plate Design workspace import is missing');
+  if ((dashboard.match(/setActiveView\('plateDesign'\)/g) ?? []).length < 2) throw new Error('static Plate Design navigation controls are missing');
+  if (dashboard.includes('AI-ALE Assistant') || dashboard.includes('User Workspace')) throw new Error('static AI sidebar chat or User Workspace UI is present');
+  console.log('verified static UI: Plate Design is available; AI-ALE Assistant and User Workspace are absent');
+
   if (!BASE) throw new Error('BASE is required, for example BASE=http://localhost:3457 node scripts/verify-static-parity.mjs');
 
   const [source, manifest, config] = await Promise.all([

@@ -52,7 +52,7 @@ const ACTIVE_VIEW_KEY = 'lims:activeView';
 type ActiveView = 'tables' | 'mutations' | 'plateDesign';
 
 const MutationExplorer = dynamic(() => import('./MutationExplorer'), { ssr: false, loading: () => <div className="p-4 text-sm text-[var(--text-soft)]">Loading Mutation Explorer…</div> });
-const PlateDesignWorkspace = !IS_STATIC ? dynamic(() => import('./PlateDesignWorkspace'), { ssr: false, loading: () => <div className="p-4 text-sm text-[var(--text-soft)]">Loading Plate Design…</div> }) : null;
+const PlateDesignWorkspace = dynamic(() => import('./PlateDesignWorkspace'), { ssr: false, loading: () => <div className="p-4 text-sm text-[var(--text-soft)]">Loading Plate Design…</div> });
 const GuideAssistant = !IS_STATIC ? dynamic(() => import('./GuideAssistant'), { ssr: false }) : null;
 const DataTable = dynamic(() => import('./DataTable'), { ssr: false, loading: () => <div className="p-4 text-sm text-[var(--text-soft)]">Loading table browser…</div> });
 
@@ -150,8 +150,8 @@ export default function Dashboard({ initialTables, buildInfo }: DashboardProps) 
       if (c === '1') setCollapsed(true);
       const v = localStorage.getItem(ACTIVE_VIEW_KEY);
       const oldTab = localStorage.getItem('lims:mutation:tab');
-       if (!IS_STATIC && oldTab === 'plateDesign') { localStorage.setItem('lims:mutation:tab', 'samples'); setActiveView('plateDesign'); }
-       else if (v === 'mutations' || v === 'tables' || (!IS_STATIC && v === 'plateDesign')) setActiveView(v);
+      if (oldTab === 'plateDesign') { localStorage.setItem('lims:mutation:tab', 'samples'); setActiveView('plateDesign'); }
+      else if (v === 'mutations' || v === 'tables' || v === 'plateDesign') setActiveView(v);
     } catch {}
   }, []);
 
@@ -531,7 +531,7 @@ export default function Dashboard({ initialTables, buildInfo }: DashboardProps) 
                   <span className="flex-1">Database Tables</span>
                 </button>
                 <button onClick={() => setActiveView('mutations')} data-active={activeView === 'mutations'} data-tour="nav-mutations" className="lims-nav"><Dna className="w-4 h-4 shrink-0" /><span className="flex-1">Mutation Explorer</span></button>
-                {!IS_STATIC && <button onClick={() => setActiveView('plateDesign')} data-active={activeView === 'plateDesign'} className="lims-nav"><Grid3X3 className="w-4 h-4 shrink-0" /><span className="flex-1">Plate Design</span></button>}
+                <button onClick={() => setActiveView('plateDesign')} data-active={activeView === 'plateDesign'} className="lims-nav"><Grid3X3 className="w-4 h-4 shrink-0" /><span className="flex-1">Plate Design</span></button>
               </div>
 
               {activeView === 'tables' ? (
@@ -637,7 +637,7 @@ export default function Dashboard({ initialTables, buildInfo }: DashboardProps) 
                 title="Mutation Explorer">
                 <Dna className="w-4 h-4" />
               </button>
-              {!IS_STATIC && <button onClick={() => setActiveView('plateDesign')} className={cn("p-1.5 rounded-md", activeView === 'plateDesign' ? "text-[var(--accent-700)] bg-[var(--accent-50)]" : "text-[var(--text-faint)] hover:bg-[var(--surface-3)]")} title="Plate Design"><Grid3X3 className="w-4 h-4" /></button>}
+              <button onClick={() => setActiveView('plateDesign')} className={cn("p-1.5 rounded-md", activeView === 'plateDesign' ? "text-[var(--accent-700)] bg-[var(--accent-50)]" : "text-[var(--text-faint)] hover:bg-[var(--surface-3)]")} title="Plate Design"><Grid3X3 className="w-4 h-4" /></button>
               <div className="mt-auto flex flex-col items-center gap-1 pb-2">
                 {!IS_STATIC && <button onClick={() => setShowGuide(true)} className="p-1.5 rounded-md text-[var(--text-faint)] hover:bg-[var(--surface-3)]" title="Guide"><Compass className="w-4 h-4" /></button>}
                 <button onClick={() => setShowChangesPanel(true)} className="p-1.5 rounded-md text-[var(--text-faint)] hover:bg-[var(--surface-3)]" title="Changelog"><ScrollText className="w-4 h-4" /></button>

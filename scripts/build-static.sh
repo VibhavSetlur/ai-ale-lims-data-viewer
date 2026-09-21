@@ -6,8 +6,9 @@
 # failure via the trap). Server mode is never affected.
 #
 # Usage:
-#   scripts/build-static.sh                       # base path /annotation/projects/aiale
-#   BASE_PATH=/annotation/projects/myname scripts/build-static.sh
+#   scripts/build-static.sh                       # base path /annotation/projects/aiale-dev
+#   BASE_PATH=/annotation/projects/aiale-dev scripts/build-static.sh
+#   scripts/build-static.sh --validate-config     # validate without building
 #
 # Output: out/  (a self-contained static site). Hand `out/` to Filipe, or copy
 # its contents into the granted webroot. Run scripts/prebake.mjs FIRST so
@@ -15,14 +16,36 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-BASE_PATH="${BASE_PATH:-/annotation/projects/aiale}"
+if [ "${1:-}" = "--help" ]; then
+  echo "Usage: BASE_PATH=/annotation/projects/aiale-dev scripts/build-static.sh"
+  echo "       scripts/build-static.sh --validate-config"
+  exit 0
+fi
+
+BASE_PATH="${BASE_PATH:-/annotation/projects/aiale-dev}"
+case "$BASE_PATH" in
+  /annotation/projects/aiale-dev) ;;
+  *)
+    echo "ERROR: static builds support only /annotation/projects/aiale-dev" >&2
+    exit 2
+    ;;
+esac
+if [ -n "${DEPLOYMENT_CHANNEL:-}" ] && [ "$DEPLOYMENT_CHANNEL" != "dev" ]; then
+  echo "ERROR: static builds require DEPLOYMENT_CHANNEL=dev" >&2
+  exit 2
+fi
+if [ -n "${DEPLOYMENT_BRANCH:-}" ] && [ "$DEPLOYMENT_BRANCH" != "deploy/aiale-dev" ]; then
+  echo "ERROR: static builds require DEPLOYMENT_BRANCH=deploy/aiale-dev" >&2
+  exit 2
+fi
+if [ "${1:-}" = "--validate-config" ]; then
+  printf 'static build configuration valid: base path=%s channel=dev branch=deploy/aiale-dev\n' "$BASE_PATH"
+  exit 0
+fi
 VIEWER_VERSION="${VIEWER_VERSION:-$(node -p 'require("./package.json").version')}"
 GIT_COMMIT="${GIT_COMMIT:-$(git rev-parse --short=12 HEAD 2>/dev/null || printf 'unknown')}"
-case "$BASE_PATH" in
-  */aiale-dev) DEPLOYMENT_CHANNEL="${DEPLOYMENT_CHANNEL:-dev}"; DEPLOYMENT_BRANCH="${DEPLOYMENT_BRANCH:-deploy/aiale-dev}" ;;
-  */aiale) DEPLOYMENT_CHANNEL="${DEPLOYMENT_CHANNEL:-public}"; DEPLOYMENT_BRANCH="${DEPLOYMENT_BRANCH:-deploy/aiale-public}" ;;
-  *) DEPLOYMENT_CHANNEL="${DEPLOYMENT_CHANNEL:-dev}"; DEPLOYMENT_BRANCH="${DEPLOYMENT_BRANCH:-main}" ;;
-esac
+DEPLOYMENT_CHANNEL="dev"
+DEPLOYMENT_BRANCH="deploy/aiale-dev"
 API_DIR="src/app/api"
 API_STASH=".api_stash_$$"
 

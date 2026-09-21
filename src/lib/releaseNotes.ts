@@ -5,6 +5,7 @@ export interface ReleaseNote {
 }
 
 export const releaseNotes: readonly ReleaseNote[] = [
+  { version: '1.14.4', date: '2026-09-21', summary: 'Restored the browser-local Plate Design workspace and its navigation controls in static exports while static AI sidebar chat and User Workspace remain unavailable.' },
   { version: '1.14.3', date: '2026-09-21', summary: 'Static exports now record the canonical LIMS mirror SHA-256 and verify that Mutation Explorer snapshots, table metadata, and the HTTPVFS database all derive from that same source.' },
   { version: '1.14.2', date: '2026-09-16', summary: 'Dev static refresh now gives the Database Explorer a database URL keyed to the full LIMS mirror hash, preventing stale cached HTTP range pages after a data refresh. Mutation Explorer was rebuilt from the same mirror.' },
   { version: '1.14.1', date: '2026-09-15', summary: 'Dev static refresh. Rebuilt the Mutation Explorer snapshot from the full LIMS mirror and restored the HTTPVFS database, worker, and WebAssembly assets required by Database Explorer.' },
