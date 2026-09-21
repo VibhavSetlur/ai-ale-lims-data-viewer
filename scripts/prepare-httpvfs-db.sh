@@ -50,6 +50,8 @@ print(f"  built {dst}: page_size={ps} page_count={pc} bytes={ps*pc}")
 c.close()
 PY
 
+ln -s "$DB_NAME" "$DBDIR/lims.db"
+
 echo "copying sql.js-httpvfs worker + wasm ..."
 cp node_modules/sql.js-httpvfs/dist/sqlite.worker.js "$DBDIR/"
 cp node_modules/sql.js-httpvfs/dist/sql-wasm.wasm "$DBDIR/"

@@ -21,13 +21,14 @@
  * one CHUNK at a time (CHUNK_ROWS rows), so even the 223k-row Mutations table is
  * browsed without ever holding the whole thing. We never ship the 240MB DB.
  */
-import { mkdir, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, readFile, readlink, stat, writeFile } from 'node:fs/promises';
 import { gzipSync } from 'node:zlib';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 
 const BASE = process.env.BASE || 'http://localhost:3457';
 const OUT = path.resolve(process.cwd(), 'public', 'data');
+const SOURCE_DB = path.resolve(process.cwd(), process.env.SRC || 'data/lims_indexed.db');
 
 const EXPERIMENTS = ['TFMN1', 'TFMN2', 'TFMN3', 'TFMN4', 'strain_stocks'];
 const curatedTargets = [
@@ -57,8 +58,27 @@ async function fetchJson(url) {
 }
 
 async function main() {
+  const [source, sourceStats] = await Promise.all([readFile(SOURCE_DB), stat(SOURCE_DB)]);
+  const sourceSha256 = createHash('sha256').update(source).digest('hex');
+  const dbConfigPath = path.resolve(process.cwd(), 'public', 'db', 'config.json');
+  let dbConfig;
+  try { dbConfig = JSON.parse(await readFile(dbConfigPath, 'utf8')); }
+  catch (error) { throw new Error(`Could not read HTTPVFS config: ${error instanceof Error ? error.message : String(error)}`); }
+  if (dbConfig.sourceSha256 !== sourceSha256) {
+    throw new Error(`HTTPVFS source hash ${dbConfig.sourceSha256 ?? 'missing'} does not match ${SOURCE_DB}`);
+  }
+  const dbLink = path.resolve(process.cwd(), 'public', 'db', 'lims.db');
+  if (!(await lstat(dbLink)).isSymbolicLink() || await readlink(dbLink) !== dbConfig.url) {
+    throw new Error('public/db/lims.db must be a symlink to the configured HTTPVFS database');
+  }
+
   await mkdir(OUT, { recursive: true });
-  const manifest = { generatedAt: new Date().toISOString(), source: BASE, files: {} };
+  const manifest = {
+    generatedAt: new Date().toISOString(),
+    source: BASE,
+    snapshot: { path: path.relative(process.cwd(), SOURCE_DB), sha256: sourceSha256, bytes: sourceStats.size },
+    files: {},
+  };
   let totalRaw = 0, totalGz = 0;
 
   for (const t of curatedTargets) {
