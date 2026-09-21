@@ -30,22 +30,22 @@ case "$BASE_PATH" in
     exit 2
     ;;
 esac
-if [ -n "${DEPLOYMENT_CHANNEL:-}" ] && [ "$DEPLOYMENT_CHANNEL" != "dev" ]; then
-  echo "ERROR: static builds require DEPLOYMENT_CHANNEL=dev" >&2
+if [ -n "${DEPLOYMENT_CHANNEL:-}" ] && [ "$DEPLOYMENT_CHANNEL" != "static" ]; then
+  echo "ERROR: static builds require DEPLOYMENT_CHANNEL=static" >&2
   exit 2
 fi
-if [ -n "${DEPLOYMENT_BRANCH:-}" ] && [ "$DEPLOYMENT_BRANCH" != "deploy/aiale-dev" ]; then
-  echo "ERROR: static builds require DEPLOYMENT_BRANCH=deploy/aiale-dev" >&2
+if [ -n "${DEPLOYMENT_BRANCH:-}" ] && [ "$DEPLOYMENT_BRANCH" != "static" ]; then
+  echo "ERROR: static builds require DEPLOYMENT_BRANCH=static" >&2
   exit 2
 fi
 if [ "${1:-}" = "--validate-config" ]; then
-  printf 'static build configuration valid: base path=%s channel=dev branch=deploy/aiale-dev\n' "$BASE_PATH"
+  printf 'static build configuration valid: base path=%s channel=static branch=static\n' "$BASE_PATH"
   exit 0
 fi
 VIEWER_VERSION="${VIEWER_VERSION:-$(node -p 'require("./package.json").version')}"
 GIT_COMMIT="${GIT_COMMIT:-$(git rev-parse --short=12 HEAD 2>/dev/null || printf 'unknown')}"
-DEPLOYMENT_CHANNEL="dev"
-DEPLOYMENT_BRANCH="deploy/aiale-dev"
+DEPLOYMENT_CHANNEL="static"
+DEPLOYMENT_BRANCH="static"
 API_DIR="src/app/api"
 API_STASH=".api_stash_$$"
 

@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import { fetchData, IS_STATIC, BASE_PATH } from '../lib/dataSource';
-import { DEPLOYMENT_CHANNELS, type BuildInfo } from '../lib/buildInfo';
+import { DEPLOYMENT_CHANNELS, type BuildInfo, type DeploymentChannel } from '../lib/buildInfo';
 import { releaseNotes } from '../lib/releaseNotes';
 import {
   Database, Search, Sun, Moon, Table2, Dna,
@@ -390,7 +390,7 @@ export default function Dashboard({ initialTables, buildInfo }: DashboardProps) 
                       <span className="text-[var(--text-soft)]">Barcodes</span><span>{channelInfo.barcodePolicy}</span>
                     </div>
                     <div className="mt-3 pt-2 border-t border-[var(--border)] space-y-1">
-                      {(['dev', 'public', 'server'] as const).map(channel => (
+                      {(Object.keys(DEPLOYMENT_CHANNELS) as DeploymentChannel[]).map(channel => (
                         <div key={channel} className={cn('flex items-start gap-2 rounded px-1.5 py-1', channel === buildInfo.channel ? 'bg-[var(--accent-50)]' : '')}>
                           <GitBranch className="w-3.5 h-3.5 mt-0.5 text-[var(--text-faint)] shrink-0" />
                           <div className="min-w-0">

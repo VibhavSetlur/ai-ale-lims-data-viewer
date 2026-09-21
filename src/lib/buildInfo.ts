@@ -1,4 +1,4 @@
-export type DeploymentChannel = 'dev' | 'public' | 'server';
+export type DeploymentChannel = 'static' | 'dynamic' | 'server';
 
 export interface BuildInfo {
   version: string;
@@ -17,35 +17,35 @@ export const DEPLOYMENT_CHANNELS: Record<DeploymentChannel, {
   barcodePolicy: string;
   audience: string;
 }> = {
-  dev: {
-    label: 'Dev',
-    branch: 'deploy/aiale-dev',
+  static: {
+    label: 'Static',
+    branch: 'static',
     url: 'https://modelseed.org/annotation/projects/aiale-dev/',
     database: 'Full LIMS mirror: data/lims_indexed.db',
     barcodePolicy: 'Barcode tab shown when verAB_barcodes is present',
-    audience: 'Internal test deployment',
+    audience: 'Static production release',
   },
-  public: {
-    label: 'Public',
-    branch: 'deploy/aiale-public',
-    url: 'https://modelseed.org/annotation/projects/aiale/',
-    database: 'TFMN1 trimmed mirror: data/lims_TFMN1_indexed.db',
-    barcodePolicy: 'Barcode tab hidden because verAB_barcodes is absent',
-    audience: 'Publication snapshot',
-  },
-  server: {
-    label: 'Server',
-    branch: 'main',
+  dynamic: {
+    label: 'Dynamic',
+    branch: 'dynamic',
     url: 'http://localhost:3457/',
     database: 'Runtime SQLITE_PATH or configured DB connection',
     barcodePolicy: 'Barcode tab follows active database capability',
-    audience: 'Local runtime',
+    audience: 'Dynamic production release',
+  },
+  server: {
+    label: 'Server',
+    branch: 'dynamic-dev',
+    url: 'http://localhost:3457/',
+    database: 'Runtime SQLITE_PATH or configured DB connection',
+    barcodePolicy: 'Barcode tab follows active database capability',
+    audience: 'Local development runtime',
   },
 };
 
 function cleanChannel(value: string | undefined): DeploymentChannel {
-  if (value === 'dev' || value === 'public' || value === 'server') return value;
-  return process.env.NEXT_PUBLIC_STATIC === '1' ? 'dev' : 'server';
+  if (value === 'static' || value === 'dynamic' || value === 'server') return value;
+  return process.env.NEXT_PUBLIC_STATIC === '1' ? 'static' : 'server';
 }
 
 export function getBuildInfo(): BuildInfo {
@@ -53,7 +53,7 @@ export function getBuildInfo(): BuildInfo {
   return {
     version: process.env.NEXT_PUBLIC_VIEWER_VERSION || '1.14.4',
     channel: cleanChannel(process.env.NEXT_PUBLIC_DEPLOYMENT_CHANNEL),
-    branch: process.env.NEXT_PUBLIC_DEPLOYMENT_BRANCH || (mode === 'static' ? 'deploy/aiale-dev' : 'dev'),
+    branch: process.env.NEXT_PUBLIC_DEPLOYMENT_BRANCH || (mode === 'static' ? 'static' : 'dynamic-dev'),
     commit: process.env.NEXT_PUBLIC_GIT_COMMIT || 'local',
     mode,
     basePath: process.env.NEXT_PUBLIC_BASE_PATH || '',

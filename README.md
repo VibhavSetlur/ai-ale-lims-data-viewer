@@ -6,12 +6,10 @@ trajectories, robot-measured OD600 growth curves, and VerA/VerB barcode-
 composition charts for engineered *Acinetobacter baylyi* ADP1 strains evolved on
 the automated robotic ALE platform.
 
-- LIVE (public, publication snapshot): https://modelseed.org/annotation/projects/aiale/
-- DEV (internal test): https://modelseed.org/annotation/projects/aiale-dev/
+- STATIC (production): https://modelseed.org/annotation/projects/aiale-dev/
 
-Both sites are built from THIS single codebase. They differ only in which
-database snapshot is baked in, and the UI automatically hides views whose data is
-absent (see "Data-driven views" below).
+The approved static viewer is built from the `static` branch with its full LIMS
+mirror snapshot. Static output is prebaked and does not call live APIs.
 
 ## Documentation map
 
@@ -102,30 +100,21 @@ npm run build
 npm start                     # add -- -p 3457 to change port
 ```
 
-## Static build (for modelseed.org)
+## Static production build (modelseed.org)
 
-The same codebase also builds a fully static bundle (no server) for the public
-deployment. Which database you point the server at before `prebake` +
-`prepare-httpvfs-db.sh` determines what the static instance shows.
+The approved static production source is `static`; `static-dev` is the private static-development source. The static URL remains `https://modelseed.org/annotation/projects/aiale-dev/`. Do not build, promote, or deploy from compatibility-only `dev` or `deploy/aiale-dev`.
+
+From an accepted `static` checkout, with a server running against `data/lims_indexed.db`:
 
 ```bash
-# 1. a server must be running so prebake can snapshot the live API
-npm run prebake                                              # API -> public/data/*.json(.gz)
-SRC=data/lims_indexed.db bash scripts/prepare-httpvfs-db.sh  # -> public/db/lims.db
-BASE_PATH=/annotation/projects/aiale npm run build:static    # -> out/
-# then mirror out/ into the target webroot and fix file perms (644 files / 755 dirs)
+npm run prebake
+SRC=data/lims_indexed.db bash scripts/prepare-httpvfs-db.sh
+BASE_PATH=/annotation/projects/aiale-dev scripts/build-static.sh
 ```
 
-The raw Database Tables browser stays fully queryable in the static build because
-it runs real SQLite in the browser via sql.js-httpvfs over HTTP range requests;
-the host must serve the `.db` with `Accept-Ranges: bytes`.
+The script accepts only that existing base path and bakes `channel=static` and `branch=static`. It creates `out/`; after explicit authorization, mirror its contents into the approved webroot, then verify the URL root, `data/manifest.json`, and a SQLite byte-range response. Static output is prebaked with no live API calls, retains Plate Design, and omits the AI sidebar/User Workspace. Rebuild `npm run build` before returning to server mode because the static export clears `.next`.
 
-Static deployments are tracked by branch and displayed in the viewer version
-badge and Changelog. Viewer version is the semantic release in `package.json`;
-data version is the active mirror snapshot timestamp, with file mtime and static
-manifest metadata shown separately. Versioning starts at `1.0.0`; see
-[`docs/DEPLOYMENT_VERSIONING.md`](docs/DEPLOYMENT_VERSIONING.md) for the
-`deploy/aiale-dev` and `deploy/aiale-public` workflow.
+Dynamic development and releases use `dynamic-dev` and `dynamic`; `main` is historic/shared recovery only.
 
 ## Database performance
 
@@ -147,11 +136,11 @@ refreshes. Database files live under `data/` and are not committed.
 | `SQLITE_PATH` | `data/lims_mirror.db` | SQLite database path (use the indexed copy) |
 | `MYSQL_URL` | - | MySQL connection string; if set, MySQL is used instead of SQLite |
 | `STATIC_EXPORT` | - | `1` switches the build to static `output: export` |
-| `BASE_PATH` | - | URL base path for a static build (e.g. `/annotation/projects/aiale`) |
-| `VIEWER_VERSION` | `package.json` version | Static build viewer version override |
-| `DEPLOYMENT_CHANNEL` | inferred from `BASE_PATH` | Static channel: `dev` or `public` |
-| `DEPLOYMENT_BRANCH` | inferred from `BASE_PATH` | Static deploy branch pointer shown in the viewer |
-| `GIT_COMMIT` | current git commit | Static build commit override |
+| `NEXT_PUBLIC_BASE_PATH` | - | Static URL base path: `/annotation/projects/aiale-dev` |
+| `NEXT_PUBLIC_VIEWER_VERSION` | `package.json` version | Static build viewer version override |
+| `NEXT_PUBLIC_DEPLOYMENT_CHANNEL` | `static` | Baked static deployment channel |
+| `NEXT_PUBLIC_DEPLOYMENT_BRANCH` | `static` | Baked static source branch |
+| `NEXT_PUBLIC_GIT_COMMIT` | current git commit | Baked static commit override |
 
 ## API (server mode)
 
