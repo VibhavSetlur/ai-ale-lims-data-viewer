@@ -322,7 +322,7 @@ export default function HelpCenter({
   onClose, onGuide, guideUrl,
 }: {
   onClose: () => void;
-  onGuide: () => void;
+  onGuide?: () => void;
   guideUrl?: string;
 }) {
   const [query, setQuery] = useState('');
@@ -356,9 +356,9 @@ export default function HelpCenter({
             <h2 className="text-[17px] font-semibold leading-none">Help & Researcher Guide</h2>
             <p className="text-[11.5px] text-[var(--text-soft)] mt-1">Practical, biologist-friendly documentation for every view, with color rules, data provenance, export, and manuscript wording.</p>
           </div>
-          <button onClick={onGuide} className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[12px] font-medium border border-[var(--border)] hover:bg-[var(--surface-3)]">
+          {onGuide && <button onClick={onGuide} className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[12px] font-medium border border-[var(--border)] hover:bg-[var(--surface-3)]">
             <Compass className="w-4 h-4 text-[var(--accent-600)]" /> Open Guide
-          </button>
+          </button>}
           <button onClick={onClose} className="p-1 rounded hover:bg-[var(--surface-3)]" title="Close (Esc)"><X className="w-5 h-5" /></button>
         </div>
 
@@ -423,9 +423,9 @@ export default function HelpCenter({
               <div className="text-[var(--text-soft)]">Nothing matches your search. Clear it to see the full guide.</div>
             )}
             <div className="pt-4 border-t border-[var(--border)] flex flex-wrap gap-2">
-              <button onClick={onGuide} className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[12px] font-medium border border-[var(--border)] hover:bg-[var(--surface-3)]">
+              {onGuide && <button onClick={onGuide} className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[12px] font-medium border border-[var(--border)] hover:bg-[var(--surface-3)]">
                 <Compass className="w-4 h-4 text-[var(--accent-600)]" /> Open the Guide (how-do-I + prompt builder)
-              </button>
+              </button>}
             </div>
           </div>
         </div>

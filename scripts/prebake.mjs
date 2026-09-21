@@ -21,15 +21,35 @@
  * one CHUNK at a time (CHUNK_ROWS rows), so even the 223k-row Mutations table is
  * browsed without ever holding the whole thing. We never ship the 240MB DB.
  */
-import { mkdir, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, readFile, readlink, stat, writeFile } from 'node:fs/promises';
 import { gzipSync } from 'node:zlib';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 
 const BASE = process.env.BASE || 'http://localhost:3457';
 const OUT = path.resolve(process.cwd(), 'public', 'data');
+const SOURCE_DB = path.resolve(process.cwd(), process.env.SRC || 'data/lims_indexed.db');
 
-const FLOOR_EXPERIMENTS = ['TFMN1', 'TFMN2', 'TFMN3', 'TFMN4', 'strain_stocks'];
+const EXPERIMENTS = ['TFMN1', 'TFMN2', 'TFMN3', 'TFMN4', 'strain_stocks'];
+const curatedTargets = [
+  { key: 'mutations__all', url: '/api/mutations' },
+  ...EXPERIMENTS.map(e => ({
+    key: `mutations__experiment_${e}`,
+    url: `/api/mutations?experiment=${encodeURIComponent(e)}`,
+  })),
+  { key: 'growth-series__all', url: '/api/growth-series' },
+  ...EXPERIMENTS.map(e => ({
+    key: `growth-series__experiment_${e}`,
+    url: `/api/growth-series?experiment=${encodeURIComponent(e)}`,
+  })),
+  { key: 'mutations-stats', url: '/api/mutations-stats' },
+  { key: 'barcode-counts', url: '/api/barcode-counts' },
+  { key: 'library-variants', url: '/api/library-variants' },
+  { key: 'plate-design-factors', url: '/api/plate-design/factors' },
+  { key: 'tables', url: '/api/tables?withCounts=1' },
+  { key: 'mirror-info', url: '/api/mirror-info' },
+  { key: 'config', url: '/api/config' },
+];
 
 async function fetchJson(url) {
   const res = await fetch(BASE + url, { headers: { accept: 'application/json' } });
@@ -37,38 +57,28 @@ async function fetchJson(url) {
   return res.json();
 }
 
-async function getCuratedTargets() {
-  const mutations = await fetchJson('/api/mutations');
-  const derivedExperiments = Array.isArray(mutations.experiments) && mutations.experiments.length
-    ? mutations.experiments
-    : FLOOR_EXPERIMENTS;
-  const experiments = [...new Set([...FLOOR_EXPERIMENTS, ...derivedExperiments])].sort();
-  console.log(`experiments: ${experiments.join(', ')}`);
-  return [
-    { key: 'mutations__all', url: '/api/mutations' },
-    ...experiments.map(e => ({
-      key: `mutations__experiment_${e}`,
-      url: `/api/mutations?experiment=${encodeURIComponent(e)}`,
-    })),
-    { key: 'growth-series__all', url: '/api/growth-series' },
-    ...experiments.map(e => ({
-      key: `growth-series__experiment_${e}`,
-      url: `/api/growth-series?experiment=${encodeURIComponent(e)}`,
-    })),
-    { key: 'mutations-stats', url: '/api/mutations-stats' },
-    { key: 'barcode-counts', url: '/api/barcode-counts' },
-    { key: 'library-variants', url: '/api/library-variants' },
-    { key: 'plate-design-factors', url: '/api/plate-design/factors' },
-    { key: 'tables', url: '/api/tables?withCounts=1' },
-    { key: 'mirror-info', url: '/api/mirror-info' },
-    { key: 'config', url: '/api/config' },
-  ];
-}
-
 async function main() {
+  const [source, sourceStats] = await Promise.all([readFile(SOURCE_DB), stat(SOURCE_DB)]);
+  const sourceSha256 = createHash('sha256').update(source).digest('hex');
+  const dbConfigPath = path.resolve(process.cwd(), 'public', 'db', 'config.json');
+  let dbConfig;
+  try { dbConfig = JSON.parse(await readFile(dbConfigPath, 'utf8')); }
+  catch (error) { throw new Error(`Could not read HTTPVFS config: ${error instanceof Error ? error.message : String(error)}`); }
+  if (dbConfig.sourceSha256 !== sourceSha256) {
+    throw new Error(`HTTPVFS source hash ${dbConfig.sourceSha256 ?? 'missing'} does not match ${SOURCE_DB}`);
+  }
+  const dbLink = path.resolve(process.cwd(), 'public', 'db', 'lims.db');
+  if (!(await lstat(dbLink)).isSymbolicLink() || await readlink(dbLink) !== dbConfig.url) {
+    throw new Error('public/db/lims.db must be a symlink to the configured HTTPVFS database');
+  }
+
   await mkdir(OUT, { recursive: true });
-  const curatedTargets = await getCuratedTargets();
-  const manifest = { generatedAt: new Date().toISOString(), source: BASE, files: {} };
+  const manifest = {
+    generatedAt: new Date().toISOString(),
+    source: BASE,
+    snapshot: { path: path.relative(process.cwd(), SOURCE_DB), sha256: sourceSha256, bytes: sourceStats.size },
+    files: {},
+  };
   let totalRaw = 0, totalGz = 0;
 
   for (const t of curatedTargets) {

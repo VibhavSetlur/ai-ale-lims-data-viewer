@@ -14,7 +14,7 @@ import {
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
 import HelpCenter from './HelpCenter';
-import GuideAssistant, { type GuideAction } from './GuideAssistant';
+import type { GuideAction } from './GuideAssistant';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -52,7 +52,8 @@ const ACTIVE_VIEW_KEY = 'lims:activeView';
 type ActiveView = 'tables' | 'mutations' | 'plateDesign';
 
 const MutationExplorer = dynamic(() => import('./MutationExplorer'), { ssr: false, loading: () => <div className="p-4 text-sm text-[var(--text-soft)]">Loading Mutation Explorer…</div> });
-const PlateDesignWorkspace = dynamic(() => import('./PlateDesignWorkspace'), { ssr: false, loading: () => <div className="p-4 text-sm text-[var(--text-soft)]">Loading Plate Design…</div> });
+const PlateDesignWorkspace = !IS_STATIC ? dynamic(() => import('./PlateDesignWorkspace'), { ssr: false, loading: () => <div className="p-4 text-sm text-[var(--text-soft)]">Loading Plate Design…</div> }) : null;
+const GuideAssistant = !IS_STATIC ? dynamic(() => import('./GuideAssistant'), { ssr: false }) : null;
 const DataTable = dynamic(() => import('./DataTable'), { ssr: false, loading: () => <div className="p-4 text-sm text-[var(--text-soft)]">Loading table browser…</div> });
 
 interface MirrorInfo {
@@ -149,8 +150,8 @@ export default function Dashboard({ initialTables, buildInfo }: DashboardProps) 
       if (c === '1') setCollapsed(true);
       const v = localStorage.getItem(ACTIVE_VIEW_KEY);
       const oldTab = localStorage.getItem('lims:mutation:tab');
-       if (oldTab === 'plateDesign') { localStorage.setItem('lims:mutation:tab', 'samples'); setActiveView('plateDesign'); }
-       else if (v === 'mutations' || v === 'tables' || v === 'plateDesign') setActiveView(v);
+       if (!IS_STATIC && oldTab === 'plateDesign') { localStorage.setItem('lims:mutation:tab', 'samples'); setActiveView('plateDesign'); }
+       else if (v === 'mutations' || v === 'tables' || (!IS_STATIC && v === 'plateDesign')) setActiveView(v);
     } catch {}
   }, []);
 
@@ -530,7 +531,7 @@ export default function Dashboard({ initialTables, buildInfo }: DashboardProps) 
                   <span className="flex-1">Database Tables</span>
                 </button>
                 <button onClick={() => setActiveView('mutations')} data-active={activeView === 'mutations'} data-tour="nav-mutations" className="lims-nav"><Dna className="w-4 h-4 shrink-0" /><span className="flex-1">Mutation Explorer</span></button>
-                <button onClick={() => setActiveView('plateDesign')} data-active={activeView === 'plateDesign'} className="lims-nav"><Grid3X3 className="w-4 h-4 shrink-0" /><span className="flex-1">Plate Design</span></button>
+                {!IS_STATIC && <button onClick={() => setActiveView('plateDesign')} data-active={activeView === 'plateDesign'} className="lims-nav"><Grid3X3 className="w-4 h-4 shrink-0" /><span className="flex-1">Plate Design</span></button>}
               </div>
 
               {activeView === 'tables' ? (
@@ -602,10 +603,10 @@ export default function Dashboard({ initialTables, buildInfo }: DashboardProps) 
               {/* Help & Learning — always at the bottom of the expanded sidebar */}
               <div className="mt-auto p-2 border-t border-[var(--border)]">
                 <div className="lims-label mb-1.5 px-1">Help &amp; Learning</div>
-                <button onClick={() => setShowGuide(true)} data-tour="help-guide" className="lims-nav mb-0.5" title="Guided how-do-I answers that walk you to the right view">
+                {!IS_STATIC && <button onClick={() => setShowGuide(true)} data-tour="help-guide" className="lims-nav mb-0.5" title="Guided how-do-I answers that walk you to the right view">
                   <Compass className="w-4 h-4 shrink-0 text-[var(--accent-600)]" />
                   <span className="flex-1 text-left">Guide</span>
-                </button>
+                </button>}
                 <button onClick={() => setShowChangesPanel(true)} className="lims-nav mb-0.5" title="Viewer changelog and data snapshot details">
                   <ScrollText className="w-4 h-4 shrink-0 text-[var(--accent-600)]" />
                   <span className="flex-1 text-left">Changelog</span>
@@ -636,9 +637,9 @@ export default function Dashboard({ initialTables, buildInfo }: DashboardProps) 
                 title="Mutation Explorer">
                 <Dna className="w-4 h-4" />
               </button>
-              <button onClick={() => setActiveView('plateDesign')} className={cn("p-1.5 rounded-md", activeView === 'plateDesign' ? "text-[var(--accent-700)] bg-[var(--accent-50)]" : "text-[var(--text-faint)] hover:bg-[var(--surface-3)]")} title="Plate Design"><Grid3X3 className="w-4 h-4" /></button>
+              {!IS_STATIC && <button onClick={() => setActiveView('plateDesign')} className={cn("p-1.5 rounded-md", activeView === 'plateDesign' ? "text-[var(--accent-700)] bg-[var(--accent-50)]" : "text-[var(--text-faint)] hover:bg-[var(--surface-3)]")} title="Plate Design"><Grid3X3 className="w-4 h-4" /></button>}
               <div className="mt-auto flex flex-col items-center gap-1 pb-2">
-                <button onClick={() => setShowGuide(true)} className="p-1.5 rounded-md text-[var(--text-faint)] hover:bg-[var(--surface-3)]" title="Guide"><Compass className="w-4 h-4" /></button>
+                {!IS_STATIC && <button onClick={() => setShowGuide(true)} className="p-1.5 rounded-md text-[var(--text-faint)] hover:bg-[var(--surface-3)]" title="Guide"><Compass className="w-4 h-4" /></button>}
                 <button onClick={() => setShowChangesPanel(true)} className="p-1.5 rounded-md text-[var(--text-faint)] hover:bg-[var(--surface-3)]" title="Changelog"><ScrollText className="w-4 h-4" /></button>
                 <button onClick={() => setShowHelp(true)} className="p-1.5 rounded-md text-[var(--text-faint)] hover:bg-[var(--surface-3)]" title="Help"><BookOpen className="w-4 h-4" /></button>
                 <a href={ISSUES_NEW_URL} target="_blank" rel="noopener noreferrer" className="p-1.5 rounded-md text-[var(--text-faint)] hover:bg-[var(--surface-3)]" title="Report an issue"><Bug className="w-4 h-4" /></a>
@@ -649,7 +650,7 @@ export default function Dashboard({ initialTables, buildInfo }: DashboardProps) 
 
         <div className="flex-1 min-w-0 p-3 flex flex-col overflow-hidden bg-[var(--surface-2)] relative">
           <div className="flex-1 min-h-0">
-            {activeView === 'mutations' ? <MutationExplorer /> : activeView === 'plateDesign' ? <PlateDesignWorkspace /> : activeTable ? (
+            {activeView === 'mutations' ? <MutationExplorer /> : activeView === 'plateDesign' && PlateDesignWorkspace ? <PlateDesignWorkspace /> : activeTable ? (
               <DataTable key={activeTable} tableName={activeTable} />
             ) : (
               <div className="flex flex-col items-center justify-center h-full bg-[var(--surface)] rounded-lg border border-[var(--border)] text-[var(--text-soft)] text-sm gap-2" style={{ boxShadow: 'var(--shadow-sm)' }}>
@@ -747,11 +748,11 @@ export default function Dashboard({ initialTables, buildInfo }: DashboardProps) 
       {showHelp && (
         <HelpCenter
           onClose={() => setShowHelp(false)}
-          onGuide={() => { setShowHelp(false); setShowGuide(true); }}
+          onGuide={!IS_STATIC ? () => { setShowHelp(false); setShowGuide(true); } : undefined}
           guideUrl={`${BASE_PATH}/help/researcher-guide.md`}
         />
       )}
-      {showGuide && (
+      {!IS_STATIC && showGuide && GuideAssistant && (
         <GuideAssistant
           ctx={{ view: activeView === 'mutations' ? 'Mutation Explorer' : activeView === 'plateDesign' ? 'Plate Design' : 'Database Tables' }}
           onClose={() => setShowGuide(false)}

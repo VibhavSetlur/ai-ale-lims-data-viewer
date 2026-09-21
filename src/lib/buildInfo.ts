@@ -45,15 +45,15 @@ export const DEPLOYMENT_CHANNELS: Record<DeploymentChannel, {
 
 function cleanChannel(value: string | undefined): DeploymentChannel {
   if (value === 'dev' || value === 'public' || value === 'server') return value;
-  return process.env.NEXT_PUBLIC_STATIC === '1' ? 'public' : 'server';
+  return process.env.NEXT_PUBLIC_STATIC === '1' ? 'dev' : 'server';
 }
 
 export function getBuildInfo(): BuildInfo {
   const mode = process.env.NEXT_PUBLIC_STATIC === '1' ? 'static' : 'server';
   return {
-    version: process.env.NEXT_PUBLIC_VIEWER_VERSION || '1.14.2',
+    version: process.env.NEXT_PUBLIC_VIEWER_VERSION || '1.14.3',
     channel: cleanChannel(process.env.NEXT_PUBLIC_DEPLOYMENT_CHANNEL),
-    branch: process.env.NEXT_PUBLIC_DEPLOYMENT_BRANCH || (mode === 'static' ? 'deploy/aiale-public' : 'main'),
+    branch: process.env.NEXT_PUBLIC_DEPLOYMENT_BRANCH || (mode === 'static' ? 'deploy/aiale-dev' : 'dev'),
     commit: process.env.NEXT_PUBLIC_GIT_COMMIT || 'local',
     mode,
     basePath: process.env.NEXT_PUBLIC_BASE_PATH || '',
