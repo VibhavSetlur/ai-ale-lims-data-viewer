@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { runQuery, getDbType } from '@/lib/db';
+import { deriveReplicate } from '@/lib/mutationSample';
 
 export interface MutationSample {
   id: string;
@@ -207,12 +208,6 @@ function describeSelection(sel: string | undefined, notes: string | null): strin
   }
   if (notes && notes.trim()) parts.push(notes.trim());
   return parts.length ? parts.join(' · ') : undefined;
-}
-
-function deriveReplicate(sampleName: string | null): string | undefined {
-  if (!sampleName) return undefined;
-  const m = sampleName.match(/\.(\d+)$/);
-  return m ? m[1] : undefined;
 }
 
 function deriveDonorDna(sampleName: string | null, transformingDna: string | null): string | undefined {

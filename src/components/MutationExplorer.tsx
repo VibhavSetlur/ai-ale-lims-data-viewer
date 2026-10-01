@@ -3709,7 +3709,7 @@ function SampleDetailModal({
                     </tr>
                   </thead>
                   <tbody>
-                    {sampleMutationRows.slice(0, 80).map(r => (
+                    {sampleMutationRows.map(r => (
                       <tr key={r.mutation.id} className="border-t border-[var(--border)]">
                         <td className="px-2 py-1 min-w-0">
                           <div className="font-mono text-[var(--text)] truncate">{r.mutation.gene} / {r.mutation.variant}</div>
@@ -3722,7 +3722,6 @@ function SampleDetailModal({
                     ))}
                   </tbody>
                 </table>
-                {sampleMutationRows.length > 80 && <div className="px-2 py-1 text-[10.5px] text-[var(--text-faint)] border-t border-[var(--border)]">Showing first 80 of {sampleMutationRows.length}. Use Comparative View for all rows.</div>}
               </div>
             )}
           </ModalSection>
