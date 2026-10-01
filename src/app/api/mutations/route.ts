@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { runQuery, getDbType } from '@/lib/db';
+import { deriveReplicate } from '@/lib/mutationSample';
 
 export interface MutationSample {
   id: string;
@@ -209,12 +210,6 @@ function describeSelection(sel: string | undefined, notes: string | null): strin
   return parts.length ? parts.join(' · ') : undefined;
 }
 
-function deriveReplicate(sampleName: string | null): string | undefined {
-  if (!sampleName) return undefined;
-  const m = sampleName.match(/\.(\d+)$/);
-  return m ? m[1] : undefined;
-}
-
 function deriveDonorDna(sampleName: string | null, transformingDna: string | null): string | undefined {
   if (transformingDna && transformingDna.trim()) return transformingDna.trim();
   if (!sampleName) return undefined;
@@ -322,13 +317,19 @@ function mutationKey(r: MutationRawRow): string {
    need to select them for verAB library comparisons.
 */
 
-// Build SAMPLES SQL on demand so the registry/experiment filters can be pushed
-// inside the CTE — a sample only appears if it had calls under the selected
-// registry/experiment. Params are appended in (experiment?, registry?) order.
+// Build SAMPLES SQL on demand so registry and canonical Seq_samples experiment
+// filters are pushed inside the CTE. Params are appended in (experiment?, registry?) order.
 function buildSamplesSql(opts: { experiment: boolean; registry: boolean; barcodeSamples: boolean }): string {
   const inner: string[] = ['deleted = 0'];
-  if (opts.experiment) inner.push('"Experiment" = ?');
-  if (opts.registry)   inner.push('"Breseq_registry_ID" = ?');
+  if (opts.experiment) {
+    inner.push(`EXISTS (
+      SELECT 1 FROM Seq_samples ss_filter
+      WHERE ss_filter."Sequencing_sample" = "Seq_sample"
+        AND ss_filter.deleted = 0
+        AND ss_filter."Experiment" = ?
+    )`);
+  }
+  if (opts.registry) inner.push('"Breseq_registry_ID" = ?');
   const barcodeWhere: string[] = ['v.deleted = 0', 'COALESCE(v."Count", 0) > 0'];
   if (opts.experiment) barcodeWhere.push('ss_filter."Experiment" = ?');
   const barcodeUnion = opts.barcodeSamples ? `
@@ -433,7 +434,7 @@ function buildSamplesSql(opts: { experiment: boolean; registry: boolean; barcode
     LEFT JOIN Samples s
       ON s."Name" = ss."Sample_Name" AND s.deleted = 0
     LEFT JOIN Experiments e
-      ON e."Name" = COALESCE(ms.experiment, ss."Experiment") AND e.deleted = 0
+      ON e."Name" = COALESCE(ss."Experiment", ms.experiment) AND e.deleted = 0
   `;
 }
 
@@ -478,9 +479,11 @@ function buildAllExperimentsSql(hasBarcodeTable: boolean): string {
   return `
     SELECT DISTINCT name
     FROM (
-      SELECT Experiment AS name
-      FROM Mutations
-      WHERE deleted = 0 AND Experiment IS NOT NULL AND Experiment != ''
+      SELECT ss."Experiment" AS name
+      FROM Seq_samples ss
+      JOIN Mutations m
+        ON m."Seq_sample" = ss."Sequencing_sample" AND m.deleted = 0
+      WHERE ss.deleted = 0 AND ss."Experiment" IS NOT NULL AND ss."Experiment" != ''
       ${hasBarcodeTable ? `
       UNION
       SELECT ss."Experiment" AS name
@@ -507,6 +510,8 @@ const REGISTRY_COUNTS_SQL = `
     r."limit_fold_coverage"            AS limit_fold_coverage,
     r."reference"                      AS reference
   FROM Mutations m
+  JOIN Seq_samples ss_filter
+    ON ss_filter."Sequencing_sample" = m."Seq_sample" AND ss_filter.deleted = 0
   LEFT JOIN Breseq_registry r
     ON r."ID" = m."Breseq_registry_ID" AND r.deleted = 0
   WHERE m.deleted = 0
@@ -604,13 +609,14 @@ export async function GET(req: NextRequest) {
       hasBarcodeTable = false;
     }
 
-    // First pass: enumerate the breseq registries present for this (experiment-filtered)
-    // dataset so we can validate the requested registry and pick a default when
+    // First pass: enumerate the breseq registries present for this dataset, using
+    // the canonical Seq_samples experiment label when filtered, so we can validate
+    // the requested registry and pick a default when
     // the caller doesn't specify one. The Mutations table currently has up to 4
     // registries per Seq_sample (different breseq parameter runs); silently
     // merging them — what the original API did — hides genuine call differences.
     const regCountsSql = experimentFilter
-      ? `${REGISTRY_COUNTS_SQL} AND m."Experiment" = ? GROUP BY m."Breseq_registry_ID", r."polymorphism_frequency_cutoff", r."limit_fold_coverage", r."reference" ORDER BY count DESC`
+      ? `${REGISTRY_COUNTS_SQL} AND ss_filter."Experiment" = ? GROUP BY m."Breseq_registry_ID", r."polymorphism_frequency_cutoff", r."limit_fold_coverage", r."reference" ORDER BY count DESC`
       : `${REGISTRY_COUNTS_SQL} GROUP BY m."Breseq_registry_ID", r."polymorphism_frequency_cutoff", r."limit_fold_coverage", r."reference" ORDER BY count DESC`;
     const regParams: (string | number | null)[] = experimentFilter ? [experimentFilter] : [];
     const registries = await runQuery<RegistrySummary>(regCountsSql, regParams);
@@ -696,7 +702,12 @@ export async function GET(req: NextRequest) {
       barcodeSamples: hasBarcodeTable,
     });
     const mutSql = MUTATIONS_SQL
-      + (experimentFilter ? ' AND "Experiment" = ?' : '')
+      + (experimentFilter ? ` AND EXISTS (
+          SELECT 1 FROM Seq_samples ss_filter
+          WHERE ss_filter."Sequencing_sample" = Mutations."Seq_sample"
+            AND ss_filter.deleted = 0
+            AND ss_filter."Experiment" = ?
+        )` : '')
       + ((selectedRegistry && !usePerSampleRegistry) ? ' AND "Breseq_registry_ID" = ?' : '');
 
     const [sampleRows, mutRows, allExperiments, odRows, curveRows, cnRows] = await Promise.all([
@@ -791,7 +802,7 @@ export async function GET(req: NextRequest) {
       return {
         id: r.seq_sample,
         name: r.seq_sample,
-        experiment: r.experiment_from_mutations ?? r.experiment_from_seq ?? '',
+        experiment: r.experiment_from_seq ?? r.experiment_from_mutations ?? '',
         breseq_registry_id: registryBySample.get(r.seq_sample),
         experiment_type: r.experiment_type ?? undefined,
         seqorder: (r.seqorder && String(r.seqorder).trim()) || undefined,
