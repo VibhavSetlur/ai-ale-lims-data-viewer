@@ -2248,8 +2248,7 @@ function ComparativePanel({
                 </th>
               ))}
             </tr>
-            {/* Breseq registry (hidden in compact mode) */}
-            {!compactHeaders && (
+            {/* Breseq registry */}
             <tr>
               <th className="sticky left-0 z-40 bg-white dark:bg-gray-800 border-b border-r border-slate-200 dark:border-gray-700 px-2 py-1 text-left text-[10px] uppercase tracking-wider text-slate-500 dark:text-gray-400">
                 Breseq run
@@ -2260,7 +2259,6 @@ function ComparativePanel({
                 </th>
               ))}
             </tr>
-            )}
             {/* Condition (hidden in compact mode) */}
             {!compactHeaders && (
             <tr>
