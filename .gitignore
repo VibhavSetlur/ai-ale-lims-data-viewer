@@ -85,6 +85,7 @@ public/data/manifest.json
 /ops/auto-refresh-live.log
 /ops/auto-refresh-live.lock
 /ops/live-db-source.mtime
+/.local/auto-refresh-release/
 
 # ops "live" slice (port 3458): isolated build dir + log, never committed
 /.next-live/
