@@ -67,6 +67,12 @@ interface MirrorInfo {
 interface ManifestInfo {
   generatedAt?: string;
   source?: string;
+  snapshot?: {
+    at?: string;
+    sha256?: string;
+    bytes?: number;
+    tableCounts?: Record<string, number>;
+  };
   files?: Record<string, { file?: string; gz?: string; bytes?: number; gzBytes?: number; hash?: string }>;
 }
 
@@ -712,8 +718,12 @@ export default function Dashboard({ initialTables, buildInfo }: DashboardProps) 
                     {manifestInfo ? (
                       <div className="grid grid-cols-[7rem_1fr] gap-x-2 gap-y-1 lims-id text-[11.5px]">
                         <span className="text-[var(--text-soft)]">Generated</span><span>{manifestInfo.generatedAt || 'not recorded'}</span>
+                        <span className="text-[var(--text-soft)]">Snapshot</span><span>{manifestInfo.snapshot?.at ? formatSnapshot(manifestInfo.snapshot.at) : 'not recorded'}</span>
+                        <span className="text-[var(--text-soft)]">SHA-256</span><span className="break-all">{manifestInfo.snapshot?.sha256 || 'not recorded'}</span>
+                        <span className="text-[var(--text-soft)]">Bytes</span><span>{manifestInfo.snapshot?.bytes?.toLocaleString() || 'not recorded'}</span>
                         <span className="text-[var(--text-soft)]">Source</span><span className="break-all">{manifestInfo.source || 'not recorded'}</span>
                         <span className="text-[var(--text-soft)]">Files</span><span>{Object.keys(manifestFiles).length}</span>
+                        <span className="text-[var(--text-soft)]">Table counts</span><span className="break-all">{manifestInfo.snapshot?.tableCounts ? Object.entries(manifestInfo.snapshot.tableCounts).map(([table, count]) => `${table}: ${count.toLocaleString()}`).join(', ') : 'not recorded'}</span>
                         <span className="text-[var(--text-soft)]">mutations__all</span><span className="break-all">{manifestFiles.mutations__all?.gz || manifestFiles.mutations__all?.file || 'not present'}</span>
                         <span className="text-[var(--text-soft)]">barcode-counts</span><span className="break-all">{manifestFiles['barcode-counts']?.gz || manifestFiles['barcode-counts']?.file || 'not present'}</span>
                       </div>

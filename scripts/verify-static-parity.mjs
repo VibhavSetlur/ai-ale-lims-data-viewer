@@ -51,6 +51,7 @@ async function main() {
   const sourceStats = await stat(SOURCE_DB);
   if (manifest.snapshot?.sha256 !== sourceHash) throw new Error(`manifest source hash ${manifest.snapshot?.sha256 ?? 'missing'} does not match ${SOURCE_DB}`);
   if (manifest.snapshot?.bytes !== sourceStats.size) throw new Error(`manifest source size ${manifest.snapshot?.bytes ?? 'missing'} does not match ${SOURCE_DB}`);
+  if (!manifest.snapshot?.at || !manifest.snapshot?.tableCounts) throw new Error('manifest snapshot timestamp or table counts are missing');
   if (config.sourceSha256 !== sourceHash) throw new Error(`HTTPVFS source hash ${config.sourceSha256 ?? 'missing'} does not match ${SOURCE_DB}`);
   if (!config.url?.includes(sourceHash)) throw new Error(`HTTPVFS URL is not keyed to source hash ${sourceHash}`);
   await access(path.join(DB_DIR, 'lims.db'));
@@ -66,6 +67,10 @@ async function main() {
   for (const [key, endpoint] of checks) {
     const [baked, live] = await Promise.all([json(path.join(DATA_DIR, `${key}.json`)), fetchJson(endpoint)]);
     if (canonicalJson(baked) !== canonicalJson(live)) throw new Error(`${key} differs from live ${endpoint}`);
+    if (key === 'mirror-info') {
+      if (manifest.snapshot.at !== live.snapshot_at) throw new Error('manifest snapshot timestamp differs from live mirror-info');
+      if (canonicalJson(manifest.snapshot.tableCounts) !== canonicalJson(live.table_counts)) throw new Error('manifest table counts differ from live mirror-info');
+    }
     const entry = manifest.files?.[key];
     if (!entry || entry.hash !== createHash('sha1').update(JSON.stringify(baked)).digest('hex').slice(0, 10)) {
       throw new Error(`manifest hash for ${key} is missing or inconsistent`);

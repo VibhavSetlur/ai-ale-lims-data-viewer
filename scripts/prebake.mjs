@@ -80,12 +80,14 @@ async function main() {
     files: {},
   };
   let totalRaw = 0, totalGz = 0;
+  let mirrorInfo;
 
   for (const t of curatedTargets) {
     process.stdout.write(`baking ${t.key} ... `);
     let data;
     try { data = await fetchJson(t.url); }
     catch (err) { throw new Error(`Could not bake ${t.key}: ${err instanceof Error ? err.message : String(err)}`); }
+    if (t.key === 'mirror-info') mirrorInfo = data;
     const json = JSON.stringify(data);
     const gz = gzipSync(Buffer.from(json), { level: 9 });
     const hash = createHash('sha1').update(json).digest('hex').slice(0, 10);
@@ -96,6 +98,11 @@ async function main() {
     console.log(`${(json.length / 1024).toFixed(0)} KB raw / ${(gz.length / 1024).toFixed(0)} KB gz`);
   }
 
+  if (!mirrorInfo || typeof mirrorInfo !== 'object' || !mirrorInfo.snapshot_at || !mirrorInfo.table_counts || typeof mirrorInfo.table_counts !== 'object') {
+    throw new Error('mirror-info must provide snapshot_at and table_counts for static provenance');
+  }
+  manifest.snapshot.at = mirrorInfo.snapshot_at;
+  manifest.snapshot.tableCounts = mirrorInfo.table_counts;
   await writeFile(path.join(OUT, 'manifest.json'), JSON.stringify(manifest, null, 2));
   console.log(`\nmanifest: ${Object.keys(manifest.files).length} artifacts`);
   console.log(`total: ${(totalRaw / 1024 / 1024).toFixed(1)} MB raw / ${(totalGz / 1024 / 1024).toFixed(2)} MB gz`);

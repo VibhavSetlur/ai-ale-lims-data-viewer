@@ -85,6 +85,8 @@ public/data/manifest.json
 /ops/auto-refresh-live.log
 /ops/auto-refresh-live.lock
 /ops/live-db-source.mtime
+/.local/auto-refresh-release/
+/static-deploy-backups/
 
 # local agent rules and private writing handoffs (not for publication)
 CLAUDE.md
