@@ -7,6 +7,8 @@ PORT="${PORT:-3457}"
 HOST="${HOST:-0.0.0.0}"
 CONDA_ENV="${CONDA_ENV:-ai-ale-dev}"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# The active indexed copy is the default runtime DB.  Preserve an explicit override.
+export SQLITE_PATH="${SQLITE_PATH:-$HERE/data/lims_indexed.db}"
 
 source /scratch/vsetlur/anaconda3/etc/profile.d/conda.sh
 conda activate "${CONDA_ENV}"

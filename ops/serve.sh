@@ -73,7 +73,7 @@ fi
 # so `tail -F ops/server.log` works without attaching.
 : > ops/server.log
 PORT="${PORT}" HOST="${HOST}" CONDA_ENV="${CONDA_ENV}" \
-  tmux new-session -d -s "$SESSION" "bash '${HERE}/ops/_run.sh'"
+  9>&- tmux new-session -d -s "$SESSION" "bash '${HERE}/ops/_run.sh'"
 tmux set-option -t "$SESSION" remain-on-exit on 2>/dev/null || true
 tmux pipe-pane -o -t "$SESSION" "cat >> '${HERE}/ops/server.log'" 2>/dev/null || true
 
