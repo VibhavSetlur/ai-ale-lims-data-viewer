@@ -70,10 +70,10 @@ and base path `/annotation/projects/aiale-dev`.
 8. Atomically write accepted state. If `--include-dynamic` was selected, run the
    dynamic companion before writing state.
 
-Any build, parity, deployment, or HTTPS verification failure returns nonzero. The
-previous static site remains the rollback source and the accepted state remains
-unchanged. Automation does not try to overwrite a failed release with an
-unverified fallback.
+Any build, parity, deployment, or HTTPS verification failure returns nonzero. If
+a failure occurs after copying webroot contents, the controller restores those
+contents from the retained rollback copy. The accepted state remains unchanged.
+Automation does not try to overwrite a failed release with an unverified fallback.
 
 ## Scheduler
 

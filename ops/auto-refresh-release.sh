@@ -18,6 +18,9 @@ TEMP_PORT="${TEMP_PORT:-3458}"
 CONDA_ENV="${CONDA_ENV:-ai-ale-dev}"
 DRY_RUN=0
 INCLUDE_DYNAMIC=0
+ROLLBACK_READY=0
+WEBROOT_TOUCHED=0
+ROLLBACK=""
 
 usage() {
   cat <<'USAGE'
@@ -56,6 +59,12 @@ cleanup() {
   if [[ -n "${SERVER_PID:-}" ]] && kill -0 "$SERVER_PID" 2>/dev/null; then
     kill "$SERVER_PID" 2>/dev/null || true
     wait "$SERVER_PID" 2>/dev/null || true
+  fi
+  if ((status != 0 && WEBROOT_TOUCHED == 1 && ROLLBACK_READY == 1)); then
+    log "release failed after publication; restoring webroot contents from $ROLLBACK"
+    rsync -a --delete --no-perms --omit-dir-times "$ROLLBACK/" "$WEBROOT/" || log "ERROR: rollback copy failed"
+    find "$WEBROOT" -mindepth 1 -type d -exec chmod 755 {} + || true
+    find "$WEBROOT" -mindepth 1 -type f -exec chmod 644 {} + || true
   fi
   [[ -n "${STAGE_DIR:-}" ]] && rm -rf "$STAGE_DIR"
   exit "$status"
@@ -147,7 +156,9 @@ ROLLBACK="$ROLLBACK_DIR/static-before-$STAMP"
 log "retaining rollback copy at $ROLLBACK"
 mkdir -p "$ROLLBACK"
 rsync -a --no-perms --omit-dir-times "$WEBROOT/" "$ROLLBACK/"
+ROLLBACK_READY=1
 log "publishing static bundle to approved webroot contents"
+WEBROOT_TOUCHED=1
 rsync -a --delete --no-perms --omit-dir-times "$STATIC_ROOT/out/" "$WEBROOT/"
 find "$WEBROOT" -mindepth 1 -type d -exec chmod 755 {} +
 find "$WEBROOT" -mindepth 1 -type f -exec chmod 644 {} +
