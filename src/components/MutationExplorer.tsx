@@ -115,12 +115,15 @@ interface RegistrySummary {
   unregistered?: boolean;
 }
 
+type CoordinateCapability = { system: 'original' | 'ncbi' | 'neidle'; available: boolean; positionColumn?: string };
+
 interface MutationDataset {
   samples: MutationSample[];
   mutations: MutationRow[];
   experiments?: string[];
   registries?: RegistrySummary[];
   selectedRegistry?: string | null;
+  coordinateCapabilities?: CoordinateCapability[];
   warnings?: string[];
   stats?: {
     sampleCount: number;
@@ -509,6 +512,7 @@ export default function MutationExplorer({ activeTab, onTabChange }: MutationExp
   // later changes the filter and clicks the callout again.
   const [forceMetric, setForceMetric] = useState<{ metric: 'copy_number'; nonce: number } | null>(null);
   const [showNotes, setShowNotes] = useState(false);
+  const [coordinateSystem, setCoordinateSystem] = useState<'original' | 'ncbi' | 'neidle'>('ncbi');
 
   // Cross-component navigation: the Guide dispatches `aiale:navigate`
   // CustomEvents to jump straight to a tab (and optionally a sub-mode). This
@@ -634,6 +638,10 @@ export default function MutationExplorer({ activeTab, onTabChange }: MutationExp
   // eslint-disable-next-line react-hooks/exhaustive-deps -- Pruning only occurs when external data changes.
   }, [data]);
 
+  const coordinateCapabilities = data?.coordinateCapabilities ?? [];
+  const selectedCoordinate = coordinateCapabilities.find(capability => capability.system === coordinateSystem);
+  const coordinateAvailable = Boolean(selectedCoordinate?.available);
+
   const selectedSamples = (data?.samples ?? []).filter(sample => selected.has(sample.id));
   const selectedRuns = Array.from(new Set(selectedSamples.map(sample => sample.breseq_registry_id).filter((id): id is string => Boolean(id))));
   const mixedRuns = selectedRuns.length > 1;
@@ -718,6 +726,13 @@ export default function MutationExplorer({ activeTab, onTabChange }: MutationExp
               })}
             </select>
           </label>
+          <label className="flex items-center gap-1.5 text-[11px] text-[var(--text-soft)]" title="Coordinate systems are available only when the current snapshot provides their mapping columns.">
+            <span className="lims-label">Coordinates</span>
+            <select value={coordinateSystem} onChange={event => setCoordinateSystem(event.target.value as 'original' | 'ncbi' | 'neidle')} className="lims-input !w-auto !py-1 !text-[11.5px]">
+              {(['ncbi', 'neidle', 'original'] as const).map(system => { const capability = coordinateCapabilities.find(item => item.system === system); return <option key={system} value={system} disabled={!capability?.available}>{system.toUpperCase()}{capability?.available ? '' : ' (unavailable)'}</option>; })}
+            </select>
+          </label>
+          {!coordinateAvailable && <span role="status" className="text-[10px] text-amber-700">{coordinateSystem.toUpperCase()} mapping is unavailable in this snapshot; no original coordinates are substituted.</span>}
           {tab === 'samples' && selected.size > 0 && (
             <button onClick={() => selectTab('compare')} className="lims-btn lims-btn-primary" title="Compare the selected samples">
               Compare {selected.size} →

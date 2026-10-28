@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { runQuery, getDbType, getTableSchema } from '@/lib/db';
 import { deriveReplicate } from '@/lib/mutationSample';
+import { coordinateCapabilities, resolveReplicate, type CoordinateCapability } from '@/lib/mutationMetadata';
 
 export interface MutationSample {
   id: string;
@@ -93,7 +94,8 @@ export interface MutationDataset {
   mutations: MutationRow[];
   experiments: string[]; // distinct experiments present in this dataset (post-filter)
   registries?: RegistrySummary[];           // breseq runs that produced calls in the (experiment-filtered) dataset, by row count desc
-  selectedRegistry?: string | null;         // which registry the returned samples/mutations are restricted to
+  selectedRegistry?: string | null;
+  coordinateCapabilities?: CoordinateCapability[];         // which registry the returned samples/mutations are restricted to
   warnings?: string[];
   source?: { driver: 'sqlite' | 'mysql'; table: string; rowsScanned: number };
   stats?: {
@@ -699,7 +701,8 @@ export async function GET(req: NextRequest) {
     if (scopeSamplesByRegistry) sampleParams.push(selectedRegistry);
     if (hasBarcodeTable && experimentFilter) sampleParams.push(experimentFilter);
 
-    const sampleSchema = await getTableSchema('Samples').catch(() => []);
+    const [sampleSchema, mutationSchema] = await Promise.all([getTableSchema('Samples').catch(() => []), getTableSchema('Mutations').catch(() => [])]);
+    const availableCoordinates = coordinateCapabilities(mutationSchema.map(column => column.name));
     const sampleSql = buildSamplesSql({
       experiment: !!experimentFilter,
       registry: scopeSamplesByRegistry,
@@ -791,8 +794,7 @@ export async function GET(req: NextRequest) {
 
     const samples: MutationSample[] = sampleRows.map(r => {
       const { transfer, selection } = parseSeqSampleSuffix(r.seq_sample);
-      const storedReplicate = r.replicate_number === null || r.replicate_number === undefined ? '' : String(r.replicate_number).trim();
-      const replicate = storedReplicate || deriveReplicate(r.sample_name);
+      const replicate = resolveReplicate(r.replicate_number, deriveReplicate(r.sample_name));
       const donor_dna = deriveDonorDna(r.sample_name, r.transforming_dna);
       const popOrColony = (r.pop_or_colony_raw && r.pop_or_colony_raw.trim()) || selection;
       // Real growth curve from Robotic_OD (joined by lineage + transfer).
@@ -1037,6 +1039,7 @@ export async function GET(req: NextRequest) {
       experiments: allExperiments.map(e => e.name),
       registries,
       selectedRegistry,
+      coordinateCapabilities: availableCoordinates,
       warnings,
       source: { driver: getDbType(), table: 'Mutations', rowsScanned },
       stats: {
