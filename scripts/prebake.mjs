@@ -31,6 +31,11 @@ const OUT = path.resolve(process.cwd(), 'public', 'data');
 const SOURCE_DB = path.resolve(process.cwd(), process.env.SRC || 'data/lims_indexed.db');
 
 const EXPERIMENTS = ['TFMN1', 'TFMN2', 'TFMN3', 'TFMN4', 'strain_stocks'];
+// Optional bounded verification mode: comma-separated artifact keys. The default
+// remains the complete release bake so normal snapshots never silently omit data.
+const requestedTargets = (process.env.PREBAKE_TARGETS || '')
+  .split(',').map(key => key.trim()).filter(Boolean);
+
 const curatedTargets = [
   { key: 'mutations__all', url: '/api/mutations' },
   ...EXPERIMENTS.map(e => ({
@@ -51,6 +56,15 @@ const curatedTargets = [
   { key: 'mirror-info', url: '/api/mirror-info' },
   { key: 'config', url: '/api/config' },
 ];
+
+const targetByKey = new Map(curatedTargets.map(target => [target.key, target]));
+if (requestedTargets.length > 0) {
+  const unknown = requestedTargets.filter(key => !targetByKey.has(key));
+  if (unknown.length > 0) throw new Error(`Unknown PREBAKE_TARGETS key(s): ${unknown.join(', ')}. Valid keys: ${curatedTargets.map(target => target.key).join(', ')}`);
+}
+const selectedTargets = requestedTargets.length > 0
+  ? requestedTargets.map(key => targetByKey.get(key))
+  : curatedTargets;
 
 async function fetchJson(url) {
   const res = await fetch(BASE + url, { headers: { accept: 'application/json' } });
@@ -81,9 +95,14 @@ async function main() {
     files: {},
   };
   let totalRaw = 0, totalGz = 0;
+  // Provenance is mandatory even for a bounded verification bake, but it need not
+  // be emitted as an artifact unless it is explicitly selected.
   let mirrorInfo;
+  const mirrorTarget = targetByKey.get('mirror-info');
+  if (!mirrorTarget) throw new Error('mirror-info target is required for static provenance');
+  if (!selectedTargets.some(target => target.key === 'mirror-info')) mirrorInfo = await fetchJson(mirrorTarget.url);
 
-  for (const t of curatedTargets) {
+  for (const t of selectedTargets) {
     process.stdout.write(`baking ${t.key} ... `);
     let data;
     try { data = await fetchJson(t.url); }
@@ -105,7 +124,7 @@ async function main() {
   manifest.snapshot.at = mirrorInfo.snapshot_at;
   manifest.snapshot.tableCounts = mirrorInfo.table_counts;
   await writeFile(path.join(OUT, 'manifest.json'), JSON.stringify(manifest, null, 2));
-  console.log(`\nmanifest: ${Object.keys(manifest.files).length} artifacts`);
+  console.log(`\nmanifest: ${Object.keys(manifest.files).length} artifacts${requestedTargets.length > 0 ? ' (bounded PREBAKE_TARGETS verification bake)' : ''}`);
   console.log(`total: ${(totalRaw / 1024 / 1024).toFixed(1)} MB raw / ${(totalGz / 1024 / 1024).toFixed(2)} MB gz`);
   console.log(`written to ${OUT}`);
   console.log(`\nNOTE: the raw Database Tables browser is served by sql.js-httpvfs from`);
