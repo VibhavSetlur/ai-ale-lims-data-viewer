@@ -1,18 +1,51 @@
 import { NextResponse } from 'next/server';
 import { getDbType, getTableSchema, runQuery } from '@/lib/db';
-const q=(s:string)=>getDbType()==='mysql'?`\`${s.replace(/`/g,'``')}\``:`"${s.replace(/"/g,'""')}"`;
-async function exists(t:string) { try { return (await runQuery<{n:number}>(getDbType()==='sqlite'?"SELECT COUNT(*) n FROM sqlite_master WHERE type='table' AND name=?":'SELECT COUNT(*) n FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=?',[t]))[0]?.n>0; } catch{return false;} }
+
+const q = (name: string) => getDbType() === 'mysql' ? `\`${name.replace(/`/g, '``')}\`` : `"${name.replace(/"/g, '""')}"`;
+async function tableExists(name: string) {
+  try {
+    const sql = getDbType() === 'sqlite'
+      ? "SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name=?"
+      : 'SELECT COUNT(*) AS n FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=?';
+    return Number((await runQuery<{ n: number }>(sql, [name]))[0]?.n ?? 0) > 0;
+  } catch { return false; }
+}
+
 export async function GET() {
- try {
-  if (!await exists('dgoA_lib_variants') || !await exists('dgoA_alleles')) return NextResponse.json({variants:[],measurements:[],warnings:['dgoA allele measurement tables are unavailable in this snapshot.'], source:{available:false}});
-  const [ms, as] = await Promise.all([getTableSchema('dgoA_lib_variants'),getTableSchema('dgoA_alleles')]); const mc=new Set(ms.map(x=>x.name)), ac=new Set(as.map(x=>x.name));
-  const need=['Seqsample','Seqorder','Transformation_library','Count','Allele_DNA_index'];
-  if (!need.every(x=>mc.has(x)) || !['Allele_DNA_index','Allele_AA_index'].every(x=>ac.has(x))) return NextResponse.json({variants:[],measurements:[],warnings:['dgoA tables do not have the required measurement identity or allele keys.'],source:{available:false}});
-  const dna=mc.has('Allele_DNA_index')?'Allele_DNA_index':'Allele_number';
-  const rows=await runQuery<Record<string,unknown>>(`SELECT v.${q('Seqsample')} sampleId, v.${q(dna)} dnaId, SUM(v.${q('Count')}) count FROM ${q('dgoA_lib_variants')} v WHERE COALESCE(v.${q('deleted')},0)=0 AND COALESCE(v.${q('Count')},0)>0 GROUP BY v.${q('Seqsample')},v.${q('Seqorder')},v.${q('Transformation_library')},v.${q(dna)}`);
-  const alleles=await runQuery<Record<string,unknown>>(`SELECT ${['Allele_DNA_index','Allele_AA_index','Allele_number','DNAseq','AAseq','AA_changes'].filter(x=>ac.has(x)).map(q).join(',')} FROM ${q('dgoA_alleles')} WHERE COALESCE(${q('deleted')},0)=0`);
-  const variants=alleles.map(a=>({id:String(a.Allele_DNA_index),dnaId:String(a.Allele_DNA_index),aaId:String(a.Allele_AA_index ?? a.Allele_DNA_index),dnaLabel:String(a.Allele_number ?? a.Allele_DNA_index),aaLabel:String(a.AA_changes || a.Allele_AA_index || a.Allele_DNA_index),dnaSequence:a.DNAseq || undefined,aaSequence:a.AAseq || undefined}));
-  const byDna=new Map(variants.map(v=>[v.dnaId,v])); const measurements=rows.flatMap(r=>{const v=byDna.get(String(r.dnaId)); return v?[{sampleId:String(r.sampleId),alleleDnaIndex:v.dnaId,alleleAaIndex:v.aaId,count:Number(r.count)}]:[]});
-  return NextResponse.json({variants,measurements,warnings:[],source:{available:true,identity:'Seqsample + Seqorder + Transformation_library'}});
- } catch(e) { return NextResponse.json({error:e instanceof Error?e.message:String(e)},{status:500}); }
+  try {
+    if (!await tableExists('dgoA_lib_variants') || !await tableExists('dgoA_alleles')) {
+      return NextResponse.json({ variants: [], measurements: [], warnings: ['dgoA allele measurement tables are unavailable in this snapshot.'], source: { available: false } });
+    }
+    const [measurementSchema, alleleSchema] = await Promise.all([getTableSchema('dgoA_lib_variants'), getTableSchema('dgoA_alleles')]);
+    const measurementColumns = new Set(measurementSchema.map(column => column.name));
+    const alleleColumns = new Set(alleleSchema.map(column => column.name));
+    const measurementNeed = ['Seqsample', 'Seqorder', 'Transformation_library', 'Count', 'DNAseq'];
+    const alleleNeed = ['Allele_DNA_index', 'Allele_AA_index', 'DNAseq'];
+    if (!measurementNeed.every(column => measurementColumns.has(column)) || !alleleNeed.every(column => alleleColumns.has(column))) {
+      return NextResponse.json({ variants: [], measurements: [], warnings: ['dgoA tables do not have the required measurement identity or sequence keys.'], source: { available: false } });
+    }
+    const alleleLabel = alleleColumns.has('Allele_number') ? q('Allele_number') : q('Allele_DNA_index');
+    const aaLabel = alleleColumns.has('AA_changes') ? q('AA_changes') : q('Allele_AA_index');
+    const rows = await runQuery<Record<string, unknown>>(`
+      SELECT v.${q('Seqsample')} AS sampleId,
+             a.${q('Allele_DNA_index')} AS dnaId,
+             a.${q('Allele_AA_index')} AS aaId,
+             a.${alleleLabel} AS dnaLabel,
+             a.${aaLabel} AS aaLabel,
+             a.${q('DNAseq')} AS dnaSequence,
+             a.${q('AAseq')} AS aaSequence,
+             SUM(v.${q('Count')}) AS count
+      FROM ${q('dgoA_lib_variants')} v
+      JOIN ${q('dgoA_alleles')} a ON a.${q('DNAseq')} = v.${q('DNAseq')} AND COALESCE(a.${q('deleted')}, 0) = 0
+      WHERE COALESCE(v.${q('deleted')}, 0) = 0 AND COALESCE(v.${q('Count')}, 0) > 0
+      GROUP BY v.${q('Seqsample')}, v.${q('Seqorder')}, v.${q('Transformation_library')},
+               a.${q('Allele_DNA_index')}, a.${q('Allele_AA_index')}, a.${alleleLabel}, a.${aaLabel}, a.${q('DNAseq')}, a.${q('AAseq')}`);
+    const variantsById = new Map<string, { id: string; dnaId: string; aaId: string; dnaLabel: string; aaLabel: string; dnaSequence?: string; aaSequence?: string }>();
+    const measurements = rows.map(row => {
+      const dnaId = String(row.dnaId); const aaId = String(row.aaId ?? dnaId);
+      variantsById.set(dnaId, { id: dnaId, dnaId, aaId, dnaLabel: String(row.dnaLabel ?? dnaId), aaLabel: String(row.aaLabel || aaId), dnaSequence: typeof row.dnaSequence === 'string' ? row.dnaSequence : undefined, aaSequence: typeof row.aaSequence === 'string' ? row.aaSequence : undefined });
+      return { sampleId: String(row.sampleId), alleleDnaIndex: dnaId, alleleAaIndex: aaId, count: Number(row.count) };
+    });
+    return NextResponse.json({ variants: [...variantsById.values()], measurements, warnings: [], source: { available: true, identity: 'Seqsample + Seqorder + Transformation_library' } });
+  } catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 500 }); }
 }
