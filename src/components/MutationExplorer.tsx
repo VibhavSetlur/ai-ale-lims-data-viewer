@@ -34,6 +34,7 @@ interface MutationSample {
   has_barcodes?: boolean;
   verab_combinations?: number;
   breseq_registry_id?: string;
+  breseq_reference?: string;
   selection_note?: string;
   growth_curve?: { t: number; od: number }[];
   growth_curve_source?: {
@@ -611,6 +612,7 @@ export default function MutationExplorer({ activeTab, onTabChange }: MutationExp
   // Forward stay in sync. Persistence (TAB_KEY effect above) and the
   // `aiale:navigate` event listener are unaffected.
   const selectTab = (next: Tab) => {
+    if (next === 'compare' && mixedRuns) return;
     setTab(next);
     onTabChange?.(next);
   };
@@ -631,6 +633,10 @@ export default function MutationExplorer({ activeTab, onTabChange }: MutationExp
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps -- Pruning only occurs when external data changes.
   }, [data]);
+
+  const selectedSamples = (data?.samples ?? []).filter(sample => selected.has(sample.id));
+  const selectedRuns = Array.from(new Set(selectedSamples.map(sample => sample.breseq_registry_id).filter((id): id is string => Boolean(id))));
+  const mixedRuns = selectedRuns.length > 1;
 
   return (
     <div className="flex flex-col h-full min-h-0 bg-[var(--surface)] rounded-lg border border-[var(--border)] overflow-hidden" style={{ boxShadow: 'var(--shadow-sm)' }}>
@@ -805,7 +811,7 @@ export default function MutationExplorer({ activeTab, onTabChange }: MutationExp
           />
         </div>
         <div className={cn('flex-1 min-h-0 flex flex-col', tab === 'compare' ? '' : 'hidden')}>
-          <ComparativePanel
+          {mixedRuns ? <div role="alert" className="m-3 p-3 rounded border border-amber-300 bg-amber-50 text-sm text-amber-900">Comparison is blocked: selected samples belong to different breseq runs ({selectedRuns.join(', ')}). These runs may use distinct references. Select one run before comparing mutations.</div> : <ComparativePanel
             samples={data?.samples ?? []}
             mutations={data?.mutations ?? []}
             selected={selected}
@@ -813,7 +819,7 @@ export default function MutationExplorer({ activeTab, onTabChange }: MutationExp
             onJumpToSelection={() => selectTab('samples')}
             loading={loading}
             forceMetric={forceMetric}
-          />
+          />}
         </div>
         <div className={cn('flex-1 min-h-0 flex flex-col', tab === 'growth' ? '' : 'hidden')}>
           <GrowthCurveComparison
@@ -1340,7 +1346,7 @@ function SampleSelectionPanel({
               </th>
               <th className="px-2 py-1.5 font-semibold">Sample</th>
               <th className="px-2 py-1.5 font-semibold">Experiment</th>
-              <th className="px-2 py-1.5 font-semibold">Breseq run</th>
+              <th className="px-2 py-1.5 font-semibold">Breseq run / reference</th>
               <th className="px-2 py-1.5 font-semibold">Replicate</th>
               <th className="px-2 py-1.5 font-semibold">Donor DNA</th>
               <th className="px-2 py-1.5 font-semibold">Strain</th>
@@ -1430,7 +1436,7 @@ function SampleSelectionPanel({
                           )}
                         </td>
                         <td className="px-2 py-1 text-[var(--text-soft)]">{s.experiment}</td>
-                        <td className="px-2 py-1 font-mono text-[var(--text-soft)]">{s.breseq_registry_id ?? ''}</td>
+                        <td className="px-2 py-1 font-mono text-[var(--text-soft)]"><div>{s.breseq_registry_id ?? ''}</div><div className="text-[10px] break-all">{s.breseq_reference ?? 'reference unavailable'}</div></td>
                         <td className="px-2 py-1 text-[var(--text-soft)]">{s.replicate ?? ''}</td>
                         <td className="px-2 py-1 text-[var(--text-soft)]">
                           {s.donor_dna ? (

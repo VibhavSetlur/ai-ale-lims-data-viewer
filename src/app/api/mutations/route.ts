@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { runQuery, getDbType } from '@/lib/db';
+import { runQuery, getDbType, getTableSchema } from '@/lib/db';
 import { deriveReplicate } from '@/lib/mutationSample';
 
 export interface MutationSample {
@@ -7,6 +7,7 @@ export interface MutationSample {
   name: string;
   experiment: string;
   breseq_registry_id?: string;
+  breseq_reference?: string;
   experiment_type?: string;
   seqorder?: string;
   seqorders?: string[];
@@ -119,6 +120,7 @@ interface SeqSampleRow {
   strain: string | null;
   transforming_dna: string | null;
   notes: string | null;
+  replicate_number: string | number | null;
   seqorder: string | null;
   seqorders: string | null;
   has_barcodes: number | null;
@@ -319,7 +321,7 @@ function mutationKey(r: MutationRawRow): string {
 
 // Build SAMPLES SQL on demand so registry and canonical Seq_samples experiment
 // filters are pushed inside the CTE. Params are appended in (experiment?, registry?) order.
-function buildSamplesSql(opts: { experiment: boolean; registry: boolean; barcodeSamples: boolean }): string {
+function buildSamplesSql(opts: { experiment: boolean; registry: boolean; barcodeSamples: boolean; replicateColumn: boolean }): string {
   const inner: string[] = ['deleted = 0'];
   if (opts.experiment) {
     inner.push(`EXISTS (
@@ -363,7 +365,8 @@ function buildSamplesSql(opts: { experiment: boolean; registry: boolean; barcode
       s."Condition"                              AS condition,
       s."Strain_name"                            AS strain,
       s."Transforming_DNA"                       AS transforming_dna,
-      s."Notes"                                  AS notes
+      s."Notes"                                  AS notes,
+      ${opts.replicateColumn ? 's."Replicate_number"' : 'NULL'} AS replicate_number
     FROM (
       SELECT
         seq_sample,
@@ -696,10 +699,12 @@ export async function GET(req: NextRequest) {
     if (scopeSamplesByRegistry) sampleParams.push(selectedRegistry);
     if (hasBarcodeTable && experimentFilter) sampleParams.push(experimentFilter);
 
+    const sampleSchema = await getTableSchema('Samples').catch(() => []);
     const sampleSql = buildSamplesSql({
       experiment: !!experimentFilter,
       registry: scopeSamplesByRegistry,
       barcodeSamples: hasBarcodeTable,
+      replicateColumn: sampleSchema.some(column => column.name === 'Replicate_number'),
     });
     const mutSql = MUTATIONS_SQL
       + (experimentFilter ? ` AND EXISTS (
@@ -786,7 +791,8 @@ export async function GET(req: NextRequest) {
 
     const samples: MutationSample[] = sampleRows.map(r => {
       const { transfer, selection } = parseSeqSampleSuffix(r.seq_sample);
-      const replicate = deriveReplicate(r.sample_name);
+      const storedReplicate = r.replicate_number === null || r.replicate_number === undefined ? '' : String(r.replicate_number).trim();
+      const replicate = storedReplicate || deriveReplicate(r.sample_name);
       const donor_dna = deriveDonorDna(r.sample_name, r.transforming_dna);
       const popOrColony = (r.pop_or_colony_raw && r.pop_or_colony_raw.trim()) || selection;
       // Real growth curve from Robotic_OD (joined by lineage + transfer).
@@ -804,6 +810,7 @@ export async function GET(req: NextRequest) {
         name: r.seq_sample,
         experiment: r.experiment_from_seq ?? r.experiment_from_mutations ?? '',
         breseq_registry_id: registryBySample.get(r.seq_sample),
+        breseq_reference: (() => { const id = registryBySample.get(r.seq_sample); return id ? registries.find(registry => registry.id === id)?.reference ?? undefined : undefined; })(),
         experiment_type: r.experiment_type ?? undefined,
         seqorder: (r.seqorder && String(r.seqorder).trim()) || undefined,
         seqorders: (() => {
