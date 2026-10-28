@@ -32,14 +32,14 @@ export async function GET() {
              a.${q('Allele_AA_index')} AS aaId,
              a.${alleleLabel} AS dnaLabel,
              a.${aaLabel} AS aaLabel,
-             a.${q('DNAseq_native')} AS dnaSequence,
-             a.${q('AAseq_native')} AS aaSequence,
+             v.${q('DNAseq')} AS dnaSequence,
+             v.${q('AAseq')} AS aaSequence,
              SUM(v.${q('Count')}) AS count
       FROM ${q('dgoA_lib_variants')} v
       JOIN ${q('dgoA_alleles')} a ON a.${q('DNAseq_native')} = v.${q('DNAseq')} AND COALESCE(a.${q('deleted')}, 0) = 0
       WHERE COALESCE(v.${q('deleted')}, 0) = 0 AND COALESCE(v.${q('Count')}, 0) > 0
       GROUP BY v.${q('Seqsample')}, v.${q('Seqorder')}, v.${q('Transformation_library')},
-               a.${q('Allele_DNA_index')}, a.${q('Allele_AA_index')}, a.${alleleLabel}, a.${aaLabel}, a.${q('DNAseq_native')}, a.${q('AAseq_native')}`);
+               a.${q('Allele_DNA_index')}, a.${q('Allele_AA_index')}, a.${alleleLabel}, a.${aaLabel}, v.${q('DNAseq')}, v.${q('AAseq')}`);
     const variantsById = new Map<string, { id: string; dnaId: string; aaId: string; dnaLabel: string; aaLabel: string; dnaSequence?: string; aaSequence?: string }>();
     const measurements = rows.map(row => {
       const dnaId = String(row.dnaId); const aaId = String(row.aaId ?? dnaId);
