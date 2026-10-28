@@ -1,5 +1,5 @@
 export type DgoAGroupMode = 'aa' | 'dna';
-export type DgoAMeasurement = { sampleId: string; alleleDnaIndex: string; alleleAaIndex: string; count: number };
+export type DgoAMeasurement = { sampleId: string; alleleDnaIndex: string; alleleAaIndex: string; count: number; measurementId?: string; seqorder?: string; transformationLibrary?: string };
 export type DgoAVariant = { id: string; dnaId: string; aaId: string; dnaLabel: string; aaLabel: string; dnaSequence?: string; aaSequence?: string };
 
 /** Group first, then rank. Relative abundance is always calculated from all groups. */

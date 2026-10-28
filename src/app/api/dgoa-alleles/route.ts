@@ -28,6 +28,8 @@ export async function GET() {
     const aaLabel = alleleColumns.has('AA_changes') ? q('AA_changes') : q('Allele_AA_index');
     const rows = await runQuery<Record<string, unknown>>(`
       SELECT v.${q('Seqsample')} AS sampleId,
+             v.${q('Seqorder')} AS seqorder,
+             v.${q('Transformation_library')} AS transformationLibrary,
              a.${q('Allele_DNA_index')} AS dnaId,
              a.${q('Allele_AA_index')} AS aaId,
              a.${alleleLabel} AS dnaLabel,
@@ -43,8 +45,9 @@ export async function GET() {
     const variantsById = new Map<string, { id: string; dnaId: string; aaId: string; dnaLabel: string; aaLabel: string; dnaSequence?: string; aaSequence?: string }>();
     const measurements = rows.map(row => {
       const dnaId = String(row.dnaId); const aaId = String(row.aaId ?? dnaId);
-      variantsById.set(dnaId, { id: dnaId, dnaId, aaId, dnaLabel: String(row.dnaLabel ?? dnaId), aaLabel: String(row.aaLabel || aaId), dnaSequence: typeof row.dnaSequence === 'string' ? row.dnaSequence : undefined, aaSequence: typeof row.aaSequence === 'string' ? row.aaSequence : undefined });
-      return { sampleId: String(row.sampleId), alleleDnaIndex: dnaId, alleleAaIndex: aaId, count: Number(row.count) };
+      variantsById.set(dnaId, { id: dnaId, dnaId, aaId, dnaLabel: String(row.dnaLabel || dnaId), aaLabel: String(row.aaLabel || aaId), dnaSequence: typeof row.dnaSequence === 'string' ? row.dnaSequence : undefined, aaSequence: typeof row.aaSequence === 'string' ? row.aaSequence : undefined });
+      const seqorder = String(row.seqorder ?? ''); const transformationLibrary = String(row.transformationLibrary ?? '');
+      return { sampleId: String(row.sampleId), seqorder, transformationLibrary, measurementId: `${String(row.sampleId)}\u0000${seqorder}\u0000${transformationLibrary}\u0000${dnaId}`, alleleDnaIndex: dnaId, alleleAaIndex: aaId, count: Number(row.count) };
     });
     return NextResponse.json({ variants: [...variantsById.values()], measurements, warnings: [], source: { available: true, identity: 'Seqsample + Seqorder + Transformation_library' } });
   } catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 500 }); }
