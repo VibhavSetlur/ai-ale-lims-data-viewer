@@ -1,7 +1,8 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { runQuery, getDbType, getTableSchema } from '@/lib/db';
 import { deriveReplicate } from '@/lib/mutationSample';
-import { coordinateCapabilities, resolveReplicate, type CoordinateCapability } from '@/lib/mutationMetadata';
+import { coordinateCapabilities, resolveReplicate, type CoordinateCapability, type CoordinateSystem } from '@/lib/mutationMetadata';
+import type { MutationCoordinates } from '@/lib/mutationCoordinates';
 
 export interface MutationSample {
   id: string;
@@ -44,6 +45,7 @@ export interface MutationRow {
   mutation_category?: string; // snp_*, small_indel, large_deletion
   base_type?: string;      // raw breseq type: SNP / INS / DEL / SUB
   position?: number;
+  coordinates?: MutationCoordinates;
   gene_product?: string;
   // Sample IDs whose donor DNA (Transforming_DNA) provided THIS mutation, i.e. it
   // was supplied in the growth condition rather than arising spontaneously. The UI
@@ -141,6 +143,12 @@ interface MutationRawRow {
   gene_product: string | null;
   locus_tag: string | null;
   position: number | null;
+  coordinate_original?: number | null;
+  coordinate_ncbi?: number | null;
+  coordinate_neidle?: number | null;
+  coordinate_gene_original?: string | null;
+  coordinate_gene_ncbi?: string | null;
+  coordinate_gene_neidle?: string | null;
   ref_seq: string | null;
   new_seq: string | null;
   aa_ref_seq: string | null;
@@ -443,7 +451,15 @@ function buildSamplesSql(opts: { experiment: boolean; registry: boolean; barcode
   `;
 }
 
-const MUTATIONS_SQL = `
+function coordinateSelect(column: string | undefined, alias: string): string {
+  return column ? `"${column}" AS ${alias}` : `NULL AS ${alias}`;
+}
+
+function mutationSql(coordinates: CoordinateCapability[]): string {
+  const capability = (system: CoordinateSystem) => coordinates.find(item => item.system === system);
+  const positionColumn = (system: CoordinateSystem) => capability(system)?.positionColumn;
+  const geneColumn = (system: CoordinateSystem) => capability(system)?.geneColumn;
+  return `
   SELECT
     "Seq_sample"          AS seq_sample,
     "Experiment"          AS experiment,
@@ -455,6 +471,12 @@ const MUTATIONS_SQL = `
     "gene_product"      AS gene_product,
     "locus_tag"         AS locus_tag,
     "position"          AS position,
+    ${coordinateSelect(positionColumn('original'), 'coordinate_original')},
+    ${coordinateSelect(positionColumn('ncbi'), 'coordinate_ncbi')},
+    ${coordinateSelect(positionColumn('neidle'), 'coordinate_neidle')},
+    ${coordinateSelect(geneColumn('original'), 'coordinate_gene_original')},
+    ${coordinateSelect(geneColumn('ncbi'), 'coordinate_gene_ncbi')},
+    ${coordinateSelect(geneColumn('neidle'), 'coordinate_gene_neidle')},
     "ref_seq"           AS ref_seq,
     "new_seq"           AS new_seq,
     "aa_ref_seq"        AS aa_ref_seq,
@@ -479,6 +501,7 @@ const MUTATIONS_SQL = `
   FROM Mutations
   WHERE deleted = 0
 `;
+}
 
 function buildAllExperimentsSql(hasBarcodeTable: boolean): string {
   return `
@@ -709,7 +732,7 @@ export async function GET(req: NextRequest) {
       barcodeSamples: hasBarcodeTable,
       replicateColumn: sampleSchema.some(column => column.name === 'Replicate_number'),
     });
-    const mutSql = MUTATIONS_SQL
+    const mutSql = mutationSql(availableCoordinates)
       + (experimentFilter ? ` AND EXISTS (
           SELECT 1 FROM Seq_samples ss_filter
           WHERE ss_filter."Sequencing_sample" = Mutations."Seq_sample"
@@ -904,6 +927,26 @@ export async function GET(req: NextRequest) {
           mutation_category: r.mutation_category ?? undefined,
           base_type: r.type ?? undefined,
           position: r.position ?? undefined,
+          coordinates: {
+            original: {
+              position: r.coordinate_original ?? r.position ?? undefined,
+              positionStart: r.position_start ?? r.coordinate_original ?? r.position ?? undefined,
+              positionEnd: r.position_end ?? r.coordinate_original ?? r.position ?? undefined,
+              gene: r.coordinate_gene_original ?? undefined,
+            },
+            ncbi: r.coordinate_ncbi === null || r.coordinate_ncbi === undefined ? undefined : {
+              position: r.coordinate_ncbi,
+              positionStart: r.coordinate_ncbi,
+              positionEnd: r.coordinate_ncbi,
+              gene: r.coordinate_gene_ncbi ?? undefined,
+            },
+            neidle: r.coordinate_neidle === null || r.coordinate_neidle === undefined ? undefined : {
+              position: r.coordinate_neidle,
+              positionStart: r.coordinate_neidle,
+              positionEnd: r.coordinate_neidle,
+              gene: r.coordinate_gene_neidle ?? undefined,
+            },
+          },
           gene_product: r.gene_product ?? undefined,
           detail: {
             seq_id: r.seq_id ?? undefined,

@@ -10,14 +10,14 @@ describe('mutation metadata', () => {
   });
   it('reports coordinate capability only for columns that exist', () => {
     expect(coordinateCapabilities(['position'])).toEqual([
-      { system: 'original', available: true, positionColumn: 'position' },
-      { system: 'ncbi', available: false, positionColumn: undefined },
-      { system: 'neidle', available: false, positionColumn: undefined },
+      { system: 'original', available: true, positionColumn: 'position', geneColumn: undefined },
+      { system: 'ncbi', available: false, positionColumn: undefined, geneColumn: undefined },
+      { system: 'neidle', available: false, positionColumn: undefined, geneColumn: undefined },
     ]);
-    expect(coordinateCapabilities(['position', 'ncbi_position', 'position_neidle'])).toEqual([
-      { system: 'original', available: true, positionColumn: 'position' },
-      { system: 'ncbi', available: true, positionColumn: 'ncbi_position' },
-      { system: 'neidle', available: true, positionColumn: 'position_neidle' },
+    expect(coordinateCapabilities(['position', 'ncbi_position', 'NCBI_gene_name', 'position_neidle'])).toEqual([
+      { system: 'original', available: true, positionColumn: 'position', geneColumn: undefined },
+      { system: 'ncbi', available: true, positionColumn: 'ncbi_position', geneColumn: 'NCBI_gene_name' },
+      { system: 'neidle', available: true, positionColumn: 'position_neidle', geneColumn: undefined },
     ]);
   });
 });

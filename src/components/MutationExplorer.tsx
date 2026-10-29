@@ -14,6 +14,8 @@ import { fetchData, IS_STATIC } from '../lib/dataSource';
 import ExportFigureMenu from './ExportFigureMenu';
 import type { FigureSpec } from '../lib/figureSpec';
 import type { MutationRouteTab } from '../lib/routes';
+import { formatCoordinate, resolveDisplayCoordinate, type MutationCoordinates } from '../lib/mutationCoordinates';
+import { DEFAULT_COORDINATE_SYSTEM, type CoordinateSystem } from '../lib/mutationMetadata';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
@@ -98,6 +100,7 @@ interface MutationRow {
   mutation_category?: string;
   base_type?: string;
   position?: number;
+  coordinates?: MutationCoordinates;
   gene_product?: string;
   // Sample IDs whose donor DNA provided this mutation (supplied in the growth
   // condition, not spontaneous). Cells for these samples get an outline; the popup
@@ -115,7 +118,7 @@ interface RegistrySummary {
   unregistered?: boolean;
 }
 
-type CoordinateCapability = { system: 'original' | 'ncbi' | 'neidle'; available: boolean; positionColumn?: string };
+type CoordinateCapability = { system: CoordinateSystem; available: boolean; positionColumn?: string };
 
 interface MutationDataset {
   samples: MutationSample[];
@@ -512,7 +515,7 @@ export default function MutationExplorer({ activeTab, onTabChange }: MutationExp
   // later changes the filter and clicks the callout again.
   const [forceMetric, setForceMetric] = useState<{ metric: 'copy_number'; nonce: number } | null>(null);
   const [showNotes, setShowNotes] = useState(false);
-  const [coordinateSystem, setCoordinateSystem] = useState<'original' | 'ncbi' | 'neidle'>('ncbi');
+  const [coordinateSystem, setCoordinateSystem] = useState<CoordinateSystem>(DEFAULT_COORDINATE_SYSTEM);
 
   // Cross-component navigation: the Guide dispatches `aiale:navigate`
   // CustomEvents to jump straight to a tab (and optionally a sub-mode). This
@@ -728,7 +731,7 @@ export default function MutationExplorer({ activeTab, onTabChange }: MutationExp
           </label>
           <label className="flex items-center gap-1.5 text-[11px] text-[var(--text-soft)]" title="Coordinate systems are available only when the current snapshot provides their mapping columns.">
             <span className="lims-label">Coordinates</span>
-            <select value={coordinateSystem} onChange={event => setCoordinateSystem(event.target.value as 'original' | 'ncbi' | 'neidle')} className="lims-input !w-auto !py-1 !text-[11.5px]">
+            <select value={coordinateSystem} onChange={event => setCoordinateSystem(event.target.value as CoordinateSystem)} className="lims-input !w-auto !py-1 !text-[11.5px]">
               {(['ncbi', 'neidle', 'original'] as const).map(system => { const capability = coordinateCapabilities.find(item => item.system === system); return <option key={system} value={system} disabled={!capability?.available}>{system.toUpperCase()}{capability?.available ? '' : ' (unavailable)'}</option>; })}
             </select>
           </label>
@@ -834,6 +837,8 @@ export default function MutationExplorer({ activeTab, onTabChange }: MutationExp
             onJumpToSelection={() => selectTab('samples')}
             loading={loading}
             forceMetric={forceMetric}
+            coordinateSystem={coordinateSystem}
+            coordinateAvailable={coordinateAvailable}
           />}
         </div>
         <div className={cn('flex-1 min-h-0 flex flex-col', tab === 'growth' ? '' : 'hidden')}>
@@ -861,6 +866,8 @@ export default function MutationExplorer({ activeTab, onTabChange }: MutationExp
             mutations={data?.mutations ?? []}
             loading={loading}
             cnRegionCount={data?.stats?.cnRegionCount ?? 0}
+            coordinateSystem={coordinateSystem}
+            coordinateAvailable={coordinateAvailable}
             currentExperiment={experiment}
             availableExperiments={data?.experiments ?? []}
             onLoadExperiment={onExperimentChange}
@@ -1558,12 +1565,13 @@ type SortKey = 'gene' | 'variant' | 'type' | 'position' | 'maxFreq' | 'spread' |
 type SortDir = 'asc' | 'desc';
 
 function ComparativePanel({
-  samples, mutations, selected, setSelected, onJumpToSelection, loading, forceMetric,
+  samples, mutations, selected, setSelected, onJumpToSelection, loading, forceMetric, coordinateSystem, coordinateAvailable,
 }: {
   samples: MutationSample[]; mutations: MutationRow[];
   selected: Set<string>; setSelected: (s: Set<string>) => void;
   onJumpToSelection: () => void; loading: boolean;
   forceMetric?: { metric: 'copy_number'; nonce: number } | null;
+  coordinateSystem: CoordinateSystem; coordinateAvailable: boolean;
 }) {
   const [mutFilter, setMutFilter] = useState('');
   const [metricFilter, setMetricFilter] = useState<'all' | 'frequency' | 'copy_number'>('all');
@@ -1705,6 +1713,9 @@ function ComparativePanel({
     return { yMax: Math.max(0.05, yMax), xMin, xMax };
   }, [selectedSamples]);
 
+  const displayCoordinate = (mutation: MutationRow) => resolveDisplayCoordinate(mutation.coordinates, coordinateSystem, coordinateAvailable);
+  const displayGene = (mutation: MutationRow) => displayCoordinate(mutation).gene ?? mutation.gene;
+
   const filteredMutations = useMemo(() => {
     const q = mutFilter.trim().toLowerCase();
     return mutations
@@ -1712,7 +1723,7 @@ function ComparativePanel({
       .filter(m => snpTypes.size === 0 || snpTypes.has(m.type))
       .filter(m => {
         if (!q) return true;
-        return `${m.gene} ${m.variant} ${m.type} ${m.id} ${m.gene_product ?? ''}`.toLowerCase().includes(q);
+        return `${displayGene(m)} ${m.gene} ${m.variant} ${m.type} ${m.id} ${m.gene_product ?? ''}`.toLowerCase().includes(q);
       })
       .filter(m => {
         if (selectedSamples.length === 0) return true;
@@ -1730,20 +1741,23 @@ function ComparativePanel({
         const present = selectedSamples.reduce((acc, s) => acc + (typeof m.values[s.id] === 'number' && m.values[s.id] > 0 ? 1 : 0), 0);
         return present >= minPresence;
       });
-  }, [mutations, mutFilter, metricFilter, snpTypes, minFreq, minPresence, hideEmpty, selectedSamples]);
+  }, [mutations, mutFilter, metricFilter, snpTypes, minFreq, minPresence, hideEmpty, selectedSamples, coordinateSystem, coordinateAvailable]);
 
   const sortedMutations = useMemo(() => {
     const dir = sortDir === 'asc' ? 1 : -1;
     const base = !sortKey ? [...filteredMutations] : [...filteredMutations].sort((a, b) => {
-      if (sortKey === 'gene') return dir * (a.gene.localeCompare(b.gene) || a.variant.localeCompare(b.variant));
+      if (sortKey === 'gene') return dir * (displayGene(a).localeCompare(displayGene(b)) || a.variant.localeCompare(b.variant));
       if (sortKey === 'variant') return dir * a.variant.localeCompare(b.variant);
       if (sortKey === 'type') return dir * a.type.localeCompare(b.type);
       if (sortKey === 'position') {
-        // Genome position is a numeric coordinate; missing positions sort to the end regardless of direction.
-        const ap = typeof a.position === 'number' ? a.position : (dir === 1 ? Infinity : -Infinity);
-        const bp = typeof b.position === 'number' ? b.position : (dir === 1 ? Infinity : -Infinity);
+        // Sort against the selected mapping. Missing mapped positions stay at the end;
+        // never borrow an original coordinate for a selected mapping.
+        const aCoordinate = displayCoordinate(a).positionStart ?? displayCoordinate(a).position;
+        const bCoordinate = displayCoordinate(b).positionStart ?? displayCoordinate(b).position;
+        const ap = typeof aCoordinate === 'number' ? aCoordinate : (dir === 1 ? Infinity : -Infinity);
+        const bp = typeof bCoordinate === 'number' ? bCoordinate : (dir === 1 ? Infinity : -Infinity);
         if (ap !== bp) return dir * (ap - bp);
-        return a.gene.localeCompare(b.gene) || a.variant.localeCompare(b.variant);
+        return displayGene(a).localeCompare(displayGene(b)) || a.variant.localeCompare(b.variant);
       }
       const aVals = selectedSamples.map(s => a.values[s.id]).filter(v => typeof v === 'number') as number[];
       const bVals = selectedSamples.map(s => b.values[s.id]).filter(v => typeof v === 'number') as number[];
@@ -1771,7 +1785,7 @@ function ComparativePanel({
     const rest: MutationRow[] = [];
     for (const m of base) (m.metric === 'copy_number' ? cn : rest).push(m);
     return cn.length ? [...cn, ...rest] : base;
-  }, [filteredMutations, sortKey, sortDir, selectedSamples]);
+  }, [filteredMutations, sortKey, sortDir, selectedSamples, coordinateSystem, coordinateAvailable]);
 
   // Compose the curated-subset filter on TOP of the sorted/filtered list. When
   // compareMutationsOnly is on we render only the rows the user checked (that
@@ -1937,10 +1951,11 @@ function ComparativePanel({
       })),
       mutations: renderedMutations.map(m => {
         const range = rowRanges.get(m.id) ?? frequencyRange;
+        const coordinate = displayCoordinate(m);
         return {
           id: m.id,
-          label: `${m.gene} / ${m.variant}`,
-          subtitle: `${m.type} / ${m.metric}`,
+          label: `${displayGene(m)} / ${m.variant}`,
+          subtitle: `${m.type} / ${m.metric}${coordinateAvailable ? ` / ${coordinateSystem.toUpperCase()} ${formatCoordinate(coordinate)}` : ` / ${coordinateSystem.toUpperCase()} unavailable`}`,
           metric: m.metric,
           min: range.min,
           max: range.max,
@@ -2423,7 +2438,11 @@ function ComparativePanel({
                       : 'bg-white dark:bg-gray-800'
                   )}
                 >
-                  <div className="flex items-start gap-1.5">
+                  {(() => {
+                    const coordinate = displayCoordinate(m);
+                    const coordinateLabel = coordinateAvailable ? formatCoordinate(coordinate) : `${coordinateSystem.toUpperCase()} unavailable`;
+                    const gene = displayGene(m);
+                    return <div className="flex items-start gap-1.5">
                     <button
                       onClick={(e) => { e.stopPropagation(); toggleMutation(m.id); }}
                       className="mt-0.5 flex items-center justify-center shrink-0"
@@ -2442,15 +2461,16 @@ function ComparativePanel({
                       <div className="text-[12px] font-medium text-slate-800 dark:text-gray-100 truncate group-hover:text-blue-600 dark:group-hover:text-blue-400 group-hover:underline decoration-dotted underline-offset-2">
                         {m.metric === 'copy_number' && <span className="mr-1 px-1 rounded bg-violet-100 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300 text-[9px] font-semibold uppercase align-middle" title="Copy number region (pinned to top)">CN</span>}
                         {m.providedIn && m.providedIn.length > 0 && <span className="mr-1 px-1 rounded bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 text-[9px] font-semibold uppercase align-middle ring-1 ring-amber-400/60" title={`Provided as donor DNA in ${m.providedIn.length} sample${m.providedIn.length === 1 ? '' : 's'} (supplied, not spontaneous)`}>provided</span>}
-                        {m.gene} <span className="font-normal text-slate-500 dark:text-gray-400 group-hover:text-blue-500 dark:group-hover:text-blue-400">/ {m.variant}</span>
+                        {gene} <span className="font-normal text-slate-500 dark:text-gray-400 group-hover:text-blue-500 dark:group-hover:text-blue-400">/ {m.variant}</span>
                       </div>
                       <div className="text-[10px] text-slate-400 dark:text-gray-500 truncate">
-                        {m.type} · {m.metric}
+                        {m.type} · {m.metric} · {coordinateSystem.toUpperCase()} {coordinateLabel}
                         {m.detail?.seq_id ? <span className="ml-1 font-mono text-slate-400 dark:text-gray-500">{m.detail.seq_id}</span> : null}
                         {m.gene_product ? <span className="ml-1 italic text-slate-500 dark:text-gray-400">· {m.gene_product}</span> : null}
                       </div>
                     </button>
-                  </div>
+                  </div>;
+                  })()}
                 </th>
                 {visibleSamples.map((s, sampleIdx) => {
                   const v = m.values[s.id];
@@ -2520,6 +2540,8 @@ function ComparativePanel({
           mutation={detailMutation}
           samples={visibleSamples}
           groupOrder={groupOrder}
+          coordinateSystem={coordinateSystem}
+          coordinateAvailable={coordinateAvailable}
           onClose={() => setDetailMutation(null)}
         />
       )}
@@ -4198,11 +4220,13 @@ function ExternalAction({ href, label, title }: { href: string; label: string; t
 }
 
 function MutationDetailModal({
-  mutation, samples, groupOrder, onClose,
+  mutation, samples, groupOrder, coordinateSystem, coordinateAvailable, onClose,
 }: {
   mutation: MutationRow;
   samples: MutationSample[];
   groupOrder: GroupLevelKey[];
+  coordinateSystem: CoordinateSystem;
+  coordinateAvailable: boolean;
   onClose: () => void;
 }) {
   const d = useMemo(() => mutation.detail ?? {}, [mutation.detail]);
@@ -4216,11 +4240,13 @@ function MutationDetailModal({
   }, [onClose]);
 
   const [showAllFields, setShowAllFields] = useState(false);
+  const coordinate = resolveDisplayCoordinate(mutation.coordinates, coordinateSystem, coordinateAvailable);
+  const displayGene = coordinate.gene ?? mutation.gene;
 
   // ---- Memoized derived facts (cheap, but keep them stable across renders). ----
   const facts = useMemo(() => {
-    const posStart = typeof d.position_start === 'number' ? d.position_start : (typeof mutation.position === 'number' ? mutation.position : undefined);
-    const posEnd = typeof d.position_end === 'number' ? d.position_end : posStart;
+    const posStart = coordinate.positionStart ?? coordinate.position;
+    const posEnd = coordinate.positionEnd ?? posStart;
     const hasPos = posStart !== undefined;
     const isPoint = posStart !== undefined && posEnd !== undefined && posStart === posEnd;
     const gp = parseGenePosition(d.gene_position);
@@ -4240,10 +4266,10 @@ function MutationDetailModal({
       ? (isPoint ? `${posStart!.toLocaleString()}` : `${posStart!.toLocaleString()} to ${posEnd!.toLocaleString()}`)
       : 'n/a';
     return { posStart, posEnd, hasPos, isPoint, gp, isIntergenic, hasCodon, hasAA, isCoding, sizeStr, isIndel, hasRepeat, posLabel };
-  }, [d, mutation.position, mutation.gene, snpType]);
+  }, [coordinate, mutation.gene, snpType]);
 
   const { posStart, posEnd, hasPos, isPoint, gp, isIntergenic, isCoding, sizeStr, isIndel, hasRepeat, posLabel } = facts;
-  const ncbiQuery = useMemo(() => mutationNcbiQuery(mutation, d, posLabel), [mutation, d, posLabel]);
+  const ncbiQuery = useMemo(() => mutationNcbiQuery({ ...mutation, gene: displayGene }, d, posLabel), [mutation, d, displayGene, posLabel]);
   const seqIdForLink = d.seq_id;
   const ncbiAccessionHref = looksLikeNcbiAccession(seqIdForLink) && seqIdForLink ? ncbiNucleotideUrl(seqIdForLink) : null;
   const ncbiSearchHref = ncbiSearchUrl(ncbiQuery || `${mutation.gene} ${mutation.variant}`);
@@ -4381,7 +4407,7 @@ function MutationDetailModal({
         <div className="sticky top-0 z-10 bg-[var(--surface)] border-b border-[var(--border)] px-5 py-3 flex items-start justify-between gap-3">
           <div className="min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
-              <span className="font-mono text-[18px] font-semibold text-[var(--text)] break-all">{mutation.gene}</span>
+              <span className="font-mono text-[18px] font-semibold text-[var(--text)] break-all">{displayGene}</span>
               {mutation.variant ? (
                 <span className="font-mono text-[13px] px-1.5 py-0.5 rounded bg-[var(--surface-3)] text-[var(--text-soft)] border border-[var(--border)]">{mutation.variant}</span>
               ) : null}
@@ -4405,8 +4431,8 @@ function MutationDetailModal({
             <div className="space-y-3">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1.5 text-[12px]">
                 <div><span className="text-[var(--text-soft)]">Reference seq_id</span> <span className="font-mono text-[var(--text)] break-all">{d.seq_id ?? 'n/a'}</span></div>
-                <div><span className="text-[var(--text-soft)]">Coordinate</span> <span className="font-mono text-[var(--text)]">{posLabel}</span></div>
-                <div><span className="text-[var(--text-soft)]">Gene</span> <span className="font-mono text-[var(--text)] break-all">{mutation.gene || 'n/a'}</span></div>
+                <div><span className="text-[var(--text-soft)]">{coordinateSystem.toUpperCase()} coordinate</span> <span className="font-mono text-[var(--text)]">{posLabel}</span></div>
+                <div><span className="text-[var(--text-soft)]">Gene</span> <span className="font-mono text-[var(--text)] break-all">{displayGene || 'n/a'}</span></div>
                 <div><span className="text-[var(--text-soft)]">Locus tag</span> <span className="font-mono text-[var(--text)] break-all">{d.locus_tag ?? 'n/a'}</span></div>
               </div>
               <div className="flex flex-wrap gap-2">
@@ -4644,7 +4670,7 @@ const CN_LINE_COLORS = [
 
 function CopyNumberPanel({
   samples, selected, mutations, loading, cnRegionCount, onCompareCN, onPickSamples,
-  currentExperiment, availableExperiments, onLoadExperiment,
+  coordinateSystem, coordinateAvailable, currentExperiment, availableExperiments, onLoadExperiment,
 }: {
   samples: MutationSample[];
   selected: Set<string>;
@@ -4653,6 +4679,8 @@ function CopyNumberPanel({
   cnRegionCount: number;
   onCompareCN: () => void;
   onPickSamples: () => void;
+  coordinateSystem: CoordinateSystem;
+  coordinateAvailable: boolean;
   currentExperiment: string;
   availableExperiments: string[];
   onLoadExperiment: (next: string) => void;
@@ -4712,17 +4740,20 @@ function CopyNumberPanel({
 
   const exportCsv = () => {
     if (!activeRow) return;
-    const rows: string[][] = [['region', 'lineage', 'sample', 'transfer', 'copy_number']];
+    const coordinate = resolveDisplayCoordinate(activeRow.coordinates, coordinateSystem, coordinateAvailable);
+    const region = coordinate.gene ?? 'n/a';
+    const position = formatCoordinate(coordinate);
+    const rows: string[][] = [['region', 'coordinate_system', 'coordinate', 'lineage', 'sample', 'transfer', 'copy_number']];
     for (const s of series) {
       for (const p of s.points) {
-        rows.push([activeRow.gene, s.lineage, p.name, Number.isNaN(p.transfer) ? '' : String(p.transfer), p.value.toFixed(3)]);
+        rows.push([region, coordinateSystem.toUpperCase(), position, s.lineage, p.name, Number.isNaN(p.transfer) ? '' : String(p.transfer), p.value.toFixed(3)]);
       }
     }
     const csv = rows.map(r => r.map(c => (/[",\n]/.test(c) ? `"${c.replace(/"/g, '""')}"` : c)).join(',')).join('\n');
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = url; a.download = `copy-number-${activeRow.gene}.csv`;
+    a.href = url; a.download = `copy-number-${region}.csv`;
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
     URL.revokeObjectURL(url);
   };
