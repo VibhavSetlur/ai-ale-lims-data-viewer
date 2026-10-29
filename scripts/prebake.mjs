@@ -45,6 +45,7 @@ const curatedTargets = [
   { key: 'mutations-stats', url: '/api/mutations-stats' },
   { key: 'barcode-counts', url: '/api/barcode-counts' },
   { key: 'library-variants', url: '/api/library-variants' },
+  { key: 'dgoa-alleles', url: '/api/dgoa-alleles' },
   { key: 'plate-design-factors', url: '/api/plate-design/factors' },
   { key: 'tables', url: '/api/tables?withCounts=1' },
   { key: 'mirror-info', url: '/api/mirror-info' },

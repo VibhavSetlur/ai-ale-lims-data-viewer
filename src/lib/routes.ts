@@ -4,7 +4,7 @@
 // typed RouteView into ViewerPage (server) -> Dashboard (client) so the URL
 // stays authoritative for navigation instead of local component state.
 
-export type MutationRouteTab = 'samples' | 'compare' | 'growth' | 'libraryVariants' | 'copynumber';
+export type MutationRouteTab = 'samples' | 'compare' | 'growth' | 'libraryVariants' | 'dgoaAlleles' | 'copynumber';
 
 export type RouteView =
   | { kind: 'home' }
@@ -25,6 +25,7 @@ const MUTATION_TAB_TO_PATH: Record<MutationRouteTab, string> = {
   compare: '/mutations/compare/mutations',
   growth: '/mutations/compare/growth',
   libraryVariants: '/mutations/compare/library-variants',
+  dgoaAlleles: '/mutations/compare/dgoa-alleles',
   copynumber: '/mutations/compare/copy-number',
 };
 
@@ -33,6 +34,7 @@ const PATH_TO_MUTATION_TAB: Record<string, MutationRouteTab> = {
   mutations: 'compare',
   growth: 'growth',
   'library-variants': 'libraryVariants',
+  'dgoa-alleles': 'dgoaAlleles',
   'copy-number': 'copynumber',
 };
 

@@ -10,6 +10,7 @@ import {
 import GrowthCurveComparison from './GrowthCurveComparison';
 import ViewInfo from './ViewInfo';
 import LibraryVariantComparison from './LibraryVariantComparison';
+import DgoAAlleleComparison from './DgoAAlleleComparison';
 import { fetchData, IS_STATIC } from '../lib/dataSource';
 import ExportFigureMenu from './ExportFigureMenu';
 import type { FigureSpec } from '../lib/figureSpec';
@@ -523,7 +524,7 @@ export default function MutationExplorer({ activeTab, onTabChange }: MutationExp
   useEffect(() => {
     const onNav = (e: Event) => {
       const detail = (e as CustomEvent).detail as { tab?: Tab } | undefined;
-      if (detail?.tab && (detail.tab === 'samples' || detail.tab === 'compare' || detail.tab === 'growth' || detail.tab === 'libraryVariants' || detail.tab === 'copynumber')) {
+      if (detail?.tab && (detail.tab === 'samples' || detail.tab === 'compare' || detail.tab === 'growth' || detail.tab === 'libraryVariants' || detail.tab === 'dgoaAlleles' || detail.tab === 'copynumber')) {
         if (detail.tab === 'libraryVariants' && data?.stats?.hasBarcodes !== true) return;
         setTab(detail.tab);
       }
@@ -543,7 +544,7 @@ export default function MutationExplorer({ activeTab, onTabChange }: MutationExp
       // it is applied by the sync effect below instead.
       if (activeTab === undefined) {
         const t = localStorage.getItem(TAB_KEY);
-        if (t === 'compare' || t === 'samples' || t === 'growth' || t === 'libraryVariants' || t === 'copynumber') setTab(t);
+        if (t === 'compare' || t === 'samples' || t === 'growth' || t === 'libraryVariants' || t === 'dgoaAlleles' || t === 'copynumber') setTab(t);
       }
       const e = localStorage.getItem(EXPERIMENT_KEY);
       if (e !== null) setExperiment(e);
@@ -670,6 +671,9 @@ export default function MutationExplorer({ activeTab, onTabChange }: MutationExp
               "ml-1.5 px-1.5 py-0.5 rounded text-[10px] tabular-nums",
               selected.size > 0 ? "bg-[var(--data-grow)] text-white" : "bg-[var(--surface-3)] text-[var(--text-soft)]"
             )}>{selected.size}</span>
+          </TabButton>
+          <TabButton active={tab === 'dgoaAlleles'} onClick={() => selectTab('dgoaAlleles')} icon={<Dna className="w-3.5 h-3.5" />}>
+            dgoA Alleles
           </TabButton>
           {data?.stats?.hasBarcodes && (
             <TabButton active={tab === 'libraryVariants'} onClick={() => selectTab('libraryVariants')} icon={<Sparkles className="w-3.5 h-3.5" />} tour="tab-library-variants">
@@ -858,6 +862,9 @@ export default function MutationExplorer({ activeTab, onTabChange }: MutationExp
             selected={selected}
             loading={loading}
           />
+        </div>
+        <div className={cn('flex-1 min-h-0 flex flex-col', tab === 'dgoaAlleles' ? '' : 'hidden')}>
+          <DgoAAlleleComparison selected={selected} />
         </div>
         <div className={cn('flex-1 min-h-0 flex flex-col', tab === 'copynumber' ? '' : 'hidden')}>
           <CopyNumberPanel
