@@ -64,6 +64,14 @@ function clipLabel(label: string, max = 22): string {
   return label.length > max ? `${label.slice(0, max - 1)}\u2026` : label;
 }
 
+// Mutation Explorer sample IDs may include a NUL-separated breseq registry
+// suffix, while dgoA measurements are keyed by Seqsample. Match either the
+// legacy raw ID or the underlying Seqsample so run-aware mutation selection
+// still selects the corresponding allele measurements.
+function selectedSeqsamples(selected: Set<string>): Set<string> {
+  return new Set([...selected].map(id => id.split('\u0000', 1)[0]));
+}
+
 export default function DgoAAlleleComparison({ selected }: DgoAAlleleComparisonProps) {
   const [data, setData] = useState<DgoADataset | null>(null);
   const [loading, setLoading] = useState(true);
@@ -110,10 +118,11 @@ export default function DgoAAlleleComparison({ selected }: DgoAAlleleComparisonP
   const measurements = data?.measurements ?? [];
   const coverageWarning = data?.source?.available === false;
   const warnings = data?.warnings ?? [];
+  const selectedDgoaSamples = useMemo(() => selectedSeqsamples(selected), [selected]);
 
   const filtered = useMemo(
-    () => measurements.filter(measurement => selected.has(measurement.sampleId)),
-    [measurements, selected],
+    () => measurements.filter(measurement => selectedDgoaSamples.has(measurement.sampleId)),
+    [measurements, selectedDgoaSamples],
   );
 
   const measuredSampleIds = useMemo(
@@ -123,9 +132,9 @@ export default function DgoAAlleleComparison({ selected }: DgoAAlleleComparisonP
 
   const missingSamples = useMemo(() => {
     let count = 0;
-    for (const sampleId of selected) if (!measuredSampleIds.has(sampleId)) count += 1;
+    for (const sampleId of selectedDgoaSamples) if (!measuredSampleIds.has(sampleId)) count += 1;
     return count;
-  }, [selected, measuredSampleIds]);
+  }, [selectedDgoaSamples, measuredSampleIds]);
 
   const composition = useMemo(
     () => dgoaComposition(variants, filtered, mode, topN),
