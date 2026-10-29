@@ -516,6 +516,7 @@ export default function MutationExplorer({ activeTab, onTabChange }: MutationExp
   // later changes the filter and clicks the callout again.
   const [forceMetric, setForceMetric] = useState<{ metric: 'copy_number'; nonce: number } | null>(null);
   const [showNotes, setShowNotes] = useState(false);
+  const [blockedComparison, setBlockedComparison] = useState(false);
   const [coordinateSystem, setCoordinateSystem] = useState<CoordinateSystem>(DEFAULT_COORDINATE_SYSTEM);
 
   // Cross-component navigation: the Guide dispatches `aiale:navigate`
@@ -620,7 +621,11 @@ export default function MutationExplorer({ activeTab, onTabChange }: MutationExp
   // Forward stay in sync. Persistence (TAB_KEY effect above) and the
   // `aiale:navigate` event listener are unaffected.
   const selectTab = (next: Tab) => {
-    if (next === 'compare' && mixedRuns) return;
+    if (next === 'compare' && mixedRuns) {
+      setBlockedComparison(true);
+      return;
+    }
+    setBlockedComparison(false);
     setTab(next);
     onTabChange?.(next);
   };
@@ -789,6 +794,17 @@ export default function MutationExplorer({ activeTab, onTabChange }: MutationExp
               copy-number →
             </button>
           )}
+        </div>
+      )}
+
+      {blockedComparison && mixedRuns && (
+        <div role="alert" className="flex items-start gap-2 m-3 p-2.5 bg-amber-50 dark:bg-amber-900/20 text-amber-800 dark:text-amber-200 text-[12px] rounded border border-amber-200 dark:border-amber-800">
+          <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <div className="font-medium">Comparison blocked across breseq runs.</div>
+            <div className="text-[11px] mt-0.5">Selected samples belong to different runs ({selectedRuns.join(', ')}), which may use distinct reference genomes. Select samples from one run before comparing.</div>
+          </div>
+          <button type="button" onClick={() => setBlockedComparison(false)} className="shrink-0 opacity-60 hover:opacity-100" title="Dismiss comparison warning"><X className="w-3.5 h-3.5" /></button>
         </div>
       )}
 
