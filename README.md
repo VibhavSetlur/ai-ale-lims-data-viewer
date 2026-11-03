@@ -6,12 +6,12 @@ trajectories, robot-measured OD600 growth curves, and VerA/VerB barcode-
 composition charts for engineered *Acinetobacter baylyi* ADP1 strains evolved on
 the automated robotic ALE platform.
 
-- LIVE (public, publication snapshot): https://modelseed.org/annotation/projects/aiale/
-- DEV (internal test): https://modelseed.org/annotation/projects/aiale-dev/
+- STATIC (approved static viewer): https://modelseed.org/annotation/projects/aiale-dev/
+- DYNAMIC: served from the approved `dynamic` lineage when released
 
-Both sites are built from THIS single codebase. They differ only in which
-database snapshot is baked in, and the UI automatically hides views whose data is
-absent (see "Data-driven views" below).
+The two delivery modes share this codebase but have separate branch contracts.
+Static output is prebaked; dynamic behavior uses its configured runtime database.
+The UI hides views whose required data is absent (see "Data-driven views" below).
 
 ## Documentation map
 
@@ -22,10 +22,9 @@ absent (see "Data-driven views" below).
 | `docs/ARCHITECTURE.md` | System design, dual run modes, the data-driven dual-deployment model |
 | `docs/DATA_MODEL.md` | The LIMS tables the views use and how they map; provenance rule |
 | `docs/RESEARCHER_GUIDE.md` | How a biologist uses the viewer to find results and build figures |
-| `docs/MANUSCRIPT_INTEGRATION.md` | Ready-to-adapt methods/results/legend language + honesty guardrails |
+| `AGENTS.md` | Tracked project operating guide and delivery boundaries |
 | `CONTRIBUTING.md` | Dev setup, verification, conventions, build/deploy |
 | `CITATION.cff` | How to cite this software |
-| `CLAUDE.md` | Operating conventions for AI-assisted work in this repo |
 
 In-app help is built into the viewer itself: the left sidebar has a **Guide**
 (answers "how do I..." and walks you to the right view), a **Changelog**
@@ -109,23 +108,24 @@ deployment. Which database you point the server at before `prebake` +
 `prepare-httpvfs-db.sh` determines what the static instance shows.
 
 ```bash
-# 1. a server must be running so prebake can snapshot the live API
-npm run prebake                                              # API -> public/data/*.json(.gz)
-SRC=data/lims_indexed.db bash scripts/prepare-httpvfs-db.sh  # -> public/db/lims.db
-BASE_PATH=/annotation/projects/aiale npm run build:static    # -> out/
-# then mirror out/ into the target webroot and fix file perms (644 files / 755 dirs)
+# Run from an accepted static checkout with a server against data/lims_indexed.db.
+npm run prebake
+SRC=data/lims_indexed.db bash scripts/prepare-httpvfs-db.sh
+BASE_PATH=/annotation/projects/aiale-dev scripts/build-static.sh
 ```
 
-The raw Database Tables browser stays fully queryable in the static build because
-it runs real SQLite in the browser via sql.js-httpvfs over HTTP range requests;
-the host must serve the `.db` with `Accept-Ranges: bytes`.
+The static build is prebaked and must not acquire a live API dependency. Before an
+authorized webroot copy, verify the URL root, `data/manifest.json`, required
+artifacts, and an HTTP byte-range response for the SQLite asset. The raw tables
+browser and live CSV export are server-mode surfaces.
 
-Static deployments are tracked by branch and displayed in the viewer version
-badge and Changelog. Viewer version is the semantic release in `package.json`;
-data version is the active mirror snapshot timestamp, with file mtime and static
-manifest metadata shown separately. Versioning starts at `1.0.0`; see
-[`docs/DEPLOYMENT_VERSIONING.md`](docs/DEPLOYMENT_VERSIONING.md) for the
-`deploy/aiale-dev` and `deploy/aiale-public` workflow.
+Static releases are built from `static`; `static-dev` is its development source.
+Dynamic development and releases use `dynamic-dev` and `dynamic`; `main` is
+historic/shared recovery only. Viewer version is the semantic release in
+`package.json`; data version is the active mirror snapshot timestamp, with file
+mtime and static manifest metadata shown separately. See
+[`docs/DEPLOYMENT_VERSIONING.md`](docs/DEPLOYMENT_VERSIONING.md) for the branch
+roles and promotion boundary.
 
 ## Database performance
 

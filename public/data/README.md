@@ -12,4 +12,4 @@ The viewer in static mode reads `data/manifest.json` then the per-experiment fil
 loading ONE experiment at a time to keep browser memory low.
 
 Do not commit the generated artifacts; re-run `npm run prebake` after a DB refresh.
-See ../../docs/DEPLOYMENT_DESIGN.md for the full pipeline.
+See [the documentation authority map](../../docs/README.md) and [deployment/versioning guidance](../../docs/DEPLOYMENT_VERSIONING.md) for the release boundary.

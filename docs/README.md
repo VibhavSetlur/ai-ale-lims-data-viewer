@@ -1,26 +1,45 @@
-# Documentation
+# Documentation Authority Map
 
-Documentation for the AI-ALE LIMS Data Viewer. Start with the project
-[`README`](../README.md) for setup and a feature overview; the documents here go
-deeper.
+Start with the project [`README`](../README.md) for product use, setup, and a feature overview. This index classifies the maintained documents below. It does not move files or replace runtime paths.
 
-| Document | Read it for | Audience |
-|---|---|---|
-| [`ARCHITECTURE.md`](ARCHITECTURE.md) | System design, the dual server/static run modes, the data-driven dual-deployment model, the full re-deploy procedure, and pitfalls | Developers, maintainers |
-| [`DEPLOYMENT_VERSIONING.md`](DEPLOYMENT_VERSIONING.md) | Version badge, Changelog, deploy branch pointers, dev/public differences, and promotion workflow | Developers, maintainers, reviewers |
-| [`KIND_INTEGRATION.md`](KIND_INTEGRATION.md) | Local-only KIND adapter checks, server-mode boundary, and required external onboarding decisions | Developers, maintainers |
-| [`DATA_MODEL.md`](DATA_MODEL.md) | The LIMS tables the views depend on and how the viewer maps them; the provenance rule | Reviewers, anyone reproducing a value |
-| [`RESEARCHER_GUIDE.md`](RESEARCHER_GUIDE.md) | How a biologist actually uses the viewer: selecting samples, reading the heatmap and copy-number trajectories, growth curves, barcode charts, and exporting publication figures | Researchers, reviewers |
+## User documentation
 
-The `RESEARCHER_GUIDE.md` is also served inside the app: the left sidebar's
-**Help** opens a searchable copy, **Guide** walks users to the right view, and
-**Changelog** shows viewer releases plus data snapshot provenance.
+| Document | Authority |
+|---|---|
+| [`RESEARCHER_GUIDE.md`](RESEARCHER_GUIDE.md) | How researchers use the viewer, interpret displayed availability, and export figures. The app's Help and Guide surface this content. |
+
+## Reference documentation
+
+| Document | Authority |
+|---|---|
+| [`ARCHITECTURE.md`](ARCHITECTURE.md) | System design, server/static modes, data flow, repository map, and build boundaries. |
+| [`DATA_MODEL.md`](DATA_MODEL.md) | LIMS tables, viewer mapping, and value provenance. |
+
+## Operations documentation
+
+| Document | Authority |
+|---|---|
+| [`DEPLOYMENT_VERSIONING.md`](DEPLOYMENT_VERSIONING.md) | Branch roles, release metadata, and promotion boundaries for this lineage. |
+| [`OPS_LIVE_RUNBOOK.md`](OPS_LIVE_RUNBOOK.md) | The separate 3458 live/MySQL/ORCID slice and its operational checks. |
+| [`OPS_ARGO_PROXY.md`](OPS_ARGO_PROXY.md) | Argo proxy lifecycle and verification. |
+| [`OPS_ASSISTANT.md`](OPS_ASSISTANT.md) | Operator-facing assistant procedures where applicable. |
+
+The executable authority for lifecycle and refresh behavior remains the existing files under [`../ops/`](../ops/), including `serve.sh`, `stop.sh`, `refresh-db.sh`, the live-slice scripts, and `argo-viewer-proxy/`. Logs, PID files, locks, mtime markers, build directories, and generated artifacts are runtime outputs, not source documentation. Do not delete, move, or consolidate these paths without checking their active consumers and obtaining authorization.
+
+## Integration documentation
+
+| Document | Authority |
+|---|---|
+| [`KIND_INTEGRATION.md`](KIND_INTEGRATION.md) | The local dynamic KIND adapter contract, its server-only boundary, and external approval requirements. |
+
+## Decision records
+
+| Document | Authority |
+|---|---|
+| [`../plans/kind-integration.md`](../plans/kind-integration.md) | KIND reconciliation and decision provenance. It is not an operations runbook and remains preserved as a decision record. |
 
 ## Conventions
 
-- These docs describe the committed codebase and are kept in sync with it. When a
-  feature changes, the doc and the in-app Help and Guide are updated together.
-- No deploy secrets, server paths private to one host, or point-in-time meeting
-  notes live here. Operational notes that are not part of the public record are
-  kept outside the repository.
+- Keep documentation synchronized with the committed code and the in-app Help and Guide when a user-visible feature changes.
+- Keep secrets, host-private credentials, and point-in-time private notes out of tracked documentation.
 - Style: plain English, no em-dashes, examples over prose.

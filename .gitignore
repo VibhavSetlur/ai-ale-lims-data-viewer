@@ -97,7 +97,6 @@ ops/live.log.*
 
 # local agent rules and private writing handoffs (not for publication)
 CLAUDE.md
-AGENTS.md
 GEMINI.md
 /docs/MANUSCRIPT_INTEGRATION.md
 
