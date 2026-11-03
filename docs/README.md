@@ -20,7 +20,7 @@ The `RESEARCHER_GUIDE.md` is also served inside the app: the left sidebar's
 
 - These docs describe the committed codebase and are kept in sync with it. When a
   feature changes, the doc and the in-app Help and Guide are updated together.
-- No deploy secrets, server paths private to one host, or point-in-time meeting
-  notes live here. Operational notes that are not part of the public record are
-  kept outside the repository.
+- No deploy secrets, server paths private to one host, point-in-time meeting
+  notes, or `.omo/` session state live here. `.omo/` is ignored local state and is
+  never part of a release artifact.
 - Style: plain English, no em-dashes, examples over prose.

@@ -63,6 +63,9 @@ archive/
 # local config overrides
 /local/
 
+# repository-local transient session state (never commit or release)
+/.omo/
+
 # vercel
 .vercel
 

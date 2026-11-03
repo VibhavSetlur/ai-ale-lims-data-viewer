@@ -22,6 +22,7 @@ Produce a KIND-compatible packaging and operating path for the dynamic viewer wh
 3. Keep legacy KBase SDK work distinct from KIND integration. Legacy SDK documentation or access does not authorize KIND implementation.
 4. Never blind-merge, bulk-cherry-pick, move a deployment pointer, or infer a branch role from its name.
 5. Preserve unrelated dirty and untracked work, including existing `e2e/`, `ops/watchdog.*`, and `plans/` work, throughout all later execution.
+6. Keep `.omo/` as ignored repository-local transient session state. It is not source, build input, a KIND package input, or a static artifact.
 
 ### Non-goals
 
