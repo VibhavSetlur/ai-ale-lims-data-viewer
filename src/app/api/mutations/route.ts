@@ -1,12 +1,15 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { runQuery, getDbType } from '@/lib/db';
+import { runQuery, getDbType, getTableSchema } from '@/lib/db';
 import { deriveReplicate } from '@/lib/mutationSample';
+import { coordinateCapabilities, resolveReplicate, type CoordinateCapability, type CoordinateSystem } from '@/lib/mutationMetadata';
+import type { MutationCoordinates } from '@/lib/mutationCoordinates';
 
 export interface MutationSample {
   id: string;
   name: string;
   experiment: string;
   breseq_registry_id?: string;
+  breseq_reference?: string;
   experiment_type?: string;
   seqorder?: string;
   seqorders?: string[];
@@ -42,6 +45,7 @@ export interface MutationRow {
   mutation_category?: string; // snp_*, small_indel, large_deletion
   base_type?: string;      // raw breseq type: SNP / INS / DEL / SUB
   position?: number;
+  coordinates?: MutationCoordinates;
   gene_product?: string;
   // Sample IDs whose donor DNA (Transforming_DNA) provided THIS mutation, i.e. it
   // was supplied in the growth condition rather than arising spontaneously. The UI
@@ -92,7 +96,8 @@ export interface MutationDataset {
   mutations: MutationRow[];
   experiments: string[]; // distinct experiments present in this dataset (post-filter)
   registries?: RegistrySummary[];           // breseq runs that produced calls in the (experiment-filtered) dataset, by row count desc
-  selectedRegistry?: string | null;         // which registry the returned samples/mutations are restricted to
+  selectedRegistry?: string | null;
+  coordinateCapabilities?: CoordinateCapability[];         // which registry the returned samples/mutations are restricted to
   warnings?: string[];
   source?: { driver: 'sqlite' | 'mysql'; table: string; rowsScanned: number };
   stats?: {
@@ -110,6 +115,7 @@ export interface MutationDataset {
 
 interface SeqSampleRow {
   seq_sample: string;
+  breseq_registry_id: string | null;
   experiment_from_mutations: string | null;
   experiment_from_seq: string | null;
   sample_name: string | null;
@@ -119,6 +125,7 @@ interface SeqSampleRow {
   strain: string | null;
   transforming_dna: string | null;
   notes: string | null;
+  replicate_number: string | number | null;
   seqorder: string | null;
   seqorders: string | null;
   has_barcodes: number | null;
@@ -134,9 +141,16 @@ interface MutationRawRow {
   snp_type: string | null;
   mutation_category: string | null;
   gene_name: string | null;
+  gene_name_curated: string | null;
   gene_product: string | null;
   locus_tag: string | null;
   position: number | null;
+  coordinate_original?: number | null;
+  coordinate_ncbi?: number | null;
+  coordinate_neidle?: number | null;
+  coordinate_gene_original?: string | null;
+  coordinate_gene_ncbi?: string | null;
+  coordinate_gene_neidle?: string | null;
   ref_seq: string | null;
   new_seq: string | null;
   aa_ref_seq: string | null;
@@ -220,7 +234,7 @@ function deriveDonorDna(sampleName: string | null, transformingDna: string | nul
 }
 
 function labelGene(r: MutationRawRow): string {
-  return (r.gene_name || r.locus_tag || r.gene_product || 'unknown').trim();
+  return (r.gene_name_curated || r.gene_name || r.locus_tag || r.gene_product || 'unknown').trim();
 }
 
 // Parse a sample's donor DNA string (Transforming_DNA) into structured tokens so
@@ -299,7 +313,7 @@ function labelType(r: MutationRawRow): string {
 function mutationKey(r: MutationRawRow): string {
   return [
     r.type ?? '',
-    r.gene_name ?? r.locus_tag ?? '',
+    r.gene_name_curated ?? r.gene_name ?? r.locus_tag ?? '',
     r.position ?? '',
     r.ref_seq ?? '',
     r.new_seq ?? '',
@@ -308,6 +322,12 @@ function mutationKey(r: MutationRawRow): string {
     r.aa_new_seq ?? '',
   ].join('|');
 }
+
+// A sequencing sample can have multiple breseq runs. Keep those runs as
+// separate selectable sample identities, while retaining the underlying
+// Seq_sample for joins to metadata, curves, and copy-number measurements.
+const sampleRunKey = (seqSample: string, registry: string | null | undefined): string =>
+  `${seqSample}\u0000${registry ?? ''}`;
 
 /* ---------- SQL ----------
    Drive mutation-bearing samples FROM the Mutations table so the experiment
@@ -319,7 +339,7 @@ function mutationKey(r: MutationRawRow): string {
 
 // Build SAMPLES SQL on demand so registry and canonical Seq_samples experiment
 // filters are pushed inside the CTE. Params are appended in (experiment?, registry?) order.
-function buildSamplesSql(opts: { experiment: boolean; registry: boolean; barcodeSamples: boolean }): string {
+function buildSamplesSql(opts: { experiment: boolean; registry: boolean; barcodeSamples: boolean; replicateColumn: boolean }): string {
   const inner: string[] = ['deleted = 0'];
   if (opts.experiment) {
     inner.push(`EXISTS (
@@ -336,6 +356,7 @@ function buildSamplesSql(opts: { experiment: boolean; registry: boolean; barcode
         UNION ALL
         SELECT
           v."Seqsample" AS seq_sample,
+          NULL AS breseq_registry_id,
           NULL AS experiment,
           MIN(v."Seqorder") AS seqorder,
           'barcode' AS source,
@@ -350,6 +371,7 @@ function buildSamplesSql(opts: { experiment: boolean; registry: boolean; barcode
   return `
     SELECT
       ms.seq_sample                              AS seq_sample,
+      ms.breseq_registry_id                      AS breseq_registry_id,
       ms.experiment                              AS experiment_from_mutations,
       ms.seqorder                                AS seqorder,
       ms.seqorders                               AS seqorders,
@@ -363,10 +385,12 @@ function buildSamplesSql(opts: { experiment: boolean; registry: boolean; barcode
       s."Condition"                              AS condition,
       s."Strain_name"                            AS strain,
       s."Transforming_DNA"                       AS transforming_dna,
-      s."Notes"                                  AS notes
+      s."Notes"                                  AS notes,
+      ${opts.replicateColumn ? 's."Replicate_number"' : 'NULL'} AS replicate_number
     FROM (
       SELECT
         seq_sample,
+        breseq_registry_id,
         MAX(CASE WHEN source = 'mutation' THEN experiment END) AS experiment,
         COALESCE(
           MAX(CASE WHEN source = 'mutation' THEN seqorder END),
@@ -379,6 +403,7 @@ function buildSamplesSql(opts: { experiment: boolean; registry: boolean; barcode
       FROM (
         SELECT
           "Seq_sample" AS seq_sample,
+          "Breseq_registry_ID" AS breseq_registry_id,
           MIN("Experiment") AS experiment,
           MIN("Seqorder") AS seqorder,
           'mutation' AS source,
@@ -387,10 +412,10 @@ function buildSamplesSql(opts: { experiment: boolean; registry: boolean; barcode
           0 AS verab_combinations
         FROM Mutations
         WHERE ${inner.join(' AND ')}
-        GROUP BY "Seq_sample"
+        GROUP BY "Seq_sample", "Breseq_registry_ID"
         ${barcodeUnion}
       ) sample_sources
-      GROUP BY seq_sample
+      GROUP BY seq_sample, breseq_registry_id
     ) ms
     LEFT JOIN (
       -- A handful of samples were re-sequenced under two Seqorders, so the same
@@ -438,7 +463,17 @@ function buildSamplesSql(opts: { experiment: boolean; registry: boolean; barcode
   `;
 }
 
-const MUTATIONS_SQL = `
+function coordinateSelect(column: string | undefined, alias: string): string {
+  return column ? `"${column}" AS ${alias}` : `NULL AS ${alias}`;
+}
+
+function mutationSql(coordinates: CoordinateCapability[], columns: Iterable<string>): string {
+  const present = new Set(columns);
+  const geneNameColumn = present.has('gene_name_curated') ? 'gene_name_curated' : null;
+  const capability = (system: CoordinateSystem) => coordinates.find(item => item.system === system);
+  const positionColumn = (system: CoordinateSystem) => capability(system)?.positionColumn;
+  const geneColumn = (system: CoordinateSystem) => capability(system)?.geneColumn;
+  return `
   SELECT
     "Seq_sample"          AS seq_sample,
     "Experiment"          AS experiment,
@@ -446,10 +481,17 @@ const MUTATIONS_SQL = `
     "type"              AS type,
     "snp_type"          AS snp_type,
     "mutation_category" AS mutation_category,
+    ${geneNameColumn ? `"${geneNameColumn}"` : 'NULL'} AS gene_name_curated,
     "gene_name"         AS gene_name,
     "gene_product"      AS gene_product,
     "locus_tag"         AS locus_tag,
     "position"          AS position,
+    ${coordinateSelect(positionColumn('original'), 'coordinate_original')},
+    ${coordinateSelect(positionColumn('ncbi'), 'coordinate_ncbi')},
+    ${coordinateSelect(positionColumn('neidle'), 'coordinate_neidle')},
+    ${coordinateSelect(geneColumn('original'), 'coordinate_gene_original')},
+    ${coordinateSelect(geneColumn('ncbi'), 'coordinate_gene_ncbi')},
+    ${coordinateSelect(geneColumn('neidle'), 'coordinate_gene_neidle')},
     "ref_seq"           AS ref_seq,
     "new_seq"           AS new_seq,
     "aa_ref_seq"        AS aa_ref_seq,
@@ -474,6 +516,7 @@ const MUTATIONS_SQL = `
   FROM Mutations
   WHERE deleted = 0
 `;
+}
 
 function buildAllExperimentsSql(hasBarcodeTable: boolean): string {
   return `
@@ -664,23 +707,14 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // The mutation CALLS are correctly scoped to (experiment?, registry?) — a
-    // different breseq run yields different SNP calls, so the selected registry
-    // matters for what mutations we show.
-    //
-    // DEFAULT-VIEW REGISTRY TRAP (fixed): when NO experiment and NO explicit
-    // registry are given, restricting the mutation pull to the single global
-    // top-count registry (registries[0]) showed TFMN1/TFMN4 samples against a
-    // reference they weren't called on, so each appeared with ~1 mutation
-    // instead of ~220 (a silent ~200x undercount). In that default view we now
-    // pull calls across ALL registries and keep, per seq_sample, only that
-    // sample's dominant (most-calls) registry — so every sample shows its true
-    // call set against its own reference. An explicit ?registry= or ?experiment=
-    // still scopes normally (the per-experiment best registry is correct there).
-    const usePerSampleRegistry = !experimentFilter && !registryParam;
+    // A registry filter is opt-in. Without ?registry=, return every run as a
+    // separate sample identity, including when an experiment filter is present.
+    // This is essential for re-sequenced samples whose runs use different
+    // reference genomes. The UI's auto registry is a display/default label, not
+    // an implicit data filter.
     const mutParams: (string | number | null)[] = [];
     if (experimentFilter) mutParams.push(experimentFilter);
-    if (selectedRegistry && !usePerSampleRegistry) mutParams.push(selectedRegistry);
+    if (selectedRegistry && registryParam) mutParams.push(selectedRegistry);
 
     // The SAMPLE LIST must NOT be silently scoped to a single breseq registry.
     // A sample's existence in the picker should not depend on which parameter
@@ -696,19 +730,22 @@ export async function GET(req: NextRequest) {
     if (scopeSamplesByRegistry) sampleParams.push(selectedRegistry);
     if (hasBarcodeTable && experimentFilter) sampleParams.push(experimentFilter);
 
+    const [sampleSchema, mutationSchema] = await Promise.all([getTableSchema('Samples').catch(() => []), getTableSchema('Mutations').catch(() => [])]);
+    const availableCoordinates = coordinateCapabilities(mutationSchema.map(column => column.name));
     const sampleSql = buildSamplesSql({
       experiment: !!experimentFilter,
       registry: scopeSamplesByRegistry,
       barcodeSamples: hasBarcodeTable,
+      replicateColumn: sampleSchema.some(column => column.name === 'Replicate_number'),
     });
-    const mutSql = MUTATIONS_SQL
+    const mutSql = mutationSql(availableCoordinates, mutationSchema.map(column => column.name))
       + (experimentFilter ? ` AND EXISTS (
           SELECT 1 FROM Seq_samples ss_filter
           WHERE ss_filter."Sequencing_sample" = Mutations."Seq_sample"
             AND ss_filter.deleted = 0
             AND ss_filter."Experiment" = ?
         )` : '')
-      + ((selectedRegistry && !usePerSampleRegistry) ? ' AND "Breseq_registry_ID" = ?' : '');
+      + ((selectedRegistry && registryParam) ? ' AND "Breseq_registry_ID" = ?' : '');
 
     const [sampleRows, mutRows, allExperiments, odRows, curveRows, cnRows] = await Promise.all([
       runQuery<SeqSampleRow>(sampleSql, sampleParams),
@@ -766,27 +803,15 @@ export async function GET(req: NextRequest) {
       cnBySampleRegion.set(r.seq_sample, byRegion);
     }
 
-    const registryBySample = new Map<string, string>();
-    const sampleRowIds = new Set(sampleRows.map(r => r.seq_sample));
-    const registryCountsBySample = new Map<string, Map<string, number>>();
-    for (const r of mutRows) {
-      const registry = r.breseq_registry_id ?? '';
-      if (!registry || !sampleRowIds.has(r.seq_sample)) continue;
-      const counts = registryCountsBySample.get(r.seq_sample) ?? new Map<string, number>();
-      counts.set(registry, (counts.get(registry) ?? 0) + 1);
-      registryCountsBySample.set(r.seq_sample, counts);
-    }
-    for (const [sample, counts] of registryCountsBySample) {
-      let registry = ''; let count = -1;
-      for (const [candidate, n] of counts) {
-        if (n > count || (n === count && candidate < registry)) { registry = candidate; count = n; }
-      }
-      if (registry) registryBySample.set(sample, registry);
-    }
+    // The API identity is (Seq_sample, Breseq_registry_ID), not Seq_sample alone.
+    // A single biological sample can have calls from multiple runs against
+    // different references, and collapsing those runs loses selectable data.
+    const sampleIds = new Set(sampleRows.map(r => sampleRunKey(r.seq_sample, r.breseq_registry_id)));
 
     const samples: MutationSample[] = sampleRows.map(r => {
       const { transfer, selection } = parseSeqSampleSuffix(r.seq_sample);
-      const replicate = deriveReplicate(r.sample_name);
+      const id = sampleRunKey(r.seq_sample, r.breseq_registry_id);
+      const replicate = resolveReplicate(r.replicate_number, deriveReplicate(r.sample_name));
       const donor_dna = deriveDonorDna(r.sample_name, r.transforming_dna);
       const popOrColony = (r.pop_or_colony_raw && r.pop_or_colony_raw.trim()) || selection;
       // Real growth curve from Robotic_OD (joined by lineage + transfer).
@@ -800,10 +825,11 @@ export async function GET(req: NextRequest) {
         ? odBySample.get(r.seq_sample)
         : undefined;
       return {
-        id: r.seq_sample,
+        id,
         name: r.seq_sample,
         experiment: r.experiment_from_seq ?? r.experiment_from_mutations ?? '',
-        breseq_registry_id: registryBySample.get(r.seq_sample),
+        breseq_registry_id: r.breseq_registry_id ?? undefined,
+        breseq_reference: r.breseq_registry_id ? registries.find(registry => registry.id === r.breseq_registry_id)?.reference ?? undefined : undefined,
         experiment_type: r.experiment_type ?? undefined,
         seqorder: (r.seqorder && String(r.seqorder).trim()) || undefined,
         seqorders: (() => {
@@ -827,42 +853,12 @@ export async function GET(req: NextRequest) {
       };
     });
 
-    const sampleIds = new Set(samples.map(s => s.id));
-
-    // Per-sample parsed donor DNA tokens, so we can flag PROVIDED mutations (Henry):
-    // a mutation supplied in the growth condition vs one that arose spontaneously.
+    // Per-run parsed donor DNA tokens, so provided mutations follow the same
+    // composite identity as the selectable sample rows.
     const donorBySample = new Map<string, DonorToken[]>();
     for (const s of samples) {
       const toks = parseDonorTokens(s.donor_dna);
       if (toks.length) donorBySample.set(s.id, toks);
-    }
-
-    // DEFAULT-VIEW per-sample registry resolution (see usePerSampleRegistry
-    // above). When we pulled calls across all registries, each seq_sample may
-    // have calls under several breseq runs; we keep only that sample's DOMINANT
-    // registry (the one with the most calls for it) so the sample is shown
-    // against a single, self-consistent reference instead of a mix. Without an
-    // experiment/registry filter this is what makes the default grid report the
-    // true ~220 calls/sample for TFMN1/TFMN4 instead of ~1.
-    const bestRegistryBySample = new Map<string, string>();
-    if (usePerSampleRegistry) {
-      const countsBySample = new Map<string, Map<string, number>>();
-      for (const r of mutRows) {
-        if (!sampleIds.has(r.seq_sample)) continue;
-        const reg = r.breseq_registry_id ?? '';
-        if (!reg) continue;
-        const byReg = countsBySample.get(r.seq_sample) ?? new Map<string, number>();
-        byReg.set(reg, (byReg.get(reg) ?? 0) + 1);
-        countsBySample.set(r.seq_sample, byReg);
-      }
-      for (const [sample, byReg] of countsBySample) {
-        let bestReg = ''; let bestN = -1;
-        for (const [reg, n] of byReg) {
-          // tie-break deterministically by registry id so results are stable
-          if (n > bestN || (n === bestN && reg < bestReg)) { bestN = n; bestReg = reg; }
-        }
-        if (bestReg) bestRegistryBySample.set(sample, bestReg);
-      }
     }
 
     // Aggregate mutation calls into rows; take MAX frequency when breseq emits
@@ -874,13 +870,8 @@ export async function GET(req: NextRequest) {
     let droppedNoSampleMatch = 0;
     for (const r of mutRows) {
       rowsScanned++;
-      if (!sampleIds.has(r.seq_sample)) { droppedNoSampleMatch++; continue; }
-      // In the default view, drop calls from any registry that isn't this
-      // sample's dominant one (keeps each sample on a single reference).
-      if (usePerSampleRegistry) {
-        const best = bestRegistryBySample.get(r.seq_sample);
-        if (best && (r.breseq_registry_id ?? '') !== best) continue;
-      }
+      const sampleId = sampleRunKey(r.seq_sample, r.breseq_registry_id);
+      if (!sampleIds.has(sampleId)) { droppedNoSampleMatch++; continue; }
       const key = mutationKey(r);
       let row = byKey.get(key);
       if (!row) {
@@ -895,6 +886,26 @@ export async function GET(req: NextRequest) {
           mutation_category: r.mutation_category ?? undefined,
           base_type: r.type ?? undefined,
           position: r.position ?? undefined,
+          coordinates: {
+            original: {
+              position: r.coordinate_original ?? r.position ?? undefined,
+              positionStart: r.position_start ?? r.coordinate_original ?? r.position ?? undefined,
+              positionEnd: r.position_end ?? r.coordinate_original ?? r.position ?? undefined,
+              gene: r.coordinate_gene_original ?? undefined,
+            },
+            ncbi: r.coordinate_ncbi === null || r.coordinate_ncbi === undefined ? undefined : {
+              position: r.coordinate_ncbi,
+              positionStart: r.coordinate_ncbi,
+              positionEnd: r.coordinate_ncbi,
+              gene: r.coordinate_gene_ncbi ?? undefined,
+            },
+            neidle: r.coordinate_neidle === null || r.coordinate_neidle === undefined ? undefined : {
+              position: r.coordinate_neidle,
+              positionStart: r.coordinate_neidle,
+              positionEnd: r.coordinate_neidle,
+              gene: r.coordinate_gene_neidle ?? undefined,
+            },
+          },
           gene_product: r.gene_product ?? undefined,
           detail: {
             seq_id: r.seq_id ?? undefined,
@@ -925,10 +936,10 @@ export async function GET(req: NextRequest) {
       }
       const f = typeof r.frequency === 'number' && Number.isFinite(r.frequency) ? r.frequency : null;
       if (f !== null) {
-        const prev = row._maxFreqBySample.get(r.seq_sample);
+        const prev = row._maxFreqBySample.get(sampleId);
         if (prev === undefined || f > prev) {
-          row._maxFreqBySample.set(r.seq_sample, f);
-          row.values[r.seq_sample] = f;
+          row._maxFreqBySample.set(sampleId, f);
+          row.values[sampleId] = f;
         }
       }
     }
@@ -949,9 +960,11 @@ export async function GET(req: NextRequest) {
     });
 
     // Copy number comparative rows. One row per amplified region (dgoA-star,
-    // verC); values are Region_CN keyed by seq_sample, restricted to samples in
-    // the current dataset. These ride alongside the SNP-frequency rows and the
-    // UI surfaces them via the copy_number metric filter + emerald color scale.
+    // verC); values are keyed by the same composite sample/run identity used by
+    // mutation rows. Copy_numbers has no run column, so the measured value is
+    // intentionally available for every selected run of that Seq_sample.
+    // These ride alongside the SNP-frequency rows and the UI surfaces them via
+    // the copy_number metric filter + emerald color scale.
     // dgoA-star is the headline amplification nspahr asked to display; verC is
     // included when present so the two regions can be compared.
     const REGION_LABELS: Record<string, { gene: string; product: string }> = {
@@ -966,7 +979,8 @@ export async function GET(req: NextRequest) {
     const cnRowsByRegion = new Map<string, MutationRow>();
     let cnSamplesSeen = 0;
     for (const [seqSample, byRegion] of cnBySampleRegion) {
-      if (!sampleIds.has(seqSample)) continue;
+      const runSamples = samples.filter(sample => sample.name === seqSample);
+      if (runSamples.length === 0) continue;
       cnSamplesSeen++;
       for (const [region, cnVal] of byRegion) {
         let row = cnRowsByRegion.get(region);
@@ -984,7 +998,7 @@ export async function GET(req: NextRequest) {
           };
           cnRowsByRegion.set(region, row);
         }
-        row.values[seqSample] = cnVal;
+        for (const sample of runSamples) row.values[sample.id] = cnVal;
       }
     }
     // Surface known regions in a consistent order; unlabelled regions sort last.
@@ -1030,6 +1044,7 @@ export async function GET(req: NextRequest) {
       experiments: allExperiments.map(e => e.name),
       registries,
       selectedRegistry,
+      coordinateCapabilities: availableCoordinates,
       warnings,
       source: { driver: getDbType(), table: 'Mutations', rowsScanned },
       stats: {
