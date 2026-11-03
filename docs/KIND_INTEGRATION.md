@@ -38,6 +38,9 @@ that affects static readiness must preserve the artifact checks above and must n
 an API, launcher, authentication, AI, or workspace runtime dependency to the static
 export.
 
+`.omo/` is ignored repository-local transient session state. It is neither KIND
+package input nor a static artifact and must not be committed or included in a release.
+
 ## Validation boundary
 
 Before an authorized static release, inspect the generated manifest and verify the

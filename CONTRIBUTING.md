@@ -20,6 +20,12 @@ npm run dev                        # http://localhost:3000
 Database files are never committed; point `SQLITE_PATH` at a local copy (see the
 README "Database performance" section for building an indexed mirror).
 
+## Local session state
+
+`.omo/` is repository-local transient session state. It is ignored and must not be
+committed. It is not a source or build input and must not be included in releases,
+static artifacts, or KIND packaging.
+
 ## Verify before every commit
 
 ```bash

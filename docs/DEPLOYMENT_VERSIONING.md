@@ -39,6 +39,12 @@ The header and Changelog identify viewer version, deployment channel, branch, co
 4. Do not source work, promote releases, or deploy from `dev` or `deploy/aiale-dev`. Do not treat `main` as a deployment record.
 5. Static exports remain prebaked and make no live API calls. They retain Plate Design and omit the AI sidebar/User Workspace; dynamic behavior remains unchanged.
 
+## Local session state
+
+`.omo/` is ignored repository-local transient session state. It is not source or
+build input and must not be committed, included in a static artifact, or included in
+KIND packaging or a release.
+
 ## Version Alignment
 
 A release identity must match its approved source branch, channel, commit, and data snapshot. Static metadata must say `channel=static` and `branch=static`; dynamic release metadata must identify `dynamic`. Data refreshes do not change the viewer version by themselves.
