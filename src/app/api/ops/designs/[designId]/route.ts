@@ -3,7 +3,7 @@ import { assertSameOrigin } from '@/lib/ops/csrf';
 import { normalizeDesignName } from '@/lib/ops/designInput';
 import { OpsHttpError, assertOwned } from '@/lib/ops/guards';
 import { deleteDesign, getDesign, renameDesign, updateDesignPayload } from '@/lib/ops/repo';
-import { MAX_BODY_BYTES } from '@/app/api/ops/workspaces/[workspaceId]/designs/route';
+import { MAX_DESIGN_BODY_BYTES } from '@/lib/ops/requestLimits';
 
 export const GET = handleOps(async (req: Request, ctx: { params: Promise<{ designId: string }> }) => {
   const session = await requireSession(req);
@@ -15,7 +15,7 @@ export const GET = handleOps(async (req: Request, ctx: { params: Promise<{ desig
 export const PATCH = handleOps(async (req: Request, ctx: { params: Promise<{ designId: string }> }) => {
   assertSameOrigin(req);
   const contentLength = Number(req.headers.get('content-length') || '0');
-  if (contentLength > MAX_BODY_BYTES) {
+  if (contentLength > MAX_DESIGN_BODY_BYTES) {
     throw new OpsHttpError(413, 'too_large', 'Design payload exceeds the 2MB limit');
   }
 
@@ -23,7 +23,7 @@ export const PATCH = handleOps(async (req: Request, ctx: { params: Promise<{ des
   const { designId } = await ctx.params;
 
   const raw = await req.text();
-  if (raw.length > MAX_BODY_BYTES) {
+  if (raw.length > MAX_DESIGN_BODY_BYTES) {
     throw new OpsHttpError(413, 'too_large', 'Design payload exceeds the 2MB limit');
   }
   const body = JSON.parse(raw || '{}');

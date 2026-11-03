@@ -17,11 +17,12 @@ const values = (items: (string | null)[]) => [...new Set(items.map(normalize).fi
   const left = a.toLowerCase(), right = b.toLowerCase();
   return left < right ? -1 : left > right ? 1 : 0;
 });
+const hasTable = async (name: string) => (await runQuery<{ present: number }>("SELECT 1 AS present FROM sqlite_master WHERE type='table' AND name=?", [name])).length > 0;
 
-/** Read-only suggestions from the mutation/barcode-derived sequencing population. */
+/** Read-only suggestions from the sequencing population plus registered sample and experiment populations. */
 export async function GET() {
   try {
-    const rows = await runQuery<FactorRow>(`
+    const sequencingRows = await runQuery<FactorRow>(`
       SELECT DISTINCT
         COALESCE(m.experiment, ss."Experiment") AS experiment,
         s."Condition" AS media,
@@ -58,10 +59,40 @@ export async function GET() {
       ) ss ON ss."Sequencing_sample" = m.seq_sample
       LEFT JOIN Samples s ON s."Name" = ss."Sample_Name" AND s.deleted = 0
     `);
-    const experiment = values(rows.map(row => row.experiment));
+    const hasRoboticAleSamples = await hasTable('Robotic_ALE_samples');
+    const registrationRows = await runQuery<FactorRow>(`
+      SELECT s."Experiment" AS experiment, s."Condition" AS media, s."Strain_name" AS strain,
+             s."Transforming_DNA" AS transformingDNA, s."Name" AS sampleName
+      FROM Samples s WHERE s.deleted = 0
+      ${hasRoboticAleSamples ? `UNION
+      SELECT r."Experiment", r."Condition", r."Strain_name", r."Transforming_DNA", r."Name"
+      FROM Robotic_ALE_samples r WHERE r.deleted = 0` : ''}
+    `);
+    const experimentRows = await hasTable('Experiments')
+      ? await runQuery<Pick<FactorRow, 'experiment'>>('SELECT "Name" AS experiment FROM Experiments WHERE deleted = 0')
+      : [];
+    const seqSampleExperimentRows = await hasTable('Seq_samples')
+      ? await runQuery<Pick<FactorRow, 'experiment'>>('SELECT DISTINCT "Experiment" AS experiment FROM Seq_samples WHERE deleted = 0')
+      : [];
+    const strainRows = await hasTable('Strains')
+      ? await runQuery<Pick<FactorRow, 'strain'>>('SELECT "Name" AS strain FROM Strains WHERE deleted = 0')
+      : [];
+    const mediaRows = await hasTable('Conditions')
+      ? await runQuery<Pick<FactorRow, 'media'>>('SELECT "Name" AS media FROM Conditions WHERE deleted = 0')
+      : [];
+    const transformingDnaRows = await hasTable('DNA_constructs')
+      ? await runQuery<Pick<FactorRow, 'transformingDNA'>>('SELECT "Name" AS transformingDNA FROM DNA_constructs WHERE deleted = 0')
+      : [];
+    const rows = [...sequencingRows, ...registrationRows];
+    const experiment = values([...rows.map(row => row.experiment), ...experimentRows.map(row => row.experiment), ...seqSampleExperimentRows.map(row => row.experiment)]);
     const response: PlateDesignSuggestionsResponse = {
       experiments: experiment,
-      factors: { experiment, media: values(rows.map(row => row.media)), strain: values(rows.map(row => row.strain)), transformingDNA: values(rows.map(row => donorDna(row.sampleName, row.transformingDNA))) },
+      factors: {
+        experiment,
+        media: values([...rows.map(row => row.media), ...mediaRows.map(row => row.media)]),
+        strain: values([...rows.map(row => row.strain), ...strainRows.map(row => row.strain)]),
+        transformingDNA: values([...rows.map(row => donorDna(row.sampleName, row.transformingDNA)), ...transformingDnaRows.map(row => row.transformingDNA)]),
+      },
     };
     return NextResponse.json(response);
   } catch (error) {

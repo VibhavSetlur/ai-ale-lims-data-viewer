@@ -337,17 +337,33 @@ const sampleRunKey = (seqSample: string, registry: string | null | undefined): s
    need to select them for verAB library comparisons.
 */
 
-// Build SAMPLES SQL on demand so registry and canonical Seq_samples experiment
-// filters are pushed inside the CTE. Params are appended in (experiment?, registry?) order.
+// Mutations.Experiment is authoritative when populated. Older mutation rows
+// without it retain the Seq_samples fallback so the explorer can still recover
+// their experiment label. The fallback deliberately requires a live Seq_samples
+// row, while an authoritative mutation label does not: callers must retain
+// mutations whose metadata row is missing or soft-deleted.
+function experimentScopeSql(mutationExperiment: string, seqSample: string): string {
+  return `(
+    (${mutationExperiment} IS NOT NULL AND ${mutationExperiment} != '' AND ${mutationExperiment} = ?)
+    OR (
+      (${mutationExperiment} IS NULL OR ${mutationExperiment} = '')
+      AND EXISTS (
+        SELECT 1 FROM Seq_samples ss_scope
+        WHERE ss_scope."Sequencing_sample" = ${seqSample}
+          AND ss_scope.deleted = 0
+          AND ss_scope."Experiment" = ?
+      )
+    )
+  )`;
+}
+
+// Build SAMPLES SQL on demand so registry and experiment filters are pushed
+// inside the CTE. Experiment filters consume two parameters in authoritative
+// Mutations.Experiment then Seq_samples fallback order.
 function buildSamplesSql(opts: { experiment: boolean; registry: boolean; barcodeSamples: boolean; replicateColumn: boolean }): string {
   const inner: string[] = ['deleted = 0'];
   if (opts.experiment) {
-    inner.push(`EXISTS (
-      SELECT 1 FROM Seq_samples ss_filter
-      WHERE ss_filter."Sequencing_sample" = "Seq_sample"
-        AND ss_filter.deleted = 0
-        AND ss_filter."Experiment" = ?
-    )`);
+    inner.push(experimentScopeSql('"Experiment"', '"Seq_sample"'));
   }
   if (opts.registry) inner.push('"Breseq_registry_ID" = ?');
   const barcodeWhere: string[] = ['v.deleted = 0', 'COALESCE(v."Count", 0) > 0'];
@@ -522,11 +538,17 @@ function buildAllExperimentsSql(hasBarcodeTable: boolean): string {
   return `
     SELECT DISTINCT name
     FROM (
+      SELECT m."Experiment" AS name
+      FROM Mutations m
+      WHERE m.deleted = 0 AND m."Experiment" IS NOT NULL AND m."Experiment" != ''
+      UNION
       SELECT ss."Experiment" AS name
-      FROM Seq_samples ss
-      JOIN Mutations m
-        ON m."Seq_sample" = ss."Sequencing_sample" AND m.deleted = 0
-      WHERE ss.deleted = 0 AND ss."Experiment" IS NOT NULL AND ss."Experiment" != ''
+      FROM Mutations m
+      JOIN Seq_samples ss
+        ON ss."Sequencing_sample" = m."Seq_sample" AND ss.deleted = 0
+      WHERE m.deleted = 0
+        AND (m."Experiment" IS NULL OR m."Experiment" = '')
+        AND ss."Experiment" IS NOT NULL AND ss."Experiment" != ''
       ${hasBarcodeTable ? `
       UNION
       SELECT ss."Experiment" AS name
@@ -553,7 +575,7 @@ const REGISTRY_COUNTS_SQL = `
     r."limit_fold_coverage"            AS limit_fold_coverage,
     r."reference"                      AS reference
   FROM Mutations m
-  JOIN Seq_samples ss_filter
+  LEFT JOIN Seq_samples ss_filter
     ON ss_filter."Sequencing_sample" = m."Seq_sample" AND ss_filter.deleted = 0
   LEFT JOIN Breseq_registry r
     ON r."ID" = m."Breseq_registry_ID" AND r.deleted = 0
@@ -659,9 +681,9 @@ export async function GET(req: NextRequest) {
     // registries per Seq_sample (different breseq parameter runs); silently
     // merging them — what the original API did — hides genuine call differences.
     const regCountsSql = experimentFilter
-      ? `${REGISTRY_COUNTS_SQL} AND ss_filter."Experiment" = ? GROUP BY m."Breseq_registry_ID", r."polymorphism_frequency_cutoff", r."limit_fold_coverage", r."reference" ORDER BY count DESC`
+      ? `${REGISTRY_COUNTS_SQL} AND ${experimentScopeSql('m."Experiment"', 'm."Seq_sample"')} GROUP BY m."Breseq_registry_ID", r."polymorphism_frequency_cutoff", r."limit_fold_coverage", r."reference" ORDER BY count DESC`
       : `${REGISTRY_COUNTS_SQL} GROUP BY m."Breseq_registry_ID", r."polymorphism_frequency_cutoff", r."limit_fold_coverage", r."reference" ORDER BY count DESC`;
-    const regParams: (string | number | null)[] = experimentFilter ? [experimentFilter] : [];
+    const regParams: (string | number | null)[] = experimentFilter ? [experimentFilter, experimentFilter] : [];
     const registries = await runQuery<RegistrySummary>(regCountsSql, regParams);
 
     // Flag registries that mutations reference but Breseq_registry has no row for:
@@ -713,7 +735,7 @@ export async function GET(req: NextRequest) {
     // reference genomes. The UI's auto registry is a display/default label, not
     // an implicit data filter.
     const mutParams: (string | number | null)[] = [];
-    if (experimentFilter) mutParams.push(experimentFilter);
+    if (experimentFilter) mutParams.push(experimentFilter, experimentFilter);
     if (selectedRegistry && registryParam) mutParams.push(selectedRegistry);
 
     // The SAMPLE LIST must NOT be silently scoped to a single breseq registry.
@@ -726,7 +748,7 @@ export async function GET(req: NextRequest) {
     // selectable. The experiment filter still applies to both.
     const scopeSamplesByRegistry = !!registryParam && !!selectedRegistry;
     const sampleParams: (string | number | null)[] = [];
-    if (experimentFilter) sampleParams.push(experimentFilter);
+    if (experimentFilter) sampleParams.push(experimentFilter, experimentFilter);
     if (scopeSamplesByRegistry) sampleParams.push(selectedRegistry);
     if (hasBarcodeTable && experimentFilter) sampleParams.push(experimentFilter);
 
@@ -739,12 +761,7 @@ export async function GET(req: NextRequest) {
       replicateColumn: sampleSchema.some(column => column.name === 'Replicate_number'),
     });
     const mutSql = mutationSql(availableCoordinates, mutationSchema.map(column => column.name))
-      + (experimentFilter ? ` AND EXISTS (
-          SELECT 1 FROM Seq_samples ss_filter
-          WHERE ss_filter."Sequencing_sample" = Mutations."Seq_sample"
-            AND ss_filter.deleted = 0
-            AND ss_filter."Experiment" = ?
-        )` : '')
+      + (experimentFilter ? ` AND ${experimentScopeSql('"Experiment"', '"Seq_sample"')}` : '')
       + ((selectedRegistry && registryParam) ? ' AND "Breseq_registry_ID" = ?' : '');
 
     const [sampleRows, mutRows, allExperiments, odRows, curveRows, cnRows] = await Promise.all([

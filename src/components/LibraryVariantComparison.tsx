@@ -8,6 +8,7 @@ import {
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { fetchData } from '../lib/dataSource';
+import { projectVariantDataset, VARIANT_GROUP_MODES, type VariantGroupMode } from '../lib/variantGrouping';
 import type { FigureSpec } from '../lib/figureSpec';
 import ExportFigureMenu from './ExportFigureMenu';
 import ViewInfo from './ViewInfo';
@@ -249,6 +250,7 @@ export default function LibraryVariantComparison({ samples, selected, loading: s
   const [error, setError] = useState<string | null>(null);
   const [mode, setMode] = useState<ChartMode>('bars');
   const [metric, setMetric] = useState<MetricMode>('abundance');
+  const [groupMode, setGroupMode] = useState<VariantGroupMode>('combined');
   const [topN, setTopN] = useState<number>(0);
   const [variantSort, setVariantSort] = useState<VariantSortMode>('total');
   const [showHeatmapValues, setShowHeatmapValues] = useState(false);
@@ -261,6 +263,11 @@ export default function LibraryVariantComparison({ samples, selected, loading: s
   const [tooltip, setTooltip] = useState<HoverTip | null>(null);
   const [expandedMetadata, setExpandedMetadata] = useState<Set<string>>(() => new Set());
   const figureRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setIsolatedVariantIds(new Set());
+    setHoveredVariantId(null);
+  }, [groupMode]);
 
   useEffect(() => {
     let alive = true;
@@ -287,13 +294,17 @@ export default function LibraryVariantComparison({ samples, selected, loading: s
     () => (dataset?.measurements ?? []).filter(measurement => selectedSampleIds.has(measurement.sampleId)),
     [dataset?.measurements, selectedSampleIds],
   );
-  const hasCounts = useMemo(() => measurements.some(measurement => typeof measurement.count === 'number' && Number.isFinite(measurement.count)), [measurements]);
+  const grouped = useMemo(
+    () => projectVariantDataset(dataset?.variants ?? [], measurements, groupMode),
+    [dataset?.variants, measurements, groupMode],
+  );
+  const hasCounts = useMemo(() => grouped.measurements.some(measurement => typeof measurement.count === 'number' && Number.isFinite(measurement.count)), [grouped.measurements]);
 
   const effectiveMetric: MetricMode = hasCounts ? metric : 'abundance';
 
   const valueBySampleVariant = useMemo(() => {
     const map = new Map<string, { abundance: number; count: number }>();
-    for (const measurement of measurements) {
+    for (const measurement of grouped.measurements) {
       const key = `${measurement.sampleId}|${measurement.variantId}`;
       const prev = map.get(key);
       // Sum duplicate (sampleId, variantId) rows that arise when the same candidate
@@ -306,12 +317,12 @@ export default function LibraryVariantComparison({ samples, selected, loading: s
       });
     }
     return map;
-  }, [measurements]);
+  }, [grouped.measurements]);
 
   const rankedVariants = useMemo<VariantWithStats[]>(() => {
     if (!dataset) return [];
     const stats = new Map<string, { totalAbundance: number; totalCount: number; maxAbundance: number; maxCount: number; present: Set<string> }>();
-    for (const measurement of measurements) {
+    for (const measurement of grouped.measurements) {
       const entry = stats.get(measurement.variantId) ?? { totalAbundance: 0, totalCount: 0, maxAbundance: 0, maxCount: 0, present: new Set<string>() };
       const abundance = Number(measurement.abundance) || 0;
       const count = Number(measurement.count) || 0;
@@ -322,7 +333,7 @@ export default function LibraryVariantComparison({ samples, selected, loading: s
       if (abundance > 0 || count > 0) entry.present.add(measurement.sampleId);
       stats.set(measurement.variantId, entry);
     }
-    return dataset.variants
+    return grouped.variants
       .map(variant => {
         const entry = stats.get(variant.variantId) ?? { totalAbundance: 0, totalCount: 0, maxAbundance: 0, maxCount: 0, present: new Set<string>() };
         return { ...variant, totalAbundance: entry.totalAbundance, totalCount: entry.totalCount, maxAbundance: entry.maxAbundance, maxCount: entry.maxCount, present: entry.present.size };
@@ -332,7 +343,7 @@ export default function LibraryVariantComparison({ samples, selected, loading: s
         if (variantSort === 'alpha') return a.label.localeCompare(b.label, undefined, { numeric: true, sensitivity: 'base' });
         return (effectiveMetric === 'count' ? b.totalCount - a.totalCount : b.totalAbundance - a.totalAbundance) || a.label.localeCompare(b.label, undefined, { numeric: true });
       });
-  }, [dataset, measurements, effectiveMetric, variantSort]);
+  }, [dataset, grouped.measurements, grouped.variants, effectiveMetric, variantSort]);
 
   const visibleVariants = useMemo(() => topN <= 0 ? rankedVariants : rankedVariants.slice(0, topN), [rankedVariants, topN]);
   const visibleVariantIds = useMemo(() => new Set(visibleVariants.map(variant => variant.variantId)), [visibleVariants]);
@@ -558,6 +569,19 @@ export default function LibraryVariantComparison({ samples, selected, loading: s
               <button type="button" className="lims-toggle" data-on={effectiveMetric === 'count'} onClick={() => setMetric('count')}>Count</button>
             </div>
           )}
+          <div className="flex items-center gap-1.5" role="group" aria-label="Group variants by">
+            <span className="lims-label">Group by</span>
+            {VARIANT_GROUP_MODES.map(option => (
+              <button
+                key={option.value}
+                type="button"
+                className="lims-toggle"
+                data-on={groupMode === option.value}
+                aria-pressed={groupMode === option.value}
+                onClick={() => setGroupMode(option.value)}
+              >{option.label}</button>
+            ))}
+          </div>
           <label className="flex items-center gap-1.5 text-[11px] text-[var(--text-soft)]">
             <span className="lims-label">Top variants</span>
             <InfoPopover title="How Top variants is chosen">
