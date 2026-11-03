@@ -63,12 +63,6 @@ Static builds set these environment variables at build time:
 9. Move the public deploy branch only after that exact URL is rebuilt,
    permission-fixed, and verified.
 
-## Local session state
-
-`.omo/` is ignored repository-local transient session state. It is not source or
-build input and must not be committed, included in a static artifact, or included in
-KIND packaging or a release.
-
 ## Version Alignment
 
 During active work, `main` can be ahead of every deployed URL. After dev is

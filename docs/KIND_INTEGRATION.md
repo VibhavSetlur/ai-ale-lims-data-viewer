@@ -37,9 +37,6 @@ python3 -m kind doctor
 
 `info` and `kind-install` exercise the manifest path. `doctor` reports local prerequisites and returns nonzero when a server build is absent, so it is diagnostic rather than a deployment or readiness claim. The focused unit suite exercises manifest validation, local-output confinement, root-path handling, proxy rewriting, readiness-route independence, and child cleanup.
 
-`.omo/` is ignored repository-local transient session state. It is neither KIND
-package input nor a static artifact and must not be committed or included in a release.
-
 ## External actions required
 
 1. Approve the durable KIND package and catalog identity, including the distribution and console name.
