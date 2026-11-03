@@ -183,7 +183,7 @@ src/lib/
 scripts/                prebake.mjs, build-static.sh, prepare-httpvfs-db.sh
 ops/                    serve.sh, stop.sh, refresh-db.sh (server lifecycle on poplar)
 next.config.ts          Dual-mode config (server vs output:export + basePath)
-docs/                   ARCHITECTURE.md, RESEARCHER_GUIDE.md, MANUSCRIPT_INTEGRATION.md
+docs/                   README.md authority map, ARCHITECTURE.md, RESEARCHER_GUIDE.md, and maintained reference/operations docs
 ```
 
 ## 10. Provenance / citation

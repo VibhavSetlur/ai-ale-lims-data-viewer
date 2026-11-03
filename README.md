@@ -20,10 +20,9 @@ mirror snapshot. Static output is prebaked and does not call live APIs.
 | `docs/ARCHITECTURE.md` | System design, dual run modes, the data-driven dual-deployment model |
 | `docs/DATA_MODEL.md` | The LIMS tables the views use and how they map; provenance rule |
 | `docs/RESEARCHER_GUIDE.md` | How a biologist uses the viewer to find results and build figures |
-| `docs/MANUSCRIPT_INTEGRATION.md` | Ready-to-adapt methods/results/legend language + honesty guardrails |
+| `AGENTS.md` | Tracked project operating guide and delivery boundaries |
 | `CONTRIBUTING.md` | Dev setup, verification, conventions, build/deploy |
 | `CITATION.cff` | How to cite this software |
-| `CLAUDE.md` | Operating conventions for AI-assisted work in this repo |
 
 In-app help is built into the viewer itself: the left sidebar has a **Guide**
 (answers "how do I..." and walks you to the right view), a **Changelog**
