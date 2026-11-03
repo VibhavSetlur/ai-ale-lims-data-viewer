@@ -24,7 +24,7 @@ export async function GET() {
   try {
     const sequencingRows = await runQuery<FactorRow>(`
       SELECT DISTINCT
-        COALESCE(m.experiment, ss."Experiment") AS experiment,
+        COALESCE(NULLIF(TRIM(m.experiment), ''), NULLIF(TRIM(ss."Experiment"), '')) AS experiment,
         s."Condition" AS media,
         s."Strain_name" AS strain,
         s."Transforming_DNA" AS transformingDNA,

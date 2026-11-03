@@ -3,6 +3,7 @@ import { runQuery, getDbType, getTableSchema } from '@/lib/db';
 import { deriveReplicate } from '@/lib/mutationSample';
 import { coordinateCapabilities, resolveReplicate, type CoordinateCapability, type CoordinateSystem } from '@/lib/mutationMetadata';
 import type { MutationCoordinates } from '@/lib/mutationCoordinates';
+import { effectiveMutationExperiment, mutationExperimentScopeSql } from '@/lib/mutationExperiment';
 
 export interface MutationSample {
   id: string;
@@ -342,20 +343,6 @@ const sampleRunKey = (seqSample: string, registry: string | null | undefined): s
 // their experiment label. The fallback deliberately requires a live Seq_samples
 // row, while an authoritative mutation label does not: callers must retain
 // mutations whose metadata row is missing or soft-deleted.
-function experimentScopeSql(mutationExperiment: string, seqSample: string): string {
-  return `(
-    (${mutationExperiment} IS NOT NULL AND ${mutationExperiment} != '' AND ${mutationExperiment} = ?)
-    OR (
-      (${mutationExperiment} IS NULL OR ${mutationExperiment} = '')
-      AND EXISTS (
-        SELECT 1 FROM Seq_samples ss_scope
-        WHERE ss_scope."Sequencing_sample" = ${seqSample}
-          AND ss_scope.deleted = 0
-          AND ss_scope."Experiment" = ?
-      )
-    )
-  )`;
-}
 
 // Build SAMPLES SQL on demand so registry and experiment filters are pushed
 // inside the CTE. Experiment filters consume two parameters in authoritative
@@ -363,7 +350,7 @@ function experimentScopeSql(mutationExperiment: string, seqSample: string): stri
 function buildSamplesSql(opts: { experiment: boolean; registry: boolean; barcodeSamples: boolean; replicateColumn: boolean }): string {
   const inner: string[] = ['deleted = 0'];
   if (opts.experiment) {
-    inner.push(experimentScopeSql('"Experiment"', '"Seq_sample"'));
+    inner.push(mutationExperimentScopeSql('"Experiment"', '"Seq_sample"'));
   }
   if (opts.registry) inner.push('"Breseq_registry_ID" = ?');
   const barcodeWhere: string[] = ['v.deleted = 0', 'COALESCE(v."Count", 0) > 0'];
@@ -475,7 +462,7 @@ function buildSamplesSql(opts: { experiment: boolean; registry: boolean; barcode
     LEFT JOIN Samples s
       ON s."Name" = ss."Sample_Name" AND s.deleted = 0
     LEFT JOIN Experiments e
-      ON e."Name" = COALESCE(ss."Experiment", ms.experiment) AND e.deleted = 0
+      ON e."Name" = COALESCE(NULLIF(TRIM(ms.experiment), ''), NULLIF(TRIM(ss."Experiment"), '')) AND e.deleted = 0
   `;
 }
 
@@ -681,7 +668,7 @@ export async function GET(req: NextRequest) {
     // registries per Seq_sample (different breseq parameter runs); silently
     // merging them — what the original API did — hides genuine call differences.
     const regCountsSql = experimentFilter
-      ? `${REGISTRY_COUNTS_SQL} AND ${experimentScopeSql('m."Experiment"', 'm."Seq_sample"')} GROUP BY m."Breseq_registry_ID", r."polymorphism_frequency_cutoff", r."limit_fold_coverage", r."reference" ORDER BY count DESC`
+      ? `${REGISTRY_COUNTS_SQL} AND ${mutationExperimentScopeSql('m."Experiment"', 'm."Seq_sample"')} GROUP BY m."Breseq_registry_ID", r."polymorphism_frequency_cutoff", r."limit_fold_coverage", r."reference" ORDER BY count DESC`
       : `${REGISTRY_COUNTS_SQL} GROUP BY m."Breseq_registry_ID", r."polymorphism_frequency_cutoff", r."limit_fold_coverage", r."reference" ORDER BY count DESC`;
     const regParams: (string | number | null)[] = experimentFilter ? [experimentFilter, experimentFilter] : [];
     const registries = await runQuery<RegistrySummary>(regCountsSql, regParams);
@@ -761,7 +748,7 @@ export async function GET(req: NextRequest) {
       replicateColumn: sampleSchema.some(column => column.name === 'Replicate_number'),
     });
     const mutSql = mutationSql(availableCoordinates, mutationSchema.map(column => column.name))
-      + (experimentFilter ? ` AND ${experimentScopeSql('"Experiment"', '"Seq_sample"')}` : '')
+      + (experimentFilter ? ` AND ${mutationExperimentScopeSql('"Experiment"', '"Seq_sample"')}` : '')
       + ((selectedRegistry && registryParam) ? ' AND "Breseq_registry_ID" = ?' : '');
 
     const [sampleRows, mutRows, allExperiments, odRows, curveRows, cnRows] = await Promise.all([
@@ -844,7 +831,7 @@ export async function GET(req: NextRequest) {
       return {
         id,
         name: r.seq_sample,
-        experiment: r.experiment_from_seq ?? r.experiment_from_mutations ?? '',
+        experiment: effectiveMutationExperiment(r.experiment_from_mutations, r.experiment_from_seq),
         breseq_registry_id: r.breseq_registry_id ?? undefined,
         breseq_reference: r.breseq_registry_id ? registries.find(registry => registry.id === r.breseq_registry_id)?.reference ?? undefined : undefined,
         experiment_type: r.experiment_type ?? undefined,

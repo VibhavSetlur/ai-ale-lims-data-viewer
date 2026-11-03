@@ -37,11 +37,14 @@ export function projectVariantDataset<
     variantsByGroup.set(group, entries);
   }
 
-  const groupedMeasurements = new Map<string, { first: M; sampleId: string; variantId: string; abundance: number; count: number; hasCount: boolean }>();
+  type GroupedMeasurement = { first: M; sampleId: string; variantId: string; abundance: number; count: number; hasCount: boolean };
+  // Sample and barcode identifiers originate in external data, so they are not
+  // safe to concatenate with an unescaped delimiter as a composite map key.
+  const groupedMeasurements = new Map<string, Map<string, GroupedMeasurement>>();
   for (const measurement of measurements) {
     const variantId = variantGroupKey(measurement.variantId, mode);
-    const key = `${measurement.sampleId}|${variantId}`;
-    const entry = groupedMeasurements.get(key) ?? {
+    const byVariant = groupedMeasurements.get(measurement.sampleId) ?? new Map<string, GroupedMeasurement>();
+    const entry = byVariant.get(variantId) ?? {
       first: measurement,
       sampleId: measurement.sampleId,
       variantId,
@@ -53,10 +56,11 @@ export function projectVariantDataset<
     const count = Number(measurement.count);
     entry.count += count || 0;
     entry.hasCount ||= typeof measurement.count === 'number' && Number.isFinite(measurement.count);
-    groupedMeasurements.set(key, entry);
+    byVariant.set(variantId, entry);
+    groupedMeasurements.set(measurement.sampleId, byVariant);
   }
 
-  const projectedMeasurements = [...groupedMeasurements.values()].map(entry => ({
+  const projectedMeasurements = [...groupedMeasurements.values()].flatMap(byVariant => [...byVariant.values()]).map(entry => ({
     ...entry.first,
     sampleId: entry.sampleId,
     variantId: entry.variantId,

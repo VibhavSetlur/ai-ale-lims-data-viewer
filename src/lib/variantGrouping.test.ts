@@ -59,6 +59,21 @@ describe('variant grouping', () => {
     ]);
   });
 
+  it('does not collide when a sample ID or grouped variant contains a delimiter', () => {
+    const projection = projectVariantDataset(
+      [],
+      [
+        { sampleId: 'sample|A', variantId: 'B1-C1', abundance: 1, count: 10 },
+        { sampleId: 'sample', variantId: 'A|B1-C2', abundance: 2, count: 20 },
+      ],
+      'verA',
+    );
+    expect(projection.measurements.map(({ sampleId, variantId, abundance, count }) => ({ sampleId, variantId, abundance, count }))).toEqual([
+      { sampleId: 'sample|A', variantId: 'B1', abundance: 1, count: 10 },
+      { sampleId: 'sample', variantId: 'A|B1', abundance: 2, count: 20 },
+    ]);
+  });
+
   it('leaves count undefined when no contributor has a numeric count', () => {
     const projection = projectVariantDataset(variants, [{ sampleId: 'sample1', variantId: 'A1-B1', abundance: 1 }, { sampleId: 'sample1', variantId: 'A1-B2', abundance: 2, count: Number.NaN }], 'verA');
     expect(projection.measurements[0].count).toBeUndefined();
