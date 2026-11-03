@@ -25,8 +25,6 @@ mirror snapshot. Static output is prebaked and does not call live APIs.
 | `CITATION.cff` | How to cite this software |
 | `CLAUDE.md` | Operating conventions for AI-assisted work in this repo |
 
-Repository-local `.omo/` session state is ignored. It is not source, build input, or a release artifact.
-
 In-app help is built into the viewer itself: the left sidebar has a **Guide**
 (answers "how do I..." and walks you to the right view), a **Changelog**
 (viewer release history plus data snapshot provenance), and a deep searchable
