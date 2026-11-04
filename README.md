@@ -8,6 +8,11 @@ the automated robotic ALE platform.
 
 - STATIC (production): https://modelseed.org/annotation/projects/aiale-dev/
 
+For the provisional code-only static KIND launcher, sealed local exports, and
+separate external registration gates, see [Local KIND static launcher](docs/KIND_STATIC_LOCAL.md).
+Development source stays on `static-dev`; generated real-data exports are local
+artifacts, not committed application source or production deployments.
+
 The approved static viewer is built from the `static` branch with its full LIMS
 mirror snapshot. Static output is prebaked and does not call live APIs.
 

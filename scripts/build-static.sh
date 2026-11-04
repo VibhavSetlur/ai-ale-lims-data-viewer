@@ -30,22 +30,29 @@ case "$BASE_PATH" in
     exit 2
     ;;
 esac
-if [ -n "${DEPLOYMENT_CHANNEL:-}" ] && [ "$DEPLOYMENT_CHANNEL" != "static" ]; then
-  echo "ERROR: static builds require DEPLOYMENT_CHANNEL=static" >&2
+# Development exports retain the approved path without claiming production.
+STATIC_DEVELOPMENT="${STATIC_DEVELOPMENT:-0}"
+case "$STATIC_DEVELOPMENT" in
+  0) EXPECTED_BRANCH="static" ;;
+  1) EXPECTED_BRANCH="static-dev" ;;
+  *) echo "ERROR: STATIC_DEVELOPMENT must be 0 or 1" >&2; exit 2 ;;
+esac
+if [ -n "${DEPLOYMENT_CHANNEL:-}" ] && [ "$DEPLOYMENT_CHANNEL" != "$EXPECTED_BRANCH" ]; then
+  echo "ERROR: static builds require DEPLOYMENT_CHANNEL=$EXPECTED_BRANCH" >&2
   exit 2
 fi
-if [ -n "${DEPLOYMENT_BRANCH:-}" ] && [ "$DEPLOYMENT_BRANCH" != "static" ]; then
-  echo "ERROR: static builds require DEPLOYMENT_BRANCH=static" >&2
+if [ -n "${DEPLOYMENT_BRANCH:-}" ] && [ "$DEPLOYMENT_BRANCH" != "$EXPECTED_BRANCH" ]; then
+  echo "ERROR: static builds require DEPLOYMENT_BRANCH=$EXPECTED_BRANCH" >&2
   exit 2
 fi
 if [ "${1:-}" = "--validate-config" ]; then
-  printf 'static build configuration valid: base path=%s channel=static branch=static\n' "$BASE_PATH"
+  printf 'static build configuration valid: base path=%s channel=%s branch=%s\n' "$BASE_PATH" "$EXPECTED_BRANCH" "$EXPECTED_BRANCH"
   exit 0
 fi
 VIEWER_VERSION="${VIEWER_VERSION:-$(node -p 'require("./package.json").version')}"
 GIT_COMMIT="${GIT_COMMIT:-$(git rev-parse --short=12 HEAD 2>/dev/null || printf 'unknown')}"
-DEPLOYMENT_CHANNEL="static"
-DEPLOYMENT_BRANCH="static"
+DEPLOYMENT_CHANNEL="$EXPECTED_BRANCH"
+DEPLOYMENT_BRANCH="$EXPECTED_BRANCH"
 API_DIR="src/app/api"
 API_STASH=".api_stash_$$"
 

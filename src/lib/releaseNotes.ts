@@ -5,6 +5,7 @@ export interface ReleaseNote {
 }
 
 export const releaseNotes: readonly ReleaseNote[] = [
+  { version: '1.15.0', date: '2026-11-04', summary: 'Added a code-only local static KIND launcher with sealed bundle validation and byte-range serving. Static development exports now retain truthful development metadata, and HTTPVFS preparation leaves the source database unchanged.' },
   { version: '1.14.5', date: '2026-10-20', summary: 'Added a guarded automatic LIMS release controller. Static manifests and the Changelog now expose the snapshot timestamp, SHA-256, size, and baked table counts so the published data provenance is visible.' },
   { version: '1.14.4', date: '2026-09-21', summary: 'Restored the browser-local Plate Design workspace and its navigation controls in static exports while static AI sidebar chat and User Workspace remain unavailable.' },
   { version: '1.14.3', date: '2026-09-21', summary: 'Static exports now record the canonical LIMS mirror SHA-256 and verify that Mutation Explorer snapshots, table metadata, and the HTTPVFS database all derive from that same source.' },

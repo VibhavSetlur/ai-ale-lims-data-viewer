@@ -1,4 +1,4 @@
-export type DeploymentChannel = 'static' | 'dynamic' | 'server';
+export type DeploymentChannel = 'static' | 'static-dev' | 'dynamic' | 'server';
 
 export interface BuildInfo {
   version: string;
@@ -25,6 +25,14 @@ export const DEPLOYMENT_CHANNELS: Record<DeploymentChannel, {
     barcodePolicy: 'Barcode tab shown when verAB_barcodes is present',
     audience: 'Static production release',
   },
+  'static-dev': {
+    label: 'Static development',
+    branch: 'static-dev',
+    url: 'Local export only, not deployed',
+    database: 'Local validated LIMS snapshot',
+    barcodePolicy: 'Barcode tab follows baked database capability',
+    audience: 'Static development verification',
+  },
   dynamic: {
     label: 'Dynamic',
     branch: 'dynamic',
@@ -44,14 +52,14 @@ export const DEPLOYMENT_CHANNELS: Record<DeploymentChannel, {
 };
 
 function cleanChannel(value: string | undefined): DeploymentChannel {
-  if (value === 'static' || value === 'dynamic' || value === 'server') return value;
+  if (value === 'static' || value === 'static-dev' || value === 'dynamic' || value === 'server') return value;
   return process.env.NEXT_PUBLIC_STATIC === '1' ? 'static' : 'server';
 }
 
 export function getBuildInfo(): BuildInfo {
   const mode = process.env.NEXT_PUBLIC_STATIC === '1' ? 'static' : 'server';
   return {
-    version: process.env.NEXT_PUBLIC_VIEWER_VERSION || '1.14.5',
+    version: process.env.NEXT_PUBLIC_VIEWER_VERSION || '1.15.0',
     channel: cleanChannel(process.env.NEXT_PUBLIC_DEPLOYMENT_CHANNEL),
     branch: process.env.NEXT_PUBLIC_DEPLOYMENT_BRANCH || (mode === 'static' ? 'static' : 'dynamic-dev'),
     commit: process.env.NEXT_PUBLIC_GIT_COMMIT || 'local',

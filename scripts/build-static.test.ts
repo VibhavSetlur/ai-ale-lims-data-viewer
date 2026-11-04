@@ -20,6 +20,13 @@ describe('static build configuration guard', () => {
     })).toContain('base path=/annotation/projects/aiale-dev channel=static branch=static');
   });
 
+  it('preserves static-dev development identity without weakening the path guard', () => {
+    expect(validate({ STATIC_DEVELOPMENT: '1', DEPLOYMENT_CHANNEL: 'static-dev', DEPLOYMENT_BRANCH: 'static-dev' }))
+      .toContain('channel=static-dev branch=static-dev');
+    expect(() => validate({ STATIC_DEVELOPMENT: '1', DEPLOYMENT_BRANCH: 'static' })).toThrow();
+    expect(() => validate({ STATIC_DEVELOPMENT: '1', BASE_PATH: '/notebook/other' })).toThrow();
+  });
+
   it.each([
     [{ BASE_PATH: '/annotation/projects/other' }, 'support only'],
     [{ DEPLOYMENT_CHANNEL: 'dynamic' }, 'DEPLOYMENT_CHANNEL'],

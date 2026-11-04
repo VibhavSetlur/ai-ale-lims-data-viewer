@@ -24,6 +24,11 @@ PAGE_SIZE="${PAGE_SIZE:-65536}"   # 64KB pages: far fewer range requests for big
 
 if [ ! -f "$SRC" ]; then echo "source DB not found: $SRC" >&2; exit 1; fi
 
+# The output cleanup must never encompass the input, even for a local source.
+case "$(realpath "$SRC")" in
+  "$(realpath -m "$DBDIR")"/*)
+    echo "source DB must be outside generated $DBDIR" >&2; exit 2 ;;
+esac
 mkdir -p "$DBDIR"
 SOURCE_SHA256=$(sha256sum "$SRC" | awk '{print $1}')
 DB_NAME="lims.${SOURCE_SHA256}.db"
@@ -36,11 +41,16 @@ python3 - "$SRC" "$DB_PATH" "$PAGE_SIZE" <<'PY'
 import sqlite3, sys, os
 src, dst, page = sys.argv[1], sys.argv[2], int(sys.argv[3])
 if os.path.exists(dst): os.remove(dst)
-con = sqlite3.connect(src)
-con.execute(f"PRAGMA page_size={page}")
-# VACUUM INTO writes a fresh, defragmented copy applying the new page_size.
+from pathlib import Path
+# Open the upstream input read-only. PRAGMA page_size/journal_mode and VACUUM
+# belong to our generated copy, never to the source mirror.
+source = sqlite3.connect(Path(src).resolve().as_uri() + '?mode=ro', uri=True)
+con = sqlite3.connect(dst)
+source.backup(con)
+source.close()
 con.execute("PRAGMA journal_mode=DELETE")
-con.execute(f"VACUUM INTO '{dst}'")
+con.execute(f"PRAGMA page_size={page}")
+con.execute("VACUUM")
 con.close()
 # confirm
 c = sqlite3.connect(dst)

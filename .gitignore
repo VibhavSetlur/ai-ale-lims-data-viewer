@@ -96,3 +96,10 @@ GEMINI.md
 
 # operator prompt shortcuts (session starters, not for publication)
 docs/prompts/
+
+# Python code-only launcher build products
+__pycache__/
+*.py[cod]
+*.egg-info/
+/dist/
+/.local/
