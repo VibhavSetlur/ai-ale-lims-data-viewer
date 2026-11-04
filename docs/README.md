@@ -29,6 +29,7 @@ The executable authority for lifecycle, refresh, and release behavior remains th
 | Document | Authority |
 |---|---|
 | [`KIND_INTEGRATION.md`](KIND_INTEGRATION.md) | Static export artifact contract and the boundary from the dynamic local KIND adapter. |
+| [`KIND_STATIC_LOCAL.md`](KIND_STATIC_LOCAL.md) | Provisional code-only static launcher, local seal and HTTP contract, static-dev artifact workflow, and external registration gates. |
 
 ## Decision records
 
