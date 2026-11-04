@@ -1,25 +1,41 @@
-# Documentation
+# Documentation Authority Map
 
-Documentation for the AI-ALE LIMS Data Viewer. Start with the project
-[`README`](../README.md) for setup and a feature overview; the documents here go
-deeper.
+Start with the project [`README`](../README.md) for product use, setup, and a feature overview. This index classifies the maintained documents below. It does not move files or replace runtime paths.
 
-| Document | Read it for | Audience |
-|---|---|---|
-| [`ARCHITECTURE.md`](ARCHITECTURE.md) | System design, the dual server/static run modes, the data-driven dual-deployment model, the full re-deploy procedure, and pitfalls | Developers, maintainers |
-| [`DEPLOYMENT_VERSIONING.md`](DEPLOYMENT_VERSIONING.md) | Version badge, Changelog, deploy branch pointers, dev/public differences, and promotion workflow | Developers, maintainers, reviewers |
-| [`DATA_MODEL.md`](DATA_MODEL.md) | The LIMS tables the views depend on and how the viewer maps them; the provenance rule | Reviewers, anyone reproducing a value |
-| [`RESEARCHER_GUIDE.md`](RESEARCHER_GUIDE.md) | How a biologist actually uses the viewer: selecting samples, reading the heatmap and copy-number trajectories, growth curves, barcode charts, and exporting publication figures | Researchers, reviewers |
+## User documentation
 
-The `RESEARCHER_GUIDE.md` is also served inside the app: the left sidebar's
-**Help** opens a searchable copy, **Guide** walks users to the right view, and
-**Changelog** shows viewer releases plus data snapshot provenance.
+| Document | Authority |
+|---|---|
+| [`RESEARCHER_GUIDE.md`](RESEARCHER_GUIDE.md) | How researchers use the viewer, interpret displayed availability, and export figures. The app's Help and Guide surface this content. |
+
+## Reference documentation
+
+| Document | Authority |
+|---|---|
+| [`ARCHITECTURE.md`](ARCHITECTURE.md) | System design, server/static modes, data flow, repository map, and build boundaries. |
+| [`DATA_MODEL.md`](DATA_MODEL.md) | LIMS tables, viewer mapping, and value provenance. |
+
+## Operations documentation
+
+| Document | Authority |
+|---|---|
+| [`DEPLOYMENT_VERSIONING.md`](DEPLOYMENT_VERSIONING.md) | Branch roles, release metadata, and promotion boundaries. |
+| [`AUTO_REFRESH_RELEASE.md`](AUTO_REFRESH_RELEASE.md) | Static-first release-controller contract, scheduler example, rollback boundary, and dynamic handoff. |
+
+The executable authority for lifecycle, refresh, and release behavior remains the existing files under [`../ops/`](../ops/), including `serve.sh`, `stop.sh`, `refresh-db.sh`, and `auto-refresh-release.sh`. Logs, PID files, locks, local state, build directories, and generated artifacts are runtime outputs, not source documentation. Do not delete, move, or consolidate these paths without checking their active consumers and obtaining authorization.
+
+## Integration documentation
+
+| Document | Authority |
+|---|---|
+| [`KIND_INTEGRATION.md`](KIND_INTEGRATION.md) | Static export artifact contract and the boundary from the dynamic local KIND adapter. |
+
+## Decision records
+
+No separate decision-record directory exists in this lineage. Preserve branch history and approved integration records rather than creating parallel copies here.
 
 ## Conventions
 
-- These docs describe the committed codebase and are kept in sync with it. When a
-  feature changes, the doc and the in-app Help and Guide are updated together.
-- No deploy secrets, server paths private to one host, or point-in-time meeting
-  notes live here. Operational notes that are not part of the public record are
-  kept outside the repository.
+- Keep documentation synchronized with the committed code and the in-app Help and Guide when a user-visible feature changes.
+- Keep secrets, host-private credentials, and point-in-time private notes out of tracked documentation.
 - Style: plain English, no em-dashes, examples over prose.

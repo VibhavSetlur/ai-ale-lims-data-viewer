@@ -63,6 +63,9 @@ archive/
 # local config overrides
 /local/
 
+# repository-local transient session state (never commit or release)
+/.omo/
+
 # vercel
 .vercel
 
@@ -90,7 +93,6 @@ public/data/manifest.json
 
 # local agent rules and private writing handoffs (not for publication)
 CLAUDE.md
-AGENTS.md
 GEMINI.md
 /docs/MANUSCRIPT_INTEGRATION.md
 
