@@ -7,7 +7,7 @@
 #
 # Usage:
 #   scripts/build-static.sh                       # base path /annotation/projects/aiale-dev
-#   BASE_PATH=/annotation/projects/aiale-dev scripts/build-static.sh
+#   BASE_PATH=/annotation/projects/aiale scripts/build-static.sh
 #   scripts/build-static.sh --validate-config     # validate without building
 #
 # Output: out/  (a self-contained static site). Hand `out/` to Filipe, or copy
@@ -24,25 +24,26 @@ fi
 
 BASE_PATH="${BASE_PATH:-/annotation/projects/aiale-dev}"
 case "$BASE_PATH" in
-  /annotation/projects/aiale-dev) ;;
+  /annotation/projects/aiale|/annotation/projects/aiale-dev|'') ;;
   *)
-    echo "ERROR: static builds support only /annotation/projects/aiale-dev" >&2
+    echo "ERROR: static builds support only /annotation/projects/aiale, /annotation/projects/aiale-dev, or an empty KIND root path" >&2
     exit 2
     ;;
 esac
-# Development exports retain the approved path without claiming production.
+# Static-dev is the safe default. A release promotion may explicitly bake static
+# identity without changing this worktree's branch.
 STATIC_DEVELOPMENT="${STATIC_DEVELOPMENT:-0}"
 case "$STATIC_DEVELOPMENT" in
-  0) EXPECTED_BRANCH="static" ;;
-  1) EXPECTED_BRANCH="static-dev" ;;
+  0) DEFAULT_BRANCH="static" ;;
+  1) DEFAULT_BRANCH="static-dev" ;;
   *) echo "ERROR: STATIC_DEVELOPMENT must be 0 or 1" >&2; exit 2 ;;
 esac
-if [ -n "${DEPLOYMENT_CHANNEL:-}" ] && [ "$DEPLOYMENT_CHANNEL" != "$EXPECTED_BRANCH" ]; then
-  echo "ERROR: static builds require DEPLOYMENT_CHANNEL=$EXPECTED_BRANCH" >&2
-  exit 2
-fi
-if [ -n "${DEPLOYMENT_BRANCH:-}" ] && [ "$DEPLOYMENT_BRANCH" != "$EXPECTED_BRANCH" ]; then
-  echo "ERROR: static builds require DEPLOYMENT_BRANCH=$EXPECTED_BRANCH" >&2
+EXPECTED_BRANCH="${DEPLOYMENT_BRANCH:-$DEFAULT_BRANCH}"
+case "$EXPECTED_BRANCH" in static|static-dev) ;; *) echo "ERROR: DEPLOYMENT_BRANCH must be static or static-dev" >&2; exit 2 ;; esac
+EXPECTED_CHANNEL="${DEPLOYMENT_CHANNEL:-$DEFAULT_BRANCH}"
+case "$EXPECTED_CHANNEL" in static|static-dev) ;; *) echo "ERROR: DEPLOYMENT_CHANNEL must be static or static-dev" >&2; exit 2 ;; esac
+if [ "$EXPECTED_CHANNEL" != "$EXPECTED_BRANCH" ]; then
+  echo "ERROR: DEPLOYMENT_CHANNEL and DEPLOYMENT_BRANCH must match" >&2
   exit 2
 fi
 if [ "${1:-}" = "--validate-config" ]; then
@@ -51,7 +52,7 @@ if [ "${1:-}" = "--validate-config" ]; then
 fi
 VIEWER_VERSION="${VIEWER_VERSION:-$(node -p 'require("./package.json").version')}"
 GIT_COMMIT="${GIT_COMMIT:-$(git rev-parse --short=12 HEAD 2>/dev/null || printf 'unknown')}"
-DEPLOYMENT_CHANNEL="$EXPECTED_BRANCH"
+DEPLOYMENT_CHANNEL="$EXPECTED_CHANNEL"
 DEPLOYMENT_BRANCH="$EXPECTED_BRANCH"
 API_DIR="src/app/api"
 API_STASH=".api_stash_$$"
@@ -88,6 +89,8 @@ NEXT_PUBLIC_VIEWER_VERSION="$VIEWER_VERSION" \
 NEXT_PUBLIC_DEPLOYMENT_CHANNEL="$DEPLOYMENT_CHANNEL" \
 NEXT_PUBLIC_DEPLOYMENT_BRANCH="$DEPLOYMENT_BRANCH" \
 NEXT_PUBLIC_GIT_COMMIT="$GIT_COMMIT" \
+NEXT_PUBLIC_DATA_PROFILE="${DATA_PROFILE:-unknown}" \
+NEXT_PUBLIC_RELEASE_TARGET="${RELEASE_TARGET:-unknown}" \
   npx next build
 
 echo

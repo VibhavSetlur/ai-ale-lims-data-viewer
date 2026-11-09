@@ -47,17 +47,18 @@ not add new ones. The build is the real gate.
 
 ## Project layout
 
-See `docs/ARCHITECTURE.md` section 9 for the full repository map. In short:
+See `docs/README.md` for the repository map and complete static workflow. In short:
 `src/app/api` (server routes), `src/components` (views + help system),
 `src/lib` (data source, DB access, figure export), `scripts` (static build +
-prebake), `ops` (server lifecycle), `docs` (this documentation set).
+prebake), `ops` (data refresh, release, and validation), `docs/README.md` (the
+maintained operations reference).
 
 ## Building and deploying the static sites
 
-The viewer ships as two static deployments built from this one codebase against
-two different database snapshots. The full, verified procedure is in
-`docs/ARCHITECTURE.md` section 8. Database files, the `out/` bundle, and baked
-`public/data` / `public/db` artifacts are all gitignored and rebuilt per deploy.
+The viewer ships as static deployments built from this one codebase against a
+selected database profile. The full, verified procedure is in `docs/README.md`.
+Database files, the `out/` bundle, and baked `public/data` / `public/db` artifacts
+are all gitignored and rebuilt per deploy.
 
 ## Commit style
 

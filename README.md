@@ -9,7 +9,7 @@ the automated robotic ALE platform.
 - STATIC (production): https://modelseed.org/annotation/projects/aiale-dev/
 
 For the provisional code-only static KIND launcher, sealed local exports, and
-separate external registration gates, see [Local KIND static launcher](docs/KIND_STATIC_LOCAL.md).
+separate external registration gates, see the KIND section in [`docs/README.md`](docs/README.md).
 Development source stays on `static-dev`; generated real-data exports are local
 artifacts, not committed application source or production deployments.
 
@@ -22,9 +22,7 @@ mirror snapshot. Static output is prebaked and does not call live APIs.
 |---|---|
 | This README | Overview, quick start, feature + API reference |
 | [`docs/`](docs/README.md) | Documentation index |
-| `docs/ARCHITECTURE.md` | System design, dual run modes, the data-driven dual-deployment model |
-| `docs/DATA_MODEL.md` | The LIMS tables the views use and how they map; provenance rule |
-| `docs/RESEARCHER_GUIDE.md` | How a biologist uses the viewer to find results and build figures |
+| `docs/README.md` | Complete static operations, data, deployment, validation, and KIND reference |
 | `AGENTS.md` | Tracked project operating guide and delivery boundaries |
 | `CONTRIBUTING.md` | Dev setup, verification, conventions, build/deploy |
 | `CITATION.cff` | How to cite this software |
@@ -32,7 +30,7 @@ mirror snapshot. Static output is prebaked and does not call live APIs.
 In-app help is built into the viewer itself: the left sidebar has a **Guide**
 (answers "how do I..." and walks you to the right view), a **Changelog**
 (viewer release history plus data snapshot provenance), and a deep searchable
-**Help** center. The Help center mirrors `docs/RESEARCHER_GUIDE.md`.
+**Help** center. The Help center mirrors the bundled researcher guide at `public/help/researcher-guide.md`.
 
 ## What this is (and is not)
 
@@ -74,7 +72,7 @@ the UI gates views on them:
 - The full DB has barcodes -> the tab is shown on the dev site.
 
 Same code, different database, different visible surface. See
-`docs/ARCHITECTURE.md`.
+`docs/README.md`.
 
 ## Quick start (conda)
 
@@ -104,34 +102,53 @@ npm run build
 npm start                     # add -- -p 3457 to change port
 ```
 
-## Static production build (modelseed.org)
+## Static release workflow
 
-The approved static production source is `static`; `static-dev` is the private static-development source. The static URL remains `https://modelseed.org/annotation/projects/aiale-dev/`. Do not build, promote, or deploy from compatibility-only `dev` or `deploy/aiale-dev`.
+This task is static only. `static-dev` is the working and review source; accepted work is promoted to `static`. Dynamic branches and services are intentionally deferred.
 
-From an accepted `static` checkout, with a server running against `data/lims_indexed.db`:
+There are two local, uncommitted source assets:
+
+| Profile | Source | Intended contents |
+|---|---|---|
+| `trimmed` | `data/lims_TFMN1_indexed.db` | Reduced/public snapshot candidate |
+| `full` | `data/lims_indexed.db` | Full research snapshot candidate |
+
+A profile is independent from its destination. Either profile can be built for either static URL or as a KIND handoff:
+
+| Target | Compiled base path |
+|---|---|
+| `aiale` | `/annotation/projects/aiale` |
+| `aiale-dev` | `/annotation/projects/aiale-dev` |
+| `kind` | The exact prefix supplied by the KIND owner, or empty for root |
+
+Build and validate a selected bundle:
 
 ```bash
-npm run prebake
-SRC=data/lims_indexed.db bash scripts/prepare-httpvfs-db.sh
-BASE_PATH=/annotation/projects/aiale-dev scripts/build-static.sh
+ops/static-release.sh --profile trimmed --target aiale --dry-run
+ops/static-release.sh --profile trimmed --target aiale
+ops/static-release.sh --profile full --target aiale-dev
+ops/validate.py --profile full
 ```
 
-The script accepts only that existing base path and bakes `channel=static` and `branch=static`. It creates `out/`; after explicit authorization, mirror its contents into the approved webroot, then verify the URL root, `data/manifest.json`, and a SQLite byte-range response. Static output is prebaked with no live API calls, retains Plate Design, and omits the AI sidebar/User Workspace. Rebuild `npm run build` before returning to server mode because the static export clears `.next`.
+The operation validates the selected SQLite source, prepares isolated profile state below `.local/releases/<profile>`, snapshots the live API against that exact source, prepares HTTPVFS from the same source, builds the selected base path, writes profile/target/hash provenance, validates the bundle, and leaves only that selection in `out/`. Generated databases, prebaked JSON, `.local/`, and `out/` are local artifacts and are never committed.
 
-Dynamic development and releases use `dynamic-dev` and `dynamic`; `main` is historic/shared recovery only.
+Refresh a source asset explicitly before releasing:
+
+```bash
+ops/data-refresh.sh --profile full --source /approved/mirror.db
+```
+
+After separate deployment authorization, copy or rsync the validated contents of `out/` into the matching approved webroot. Verify the URL root, `data/manifest.json`, and a SQLite byte-range response. For local KIND verification, use the provisional launcher documented in [`docs/README.md`](docs/README.md). External KIND registration and packaging remain owner-provided.
+
+Static exports do not call live APIs. They retain the viewer's browser-local features and raw Database Tables browser. The static build clears `.next`; run `npm run build` before returning to server mode. See [`docs/README.md`](docs/README.md) for the complete operator, validation, branch, deployment, and KIND reference.
+
+Dynamic development and releases use `dynamic-dev` and `dynamic`; they are not changed by this static workflow.
 
 ## Database performance
 
-The upstream LIMS mirror has no indexes, so cold joins were slow (19-60s). Keep a
-local indexed copy and point `SQLITE_PATH` at it:
-
-```bash
-ops/refresh-db.sh                                  # full mirror  -> data/lims_indexed.db
-ops/refresh-db.sh /path/to/lims_mirror_TFMN1.db data/lims_TFMN1_indexed.db   # trimmed
-```
-
-`/api/mutations` drops from ~19s to ~0.8s after indexing. Re-run when upstream
-refreshes. Database files live under `data/` and are not committed.
+The upstream LIMS mirror has no indexes, so cold joins are slow. Keep the named
+local indexed assets refreshed with `ops/data-refresh.sh`, then release only after
+`ops/validate.py` passes. Database files live under `data/` and are not committed.
 
 ## Environment
 

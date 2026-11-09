@@ -23,7 +23,7 @@ export const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH || '';
 const DATA_DIR = `${BASE_PATH}/data`;
 
 type ManifestEntry = { file: string; gz: string; bytes: number; gzBytes: number; hash: string };
-type Manifest = { generatedAt: string; source: string; files: Record<string, ManifestEntry> };
+type Manifest = { generatedAt: string; source: string; profile?: string; target?: string; basePath?: string; snapshot: { path?: string; sha256?: string; bytes?: number; at?: string; tableCounts?: Record<string, number> }; files: Record<string, ManifestEntry> };
 
 let manifestPromise: Promise<Manifest> | null = null;
 function loadManifest(): Promise<Manifest> {

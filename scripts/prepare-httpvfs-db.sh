@@ -19,7 +19,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 SRC="${SRC:-data/lims_indexed.db}"
-DBDIR="public/db"
+DBDIR="${DBDIR:-public/db}"
 PAGE_SIZE="${PAGE_SIZE:-65536}"   # 64KB pages: far fewer range requests for big scans
 
 if [ ! -f "$SRC" ]; then echo "source DB not found: $SRC" >&2; exit 1; fi

@@ -8,7 +8,7 @@
  * curated views, and the raw table browser.
  *
  * Usage:
- *   1. Have the server running (ops/serve.sh) reading the DB you want to bake.
+ *   1. Have a server running against the DB you want to bake.
  *   2. node scripts/prebake.mjs            # defaults to http://localhost:3457
  *      BASE=http://localhost:3457 node scripts/prebake.mjs
  *
@@ -27,8 +27,12 @@ import { createHash } from 'node:crypto';
 import path from 'node:path';
 
 const BASE = process.env.BASE || 'http://localhost:3457';
-const OUT = path.resolve(process.cwd(), 'public', 'data');
+const OUT = path.resolve(process.cwd(), process.env.OUT || 'public/data');
+const DBDIR = path.resolve(process.cwd(), process.env.DBDIR || 'public/db');
 const SOURCE_DB = path.resolve(process.cwd(), process.env.SRC || 'data/lims_indexed.db');
+const PROFILE = process.env.PROFILE || 'unspecified';
+const TARGET = process.env.TARGET || 'unspecified';
+const ROOT_PATH = process.env.ROOT_PATH || '';
 
 const EXPERIMENTS = ['TFMN1', 'TFMN2', 'TFMN3', 'TFMN4', 'strain_stocks'];
 // Optional bounded verification mode: comma-separated artifact keys. The default
@@ -75,23 +79,26 @@ async function fetchJson(url) {
 async function main() {
   const [source, sourceStats] = await Promise.all([readFile(SOURCE_DB), stat(SOURCE_DB)]);
   const sourceSha256 = createHash('sha256').update(source).digest('hex');
-  const dbConfigPath = path.resolve(process.cwd(), 'public', 'db', 'config.json');
+  const dbConfigPath = path.join(DBDIR, 'config.json');
   let dbConfig;
   try { dbConfig = JSON.parse(await readFile(dbConfigPath, 'utf8')); }
   catch (error) { throw new Error(`Could not read HTTPVFS config: ${error instanceof Error ? error.message : String(error)}`); }
   if (dbConfig.sourceSha256 !== sourceSha256) {
     throw new Error(`HTTPVFS source hash ${dbConfig.sourceSha256 ?? 'missing'} does not match ${SOURCE_DB}`);
   }
-  const dbLink = path.resolve(process.cwd(), 'public', 'db', 'lims.db');
+  const dbLink = path.join(DBDIR, 'lims.db');
   if (!(await lstat(dbLink)).isSymbolicLink() || await readlink(dbLink) !== dbConfig.url) {
-    throw new Error('public/db/lims.db must be a symlink to the configured HTTPVFS database');
+    throw new Error(`${DBDIR}/lims.db must be a symlink to the configured HTTPVFS database`);
   }
 
   await mkdir(OUT, { recursive: true });
   const manifest = {
     generatedAt: new Date().toISOString(),
     source: BASE,
-    snapshot: { path: path.relative(process.cwd(), SOURCE_DB), sha256: sourceSha256, bytes: sourceStats.size },
+    profile: PROFILE,
+    target: TARGET,
+    basePath: ROOT_PATH,
+    snapshot: { path: path.relative(process.cwd(), SOURCE_DB), sha256: sourceSha256, bytes: sourceStats.size, mtime: sourceStats.mtime.toISOString() },
     files: {},
   };
   let totalRaw = 0, totalGz = 0;
