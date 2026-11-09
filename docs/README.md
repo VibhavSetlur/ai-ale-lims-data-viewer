@@ -146,7 +146,21 @@ A static export removes `.next` on exit so that a later server start cannot reus
 
 ## 8. Deployment handoff
 
-The release command prepares `out/`; it does not silently write a webroot. After the deployment owner separately authorizes a target, inspect the destination and use an explicit copy or rsync of the contents of `out/` into that approved webroot. Do not touch another owner's workspace or webroot as part of local verification.
+The release command prepares `out/`; it does not silently write a webroot. After the deployment owner separately authorizes a target, inspect the destination and use an explicit copy or rsync of the contents of `out/` into that approved webroot. The current ModelSEED webroot paths are:
+
+```text
+/scratch1/fliu/html/modelseed_annotation/projects/aiale/
+/scratch1/fliu/html/modelseed_annotation/projects/aiale-dev/
+```
+
+They serve:
+
+```text
+https://modelseed.org/annotation/projects/aiale/
+https://modelseed.org/annotation/projects/aiale-dev/
+```
+
+Copy the contents of `out/`, not the directory itself. Do not touch another owner's workspace or webroot as part of local verification.
 
 Before handoff, record:
 

@@ -1,9 +1,8 @@
 # Contributing
 
 This is the development guide for the AI-ALE LIMS Data Viewer. For what the app is
-and how to use it, see the [`README`](README.md); for documentation ownership,
-see [`docs/README.md`](docs/README.md); for project operating boundaries, see
-[`AGENTS.md`](AGENTS.md).
+and how to use it, see the [`README`](README.md); for documentation ownership and
+static operating boundaries, see [`docs/README.md`](docs/README.md).
 
 ## Setup
 

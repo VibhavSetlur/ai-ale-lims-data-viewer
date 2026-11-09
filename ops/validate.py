@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Validate static source assets and generated profile/target bundles."""
 from __future__ import annotations
-import argparse, hashlib, json, os, sqlite3, sys
+import argparse, hashlib, json, os, re, sqlite3, sys
 from pathlib import Path
 
 PROFILES = {
@@ -16,6 +16,39 @@ def digest(path: Path) -> str:
         for block in iter(lambda: f.read(1024 * 1024), b""):
             h.update(block)
     return h.hexdigest()
+
+def validate_static_files(out: Path, base_path: str) -> dict:
+    index = out / "index.html"
+    if not index.is_file() or index.stat().st_size == 0:
+        raise ValueError(f"static output is missing a non-empty index.html: {out}")
+    html = index.read_text(encoding="utf-8")
+    if "<title>AI-ALE LIMS Viewer</title>" not in html:
+        raise ValueError("static output index.html does not contain the AI-ALE viewer title")
+    if '<main class="h-screen' not in html:
+        raise ValueError("static output index.html does not contain the viewer root")
+    if base_path and base_path not in html:
+        raise ValueError(f"index.html does not contain the compiled base path {base_path!r}")
+    referenced = set(re.findall(r'(?:src|href)=[\"\']([^\"\']+)', html))
+    missing = []
+    for url in referenced:
+        path_part = url.split("?", 1)[0].split("#", 1)[0]
+        if base_path and path_part.startswith(base_path + "/"):
+            relative = path_part[len(base_path) + 1:]
+        elif base_path and path_part == base_path:
+            relative = "index.html"
+        elif not base_path and path_part.startswith("/"):
+            relative = path_part[1:]
+        else:
+            continue
+        if relative and not (out / relative).is_file():
+            missing.append(relative)
+    if missing:
+        raise ValueError(f"index.html references missing local assets: {sorted(set(missing))[:10]}")
+    required = ["data/manifest.json", "db/config.json", "help/researcher-guide.md"]
+    missing_required = [name for name in required if not (out / name).is_file()]
+    if missing_required:
+        raise ValueError(f"static output is missing required files: {missing_required}")
+    return {"indexBytes": index.stat().st_size, "referencedAssets": len(referenced), "missingAssets": 0}
 
 def source_info(path: Path) -> dict:
     if not path.is_file(): raise ValueError(f"source DB not found: {path}")
@@ -79,7 +112,12 @@ def main() -> int:
             output_manifest = json.loads(out_manifest.read_text())
             for key in ("profile", "target", "basePath", "snapshot"):
                 if output_manifest.get(key) != manifest.get(key): raise ValueError(f"output manifest {key} differs from release manifest")
-        print(json.dumps({"status": "ok", "profile": profile, "target": args.target, "source": info}, sort_keys=True))
+            output_checks = validate_static_files(out, manifest.get("basePath", ""))
+        elif args.out:
+            output_checks = validate_static_files(args.out.resolve(), args.root_path or "")
+        else:
+            output_checks = None
+        print(json.dumps({"status": "ok", "profile": profile, "target": args.target, "source": info, "output": output_checks}, sort_keys=True))
         return 0
     except (OSError, sqlite3.Error, ValueError, json.JSONDecodeError) as e:
         print(f"validation failed: {e}", file=sys.stderr)

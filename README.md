@@ -23,7 +23,6 @@ mirror snapshot. Static output is prebaked and does not call live APIs.
 | This README | Overview, quick start, feature + API reference |
 | [`docs/`](docs/README.md) | Documentation index |
 | `docs/README.md` | Complete static operations, data, deployment, validation, and KIND reference |
-| `AGENTS.md` | Tracked project operating guide and delivery boundaries |
 | `CONTRIBUTING.md` | Dev setup, verification, conventions, build/deploy |
 | `CITATION.cff` | How to cite this software |
 
@@ -138,7 +137,21 @@ Refresh a source asset explicitly before releasing:
 ops/data-refresh.sh --profile full --source /approved/mirror.db
 ```
 
-After separate deployment authorization, copy or rsync the validated contents of `out/` into the matching approved webroot. Verify the URL root, `data/manifest.json`, and a SQLite byte-range response. For local KIND verification, use the provisional launcher documented in [`docs/README.md`](docs/README.md). External KIND registration and packaging remain owner-provided.
+After separate deployment authorization, copy or rsync the validated contents of `out/` into the matching approved webroot. The current ModelSEED static webroots are:
+
+```text
+/scratch1/fliu/html/modelseed_annotation/projects/aiale/
+/scratch1/fliu/html/modelseed_annotation/projects/aiale-dev/
+```
+
+They correspond to these public paths:
+
+```text
+https://modelseed.org/annotation/projects/aiale/
+https://modelseed.org/annotation/projects/aiale-dev/
+```
+
+Copy the contents of `out/`, not the `out/` directory itself. Verify the URL root, `data/manifest.json`, and a SQLite byte-range response. Do not write either webroot without separate deployment authorization. For local KIND verification, use the provisional launcher documented in [`docs/README.md`](docs/README.md). External KIND registration and packaging remain owner-provided.
 
 Static exports do not call live APIs. They retain the viewer's browser-local features and raw Database Tables browser. The static build clears `.next`; run `npm run build` before returning to server mode. See [`docs/README.md`](docs/README.md) for the complete operator, validation, branch, deployment, and KIND reference.
 
