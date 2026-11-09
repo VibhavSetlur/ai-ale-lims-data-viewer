@@ -399,7 +399,7 @@ function buildSamplesSql(opts: { experiment: boolean; registry: boolean; barcode
       ) sample_sources
       GROUP BY seq_sample
     ) ms
-    LEFT JOIN (
+    JOIN (
       -- A handful of samples were re-sequenced under two Seqorders, so the same
       -- Sequencing_sample has >1 live Seq_samples row (and Database_ID is blank
       -- in this mirror, so we can't pick a "latest"). The duplicated rows carry
@@ -497,19 +497,16 @@ const EXPERIMENT_SCOPE_SQL = `
 `;
 
 function buildAllExperimentsSql(hasBarcodeTable: boolean): string {
+  // The experiment picker must describe the sample universe, not orphaned
+  // mutation rows. Trimmed publication snapshots retain historical Mutations
+  // rows for transfers whose Seq_samples were removed, so selecting directly
+  // from Mutations makes TFMN2/TFMN3/TFMN4 appear in a TFMN1-only snapshot.
   return `
     SELECT DISTINCT name
     FROM (
-      SELECT Experiment AS name
-      FROM Mutations
-      WHERE deleted = 0 AND Experiment IS NOT NULL AND Experiment != ''
-      UNION
       SELECT ss."Experiment" AS name
-      FROM Mutations m
-      JOIN Seq_samples ss
-        ON ss."Sequencing_sample" = m."Seq_sample" AND ss.deleted = 0
-      WHERE m.deleted = 0
-        AND (m."Experiment" IS NULL OR m."Experiment" = '')
+      FROM Seq_samples ss
+      WHERE ss.deleted = 0
         AND ss."Experiment" IS NOT NULL
         AND ss."Experiment" != ''
       ${hasBarcodeTable ? `
@@ -822,7 +819,11 @@ export async function GET(req: NextRequest) {
       return {
         id: r.seq_sample,
         name: r.seq_sample,
-        experiment: r.experiment_from_mutations ?? r.experiment_from_seq ?? '',
+        // Seq_samples is the authoritative population for this snapshot. The
+        // trimmed publication DB retains orphaned historical Mutations rows with
+        // TFMN2/TFMN3/TFMN4 labels, so mutation labels must not override the
+        // experiment attached to the surviving sequencing sample.
+        experiment: r.experiment_from_seq ?? r.experiment_from_mutations ?? '',
         breseq_registry_id: registryBySample.get(r.seq_sample),
         experiment_type: r.experiment_type ?? undefined,
         seqorder: (r.seqorder && String(r.seqorder).trim()) || undefined,
@@ -1047,7 +1048,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       samples,
       mutations,
-      experiments: allExperiments.map(e => e.name),
+      experiments: [...new Set(samples.map(sample => sample.experiment).filter(Boolean))],
       registries,
       selectedRegistry,
       warnings,

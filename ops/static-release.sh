@@ -8,7 +8,7 @@ TARGET=""
 ROOT_PATH=""
 DRY_RUN=0
 CHANNEL="${RELEASE_CHANNEL:-static-dev}"
-PORT="${RELEASE_PORT:-3459}"
+PORT="${RELEASE_PORT:-0}"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --profile) PROFILE="${2:?missing profile}"; shift 2 ;;
@@ -35,6 +35,19 @@ case "$TARGET" in
 esac
 case "$CHANNEL" in static|static-dev) ;; *) echo "ERROR: channel must be static or static-dev" >&2; exit 2 ;; esac
 [[ -f "$SOURCE_DB" ]] || { echo "ERROR: source DB not found: $SOURCE_DB" >&2; exit 1; }
+if [[ "$PORT" == "0" ]]; then
+  PORT="$(python3 - <<'PY'
+import socket
+with socket.socket() as s:
+    s.bind(('127.0.0.1', 0))
+    print(s.getsockname()[1])
+PY
+)"
+fi
+if ss -ltn "sport = :$PORT" 2>/dev/null | grep -q LISTEN; then
+  echo "ERROR: release port $PORT is already listening; choose --port or retry" >&2
+  exit 2
+fi
 
 RELEASE_DIR=".local/releases/$PROFILE"
 DATA_DIR="$RELEASE_DIR/data"
@@ -77,9 +90,24 @@ SRC="$SOURCE_ABS" DBDIR="$DB_DIR" bash scripts/prepare-httpvfs-db.sh
 SQLITE_PATH="$SOURCE_ABS" bash -lc "npm run build >/dev/null"
 SQLITE_PATH="$SOURCE_ABS" PORT="$PORT" HOST=127.0.0.1 npm start -- -p "$PORT" >"$RELEASE_DIR/server.log" 2>&1 &
 SERVER_PID=$!
-for _ in $(seq 1 60); do curl -fsS "http://127.0.0.1:$PORT/api/health" >/dev/null 2>&1 && break; sleep 1; done
-curl -fsS "http://127.0.0.1:$PORT/api/health" >/dev/null
-BASE="http://127.0.0.1:$PORT" SRC="$SOURCE_ABS" OUT="$DATA_DIR" DBDIR="$DB_DIR" PROFILE="$PROFILE" TARGET="$TARGET" ROOT_PATH="$ROOT_PATH" node scripts/prebake.mjs
+READY=0
+for _ in $(seq 1 60); do
+  if curl -fsS "http://127.0.0.1:$PORT/api/health" >/dev/null 2>&1; then READY=1; break; fi
+  if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+    echo "ERROR: build server exited before becoming ready" >&2
+    cat "$RELEASE_DIR/server.log" >&2 || true
+    exit 1
+  fi
+  sleep 1
+done
+if (( ! READY )); then
+  echo "ERROR: build server did not become ready on port $PORT" >&2
+  cat "$RELEASE_DIR/server.log" >&2 || true
+  exit 1
+fi
+BASE="http://127.0.0.1:$PORT"
+python3 ops/verify-server-source.py --base "$BASE" --source "$SOURCE_ABS"
+SRC="$SOURCE_ABS" BASE="$BASE" OUT="$DATA_DIR" DBDIR="$DB_DIR" PROFILE="$PROFILE" TARGET="$TARGET" ROOT_PATH="$ROOT_PATH" node scripts/prebake.mjs
 kill "$SERVER_PID" 2>/dev/null || true; wait "$SERVER_PID" 2>/dev/null || true; unset SERVER_PID
 
 # Build the selected target with a truthful branch/channel identity.

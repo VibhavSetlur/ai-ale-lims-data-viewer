@@ -61,8 +61,12 @@ def source_info(path: Path) -> dict:
         tables = [r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")]
         counts = {t: con.execute('SELECT COUNT(*) FROM "' + t.replace('"', '""') + '"').fetchone()[0] for t in tables}
         if not tables or not any(counts.values()): raise ValueError(f"source DB has no populated user tables: {path}")
-    finally: con.close()
-    return {"path": str(path), "sha256": digest(path), "bytes": st.st_size, "mtime": st.st_mtime, "integrity": "ok", "tables": counts}
+        experiments = set()
+        if "Seq_samples" in tables:
+            experiments = {str(r[0]) for r in con.execute('SELECT DISTINCT "Experiment" FROM "Seq_samples" WHERE "Experiment" IS NOT NULL AND "Experiment" != ""')}
+    finally:
+        con.close()
+    return {"path": str(path), "sha256": digest(path), "bytes": st.st_size, "mtime": st.st_mtime, "integrity": "ok", "tables": counts, "experiments": sorted(experiments)}
 
 def main() -> int:
     p = argparse.ArgumentParser()
@@ -112,6 +116,19 @@ def main() -> int:
             output_manifest = json.loads(out_manifest.read_text())
             for key in ("profile", "target", "basePath", "snapshot"):
                 if output_manifest.get(key) != manifest.get(key): raise ValueError(f"output manifest {key} differs from release manifest")
+            expected_tables = info["tables"]
+            expected_experiments = set(info.get("experiments", []))
+            snapshot_counts = manifest.get("snapshot", {}).get("tableCounts", {})
+            if any(int(snapshot_counts.get(name, -1)) != int(count) for name, count in expected_tables.items() if name in snapshot_counts):
+                raise ValueError("manifest table counts do not match selected source")
+            tables_payload = json.loads((release / "data" / "tables.json").read_text())
+            actual_tables = {str(row.get("name")): int(row.get("rowCount", -1)) for row in tables_payload.get("tables", [])}
+            if actual_tables != expected_tables:
+                raise ValueError("baked tables.json does not match selected source schema/counts")
+            mutations_payload = json.loads((release / "data" / "mutations__all.json").read_text())
+            actual_experiments = {str(value) for value in mutations_payload.get("experiments", [])}
+            if actual_experiments != expected_experiments:
+                raise ValueError("baked Mutation Explorer experiments do not match selected source")
             output_checks = validate_static_files(out, manifest.get("basePath", ""))
         elif args.out:
             output_checks = validate_static_files(args.out.resolve(), args.root_path or "")

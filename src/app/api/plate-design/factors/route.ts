@@ -32,9 +32,9 @@ export async function GET() {
       FROM (
         SELECT "Seq_sample" AS seq_sample, MIN("Experiment") AS experiment
         FROM Mutations WHERE deleted = 0 GROUP BY "Seq_sample"
-        UNION
+        ${await hasTable('verAB_barcodes') ? `UNION
         SELECT v."Seqsample", NULL
-        FROM verAB_barcodes v WHERE v.deleted = 0 AND COALESCE(v."Count", 0) > 0
+        FROM verAB_barcodes v WHERE v.deleted = 0 AND COALESCE(v."Count", 0) > 0` : ''}
       ) m
       LEFT JOIN (
         -- Match the default mutation sample projection exactly: a re-sequenced

@@ -129,7 +129,7 @@ ops/static-release.sh --profile full --target aiale-dev
 ops/validate.py --profile full
 ```
 
-The operation validates the selected SQLite source, prepares isolated profile state below `.local/releases/<profile>`, snapshots the live API against that exact source, prepares HTTPVFS from the same source, builds the selected base path, writes profile/target/hash provenance, validates the bundle, and leaves only that selection in `out/`. Generated databases, prebaked JSON, `.local/`, and `out/` are local artifacts and are never committed.
+The operation validates the selected SQLite source, prepares isolated profile state below `.local/releases/<profile>`, runs a bounded build-time worker on a dynamically allocated loopback port, verifies that worker against the exact selected source, prebakes only data from that source, prepares HTTPVFS from the same source, builds the selected base path, writes profile/target/hash provenance, validates the bundle, and leaves only that selection in `out/`. The worker is stopped before the command exits. The operation does not deploy or write a webroot. Use `ops/deploy-static.sh` separately for deployment. Generated databases, prebaked JSON, `.local/`, and `out/` are local artifacts and are never committed.
 
 Refresh a source asset explicitly before releasing:
 

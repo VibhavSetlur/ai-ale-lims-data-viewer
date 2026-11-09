@@ -109,7 +109,21 @@ async function main() {
   if (!mirrorTarget) throw new Error('mirror-info target is required for static provenance');
   if (!selectedTargets.some(target => target.key === 'mirror-info')) mirrorInfo = await fetchJson(mirrorTarget.url);
 
+  // Only emit experiment-specific artifacts for experiments represented by the
+  // selected snapshot's mutation sample universe. Historical mutation rows can
+  // retain labels for removed experiments; those labels must not become visible
+  // static tabs or artifacts in a trimmed release.
+  let allowedExperiments = null;
+  if (selectedTargets.some(target => target.key === 'mutations__all')) {
+    const allMutations = await fetchJson('/api/mutations');
+    allowedExperiments = new Set(Array.isArray(allMutations?.experiments) ? allMutations.experiments : []);
+  }
   for (const t of selectedTargets) {
+    const experimentMatch = t.key.match(/^(?:mutations|growth-series)__experiment_(.+)$/);
+    if (experimentMatch && allowedExperiments && !allowedExperiments.has(experimentMatch[1])) {
+      console.log(`skipping ${t.key}: experiment absent from selected snapshot`);
+      continue;
+    }
     process.stdout.write(`baking ${t.key} ... `);
     let data;
     try { data = await fetchJson(t.url); }

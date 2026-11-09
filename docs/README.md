@@ -70,7 +70,7 @@ ops/static-release.sh --profile full --target aiale --channel static
 ops/static-release.sh --profile trimmed --target kind --root-path /user/me/proxy/9000
 ```
 
-The command validates the source, creates isolated state, prepares HTTPVFS from the exact source, runs the server against that exact source, prebakes the curated API responses, builds the selected static base path, validates the result, and leaves the selected bundle in `out/`.
+The command validates the source, creates isolated state, prepares HTTPVFS from the exact source, runs a bounded build-time worker against that exact source, verifies the worker's database identity, prebakes the curated API responses, builds the selected static base path, validates the result, and leaves the selected bundle in `out/`. It does not start a persistent service or deploy anything. The worker uses a dynamically allocated loopback port and is killed before the command completes.
 
 The generated layout is:
 
@@ -145,6 +145,17 @@ python -B -m unittest discover -s tests/kind_static -v
 A static export removes `.next` on exit so that a later server start cannot reuse a static export. Run `npm run build` again before server-mode verification.
 
 ## 8. Deployment handoff
+
+`ops/deploy-static.sh` is the separate deployment operation. It never refreshes data, rebuilds the viewer, starts a build worker, or infers a destination. It accepts only a previously validated `out/` bundle and an allowlisted target:
+
+```bash
+ops/deploy-static.sh --target aiale --profile trimmed --bundle out --dry-run
+ops/deploy-static.sh --target aiale --profile trimmed --bundle out --apply
+```
+
+The dry run is the default-safe mode. `--apply` creates a timestamped sibling backup of the current webroot, then synchronizes the contents of `out/` to the approved target. It validates profile, target, base path, source identity, and output contents before copying. It does not support arbitrary destination paths.
+
+
 
 The release command prepares `out/`; it does not silently write a webroot. After the deployment owner separately authorizes a target, inspect the destination and use an explicit copy or rsync of the contents of `out/` into that approved webroot. The current ModelSEED webroot paths are:
 
