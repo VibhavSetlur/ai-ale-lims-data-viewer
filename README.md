@@ -41,19 +41,19 @@ says so rather than guessing.
 
 ## Views
 
-- **Sample Selection** — filter/pick samples; faceted metadata chips (picking one
+- **Sample Selection** - filter/pick samples; faceted metadata chips (picking one
   factor narrows the others); per-sample growth sparkline; click a sample name for
   a detail popup.
-- **Comparative View** — selected samples as columns, mutations and copy-number
+- **Comparative View** - selected samples as columns, mutations and copy-number
   regions as rows; per-cell heatmap (frequency on a fixed 0 to 100% scale, copy
   number on a per-row scale); multi-level column grouping; provided (donor DNA)
   mutations outlined in amber; click a mutation for a genome-context popup.
-- **Copy Number** — per-lineage dgoA\* copy-number trajectories across transfers;
+- **Copy Number** - per-lineage dgoA\* copy-number trajectories across transfers;
   log/linear toggle; hover crosshair; click a lineage to isolate it.
-- **Barcode Charts** — VerA/VerB barcode-composition bars per well, in grid /
+- **Barcode Charts** - VerA/VerB barcode-composition bars per well, in grid /
   focus / compare views, with Rows/Bars/Lines/Heatmap chart types and a
   shared-axis compare. Shown ONLY when the database contains barcode data.
-- **Database Tables** — raw paginated, filterable, searchable table browser. In
+- **Database Tables** - raw paginated, filterable, searchable table browser. In
   static mode this runs SQLite in the browser (sql.js-httpvfs) so it stays fully
   queryable with no server.
 
@@ -178,18 +178,18 @@ local indexed assets refreshed with `ops/data-refresh.sh`, then release only aft
 
 ## API (server mode)
 
-- `GET /api/health` — DB driver, path, mtime, latency
-- `GET /api/mirror-info` — table counts + snapshot timestamp of the active mirror
-- `GET /api/mutations[?experiment=TFMN1]` — Mutation Explorer dataset: samples +
+- `GET /api/health`: DB driver, path, mtime, latency
+- `GET /api/mirror-info`: table counts + snapshot timestamp of the active mirror
+- `GET /api/mutations[?experiment=TFMN1]`: Mutation Explorer dataset: samples +
   mutations (one row per unique site, with a `values: { [seq_sample]: value }`
   map, a `providedIn` list for donor-DNA mutations, and a rich `detail` block) +
   registries + `warnings[]` + `stats` (capability flags).
-- `GET /api/barcode-counts` — VerA/VerB barcode charts.
-- `GET /api/tables` — list tables.
-- `GET /api/data/[tableName]?page=&pageSize=&sortBy=&sortDirection=&globalSearch=&filterLogic=`
-  — paginated, filterable raw table data.
-- `GET /api/distinct/[tableName]?column=` — distinct values for a column.
-- `GET /api/export/[tableName]` — CSV export.
+- `GET /api/barcode-counts`: VerA/VerB barcode charts.
+- `GET /api/tables`: list tables.
+- `GET /api/data/[tableName]?page=&pageSize=&sortBy=&sortDirection=&globalSearch=&filterLogic=`:
+  paginated, filterable raw table data.
+- `GET /api/distinct/[tableName]?column=`: distinct values for a column.
+- `GET /api/export/[tableName]`: CSV export.
 
 ## License / provenance
 

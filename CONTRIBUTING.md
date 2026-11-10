@@ -57,7 +57,25 @@ maintained operations reference).
 The viewer ships as static deployments built from this one codebase against a
 selected database profile. The full, verified procedure is in `docs/README.md`.
 Database files, the `out/` bundle, and baked `public/data` / `public/db` artifacts
-are all gitignored and rebuilt per deploy.
+are all gitignored and rebuilt per release. A release prepares `out/`; deployment
+to an approved webroot is a separate, explicitly authorized operation. Do not
+change a webroot during development or local KIND verification.
+
+The static lineage is `static-dev` for implementation and verification, then
+`static` for accepted release source. The `dynamic-dev` and `dynamic` branches
+are separate server-mode lineages. The server-mode `npm run dev`, `npm run build`,
+and `npm start` commands remain useful for local development and API verification,
+but they are not the static deployment path. Static output uses prebaked JSON and
+browser HTTPVFS SQLite and has no live API dependency.
+
+`Dockerfile` and `docker-compose.yml` are retained as server-mode compatibility
+examples. They build and run the Next server with `.next`, Node, and a local
+`.env.local` database configuration. They do not build, serve, or deploy the
+static `out/` bundle and are not a KIND packaging contract.
+
+The obsolete `ops:migrate` and `ops:seed-dev` package scripts were removed because
+the referenced files are absent and no repository callers exist. Static operations
+use the scripts under `ops/` instead.
 
 ## Commit style
 

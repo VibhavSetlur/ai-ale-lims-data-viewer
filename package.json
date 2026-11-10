@@ -9,9 +9,7 @@
     "lint": "eslint",
     "prebake": "node scripts/prebake.mjs",
     "build:static": "bash scripts/build-static.sh",
-    "test": "vitest run",
-    "ops:migrate": "node scripts/ops-migrate.mjs",
-    "ops:seed-dev": "node scripts/ops-seed-dev-account.mjs"
+    "test": "vitest run"
   },
   "dependencies": {
     "better-sqlite3": "^12.10.0",

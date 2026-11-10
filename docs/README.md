@@ -146,6 +146,8 @@ A static export removes `.next` on exit so that a later server start cannot reus
 
 ## 8. Deployment handoff
 
+Release and deployment are separate stages. A release creates and validates `out/`; deployment copies a previously validated bundle to an approved webroot. Neither stage promotes Git branches automatically. No webroot write is part of local verification.
+
 `ops/deploy-static.sh` is the separate deployment operation. It never refreshes data, rebuilds the viewer, starts a build worker, or infers a destination. It accepts only a previously validated `out/` bundle and an allowlisted target:
 
 ```bash
@@ -208,7 +210,22 @@ The static viewer reads curated JSON under `<basePath>/data/` and queries the se
 
 The viewer is read-only. Static output has no live API dependency. Dynamic server mode remains a separate later concern.
 
-## 11. Troubleshooting
+## 11. Server-mode compatibility boundary
+
+`Dockerfile` and `docker-compose.yml` are retained legacy compatibility examples for
+server mode. They build the Next application, require Node and `.next`, expose port
+3000, and mount or read a local database through `.env.local`. They are not static
+release tools, do not serve `out/`, do not define a KIND contract, and must not be
+used as evidence of static deployment or KIND registration. Static reviewers should
+use `ops/static-release.sh`, `ops/validate.py`, and the separate deployment handoff
+above instead.
+
+The dual-mode API and database code remains in the repository because the static
+prebake process runs the application in a bounded build-time server context before
+exporting browser-local artifacts. This does not make live APIs a static runtime
+dependency.
+
+## 12. Troubleshooting
 
 - **Source not found:** place the named local asset at the exact profile path or run `ops/data-refresh.sh`.
 - **Integrity or hash mismatch:** stop. Do not reuse generated data. Rebuild HTTPVFS and prebaked artifacts from one source.
@@ -219,6 +236,6 @@ The viewer is read-only. Static output has no live API dependency. Dynamic serve
 - **Server API 404 after a static build:** run `npm run build` before `npm start`.
 - **A release is too large or slow:** inspect the source identity and generated artifact sizes before changing query scope. Do not silently ship a partial bake.
 
-## 12. Maintained documentation boundary
+## 13. Maintained documentation boundary
 
 This file and the root README are the maintained operational authorities for the static workflow. Existing historical/reference files may remain in the repository for application links or provenance, but they must not override these commands, branch rules, profile definitions, or deployment boundaries. The in-app Help and Guide remain user-facing product content; they are not release-operation instructions.
