@@ -1,199 +1,189 @@
-# AI-ALE LIMS Data Viewer
+# AI-ALE static operations handoff
 
-A read-only web viewer over the AI-ALE (Adaptive Laboratory Evolution) LIMS
-database. It presents breseq mutation calls, dgoA\* copy-number amplification
-trajectories, robot-measured OD600 growth curves, and VerA/VerB barcode-
-composition charts for engineered *Acinetobacter baylyi* ADP1 strains evolved on
-the automated robotic ALE platform.
+This repository is the static release source for operators, maintainers, and deployment reviewers. Work on `static-dev`, verify there, and promote accepted commits to `static`. This document describes data refresh, release, validation, deployment, rollback, and the provisional local KIND handoff. It is not a product guide.
 
-- STATIC (production): https://modelseed.org/annotation/projects/aiale-dev/
+## Branch authority and release boundary
 
-For the provisional code-only static KIND launcher, sealed local exports, and
-separate external registration gates, see the KIND section in [`docs/README.md`](docs/README.md).
-Development source stays on `static-dev`; generated real-data exports are local
-artifacts, not committed application source or production deployments.
+- `static-dev` is the implementation and verification branch.
+- `static` is the accepted static release branch and the source for an authorized static release.
+- `dynamic-dev` and `dynamic` are separate server lineages and are not touched by this workflow.
+- `main`, `dev`, and compatibility deployment branches are not release sources.
+- A release creates `out/`; it does not deploy, write a webroot, or register with KIND.
+- Generated databases, prebaked JSON, HTTPVFS files, `.local/`, and `out/` are ignored local artifacts. Never commit them.
 
-The approved static viewer is built from the `static` branch with its full LIMS
-mirror snapshot. Static output is prebaked and does not call live APIs.
+## Data sources and profiles
 
-## Documentation map
+The canonical trimmed source is:
 
-| Doc | Read it for |
-|---|---|
-| This README | Overview, quick start, feature + API reference |
-| [`docs/`](docs/README.md) | Documentation index |
-| `docs/README.md` | Complete static operations, data, deployment, validation, and KIND reference |
-| `CONTRIBUTING.md` | Dev setup, verification, conventions, build/deploy |
-| `CITATION.cff` | How to cite this software |
-
-In-app help is built into the viewer itself: the left sidebar has a **Guide**
-(answers "how do I..." and walks you to the right view), a **Changelog**
-(viewer release history plus data snapshot provenance), and a deep searchable
-**Help** center. The Help center mirrors the bundled researcher guide at `public/help/researcher-guide.md`.
-
-## What this is (and is not)
-
-It is a presentation layer over a snapshot of the LIMS database. It contains no
-scientific algorithms: every number shown is either stored in the database or
-computed transparently from stored values, and the UI labels which is which. When
-a value is absent (a missing growth series, an unsequenced timepoint) the viewer
-says so rather than guessing.
-
-## Views
-
-- **Sample Selection** - filter/pick samples; faceted metadata chips (picking one
-  factor narrows the others); per-sample growth sparkline; click a sample name for
-  a detail popup.
-- **Comparative View** - selected samples as columns, mutations and copy-number
-  regions as rows; per-cell heatmap (frequency on a fixed 0 to 100% scale, copy
-  number on a per-row scale); multi-level column grouping; provided (donor DNA)
-  mutations outlined in amber; click a mutation for a genome-context popup.
-- **Copy Number** - per-lineage dgoA\* copy-number trajectories across transfers;
-  log/linear toggle; hover crosshair; click a lineage to isolate it.
-- **Barcode Charts** - VerA/VerB barcode-composition bars per well, in grid /
-  focus / compare views, with Rows/Bars/Lines/Heatmap chart types and a
-  shared-axis compare. Shown ONLY when the database contains barcode data.
-- **Database Tables** - raw paginated, filterable, searchable table browser. In
-  static mode this runs SQLite in the browser (sql.js-httpvfs) so it stays fully
-  queryable with no server.
-
-Every chart exports through a PNG preview/editor modal with publication-oriented labels, sizing, colors, and caption controls. Major charts render exports from data-backed figure specs rather than screen captures, and CSV remains separate for quantitative values.
-
-## Data-driven views (one codebase, many audiences)
-
-Rather than fork the codebase per audience, the viewer responds to what is in its
-database. `GET /api/mutations` returns capability flags in its `stats` block
-(e.g. `hasBarcodes`, `cnRegionCount`, `curveCount`) computed from the live DB, and
-the UI gates views on them:
-
-- The TFMN1 publication snapshot DB omits `verAB_barcodes` -> `hasBarcodes` is
-  false -> the Barcode Charts tab is hidden on the public site.
-- The full DB has barcodes -> the tab is shown on the dev site.
-
-Same code, different database, different visible surface. See
-`docs/README.md`.
-
-## Quick start (conda)
-
-This host has no system-wide Node, so the project uses a dedicated conda env
-(`ai-ale-dev`) that pins Node + npm.
-
-```bash
-conda create -n ai-ale-dev -c conda-forge 'nodejs>=20' -y
-conda activate ai-ale-dev
-cd /scratch/vsetlur/ai-ale-lims-data-viewer
-npm install
-cp .env.example .env.local   # set SQLITE_PATH (or MYSQL_URL)
+```text
+/scratch1/fliu/hub_scratch/synbio/lims_mirror_TFMN1.db
 ```
 
-Dev server (hot reload):
+The full source is not yet tied to an authoritative upstream path. Supply it explicitly with `--source` until that path is confirmed. A refresh copies the selected source into the indexed local destination, validates it, creates indexes where the schema permits, and records the source identity. It does not read live webroot artifacts and never refreshes from a deployed bundle.
 
-```bash
-conda activate ai-ale-dev
-npm run dev                   # http://localhost:3000
-```
-
-Production server build:
-
-```bash
-conda activate ai-ale-dev
-npm run build
-npm start                     # add -- -p 3457 to change port
-```
-
-## Static release workflow
-
-This task is static only. `static-dev` is the working and review source; accepted work is promoted to `static`. Dynamic branches and services are intentionally deferred.
-
-There are two local, uncommitted source assets:
-
-| Profile | Source | Intended contents |
+| Profile | Indexed destination | Refresh source |
 |---|---|---|
-| `trimmed` | `data/lims_TFMN1_indexed.db` | Reduced/public snapshot candidate |
-| `full` | `data/lims_indexed.db` | Full research snapshot candidate |
+| `trimmed` | `data/lims_TFMN1_indexed.db` | canonical path above unless `--source` overrides it |
+| `full` | `data/lims_indexed.db` | required explicit `--source` |
 
-A profile is independent from its destination. Either profile can be built for either static URL or as a KIND handoff:
+The indexed destination is an operator-created working asset, not proof of upstream provenance. Release manifests preserve the source SHA-256, byte size, source mtime, snapshot timestamp, table counts, profile, target, base path, and artifact hashes. The release snapshot under `.local/releases/<profile>/data/source.db` is the immutable SQLite input used by the release stages.
 
-| Target | Compiled base path |
-|---|---|
-| `aiale` | `/annotation/projects/aiale` |
-| `aiale-dev` | `/annotation/projects/aiale-dev` |
-| `kind` | The exact prefix supplied by the KIND owner, or empty for root |
-
-Build and validate a selected bundle:
+### Refresh commands
 
 ```bash
-ops/static-release.sh --profile trimmed --target aiale --dry-run
-ops/static-release.sh --profile trimmed --target aiale
-ops/static-release.sh --profile full --target aiale-dev
+# Trimmed, using the canonical source:
+ops/data-refresh.sh --profile trimmed
+
+# Trimmed, with an explicit source:
+ops/data-refresh.sh --profile trimmed --source /path/to/mirror.db
+
+# Full, always explicit:
+ops/data-refresh.sh --profile full --source /path/to/full-mirror.db
+
+# Validate either indexed destination:
+ops/validate.py --profile trimmed
 ops/validate.py --profile full
 ```
 
-The operation validates the selected SQLite source, prepares isolated profile state below `.local/releases/<profile>`, runs a bounded build-time worker on a dynamically allocated loopback port, verifies that worker against the exact selected source, prebakes only data from that source, prepares HTTPVFS from the same source, builds the selected base path, writes profile/target/hash provenance, validates the bundle, and leaves only that selection in `out/`. The worker is stopped before the command exits. The operation does not deploy or write a webroot. Use `ops/deploy-static.sh` separately for deployment. Generated databases, prebaked JSON, `.local/`, and `out/` are local artifacts and are never committed.
+Refresh archives an existing destination under `data/archive/`, creates a transactionally consistent copy, checks SQLite integrity and populated tables, adds supported indexes, and atomically replaces the destination. If validation fails, the new destination is not installed. The source is not modified.
 
-Refresh a source asset explicitly before releasing:
+## Profiles, targets, and approved URLs
+
+Profiles and targets are independent. Valid static targets are:
+
+| Target | Compiled base path | Approved URL | Approved webroot |
+|---|---|---|---|
+| `aiale` | `/annotation/projects/aiale` | `https://modelseed.org/annotation/projects/aiale/` | `/scratch1/fliu/html/modelseed_annotation/projects/aiale/` |
+| `aiale-dev` | `/annotation/projects/aiale-dev` | `https://modelseed.org/annotation/projects/aiale-dev/` | `/scratch1/fliu/html/modelseed_annotation/projects/aiale-dev/` |
+| `kind` | explicit `--root-path`, including empty root | owner-supplied local or proxy prefix | none |
+
+The normal public pairing is `trimmed -> aiale` or `full -> aiale-dev`, but the scripts permit either profile with either approved target. KIND is a local handoff target, not an external registration or deployment target.
+
+## Operations inventory
+
+The tracked `ops/` files are the complete operational surface:
+
+- `ops/data-refresh.sh`: refreshes one named profile from an explicit SQLite source. Reads the source and selected destination, writes `data/<profile destination>`, archives the prior destination under `data/archive/`, and invokes validation. It does not release or deploy.
+- `ops/static-release.sh`: builds one profile and target. Reads the selected source, package/build scripts, and repository code. Writes `.local/releases/<profile>/data`, `.local/releases/<profile>/db`, `.local/releases/<profile>/out`, `out/`, temporary `public/data` and `public/db` links, and the ignored `server.log`. It starts only a bounded build-time loopback server, verifies source parity, stops it, validates the resulting bundle, and does not write a webroot.
+- `ops/validate.py`: validates a source, or a release and output bundle against that source. It reads SQLite, manifests, HTTPVFS config, and generated output, and writes only its JSON report to stdout when redirected. It is a validator, not a builder.
+- `ops/deploy-static.sh`: validates an existing bundle and performs a dry-run or an explicitly requested deployment to the allowlisted `aiale` or `aiale-dev` webroot. `--apply` writes a timestamped sibling backup and synchronizes bundle contents. It does not refresh or build.
+- `ops/verify-server-source.py`: compatibility helper used by `static-release.sh`. It reads the bounded build-time server health, config, table counts, and mutation experiment response, compares them to the selected SQLite source, and writes a JSON result to stdout. It is not a production health check and does not deploy.
+
+`ops/.gitignore` ignores only transient `server.log` and `server.pid`. The `ops/__pycache__/` directory is generated Python cache and is ignored by the repository-wide Python rules, not an additional tracked operator script.
+
+## Release procedure
+
+Use the exact source and target you intend to hand off. The dry run validates without creating generated output:
 
 ```bash
-ops/data-refresh.sh --profile full --source /approved/mirror.db
+ops/static-release.sh --profile trimmed --target aiale --dry-run
 ```
 
-After separate deployment authorization, copy or rsync the validated contents of `out/` into the matching approved webroot. The current ModelSEED static webroots are:
+Build a release:
+
+```bash
+ops/static-release.sh --profile trimmed --target aiale
+ops/static-release.sh --profile full --target aiale-dev
+```
+
+Options accepted by `static-release.sh` are `--profile trimmed|full`, `--source PATH`, `--target aiale|aiale-dev|kind`, `--root-path PATH`, `--channel static|static-dev`, `--port PORT`, and `--dry-run`. `--root-path` is required for an exact KIND prefix when the default empty root is not correct. The default channel is `static-dev` unless `RELEASE_CHANNEL` is set.
+
+The release takes one SQLite backup snapshot, prepares HTTPVFS from that snapshot, runs the application only as a bounded build-time compatibility server, verifies the server source identity, prebakes curated artifacts, builds the selected base path, and validates parity. It leaves the selected bundle in `out/` and a retained copy in `.local/releases/<profile>/out/`.
+
+Generated layout:
 
 ```text
-/scratch1/fliu/html/modelseed_annotation/projects/aiale/
-/scratch1/fliu/html/modelseed_annotation/projects/aiale-dev/
+.local/releases/<profile>/
+  data/       source snapshot, prebaked JSON, manifest
+  db/         hash-keyed HTTPVFS database, worker, wasm, config
+  out/        retained final bundle for this profile and target
+  server.log  ignored bounded build-server log
+out/          current selected handoff bundle only
 ```
 
-They correspond to these public paths:
+During the build, `public/data` and `public/db` are temporary links to the selected profile and are restored on exit. A release may remove `.next` as part of static build behavior. Run `npm run build` again before server-mode compatibility checks.
 
-```text
-https://modelseed.org/annotation/projects/aiale/
-https://modelseed.org/annotation/projects/aiale-dev/
+## Validation and parity
+
+```bash
+# Source validation:
+ops/validate.py --profile trimmed
+ops/validate.py --profile full
+
+# Release and output validation:
+ops/validate.py --profile trimmed \
+  --release .local/releases/trimmed --out out \
+  --target aiale --root-path /annotation/projects/aiale
+
+# Local KIND test suite:
+python -B -m unittest discover -s tests/kind_static -v
 ```
 
-Copy the contents of `out/`, not the `out/` directory itself. Verify the URL root, `data/manifest.json`, and a SQLite byte-range response. Do not write either webroot without separate deployment authorization. For local KIND verification, use the provisional launcher documented in [`docs/README.md`](docs/README.md). External KIND registration and packaging remain owner-provided.
+Validation fails closed on missing or corrupt SQLite, missing populated tables, profile mismatch, source hash mismatch, target or base-path mismatch, HTTPVFS mismatch, missing output files, stale profile data, or curated artifact parity failures. Before handoff, check `out/index.html`, `out/data/manifest.json`, `out/db/config.json`, and a local HTTP byte range.
 
-Static exports do not call live APIs. They retain the viewer's browser-local features and raw Database Tables browser. The static build clears `.next`; run `npm run build` before returning to server mode. See [`docs/README.md`](docs/README.md) for the complete operator, validation, branch, deployment, and KIND reference.
+## Static release and deployment are separate
 
-Dynamic development and releases use `dynamic-dev` and `dynamic`; they are not changed by this static workflow.
+A release is not a deployment. After separate deployment authorization, first inspect the bundle with the safe default dry run:
 
-## Database performance
+```bash
+ops/deploy-static.sh --target aiale --profile trimmed --bundle out --dry-run
+```
 
-The upstream LIMS mirror has no indexes, so cold joins are slow. Keep the named
-local indexed assets refreshed with `ops/data-refresh.sh`, then release only after
-`ops/validate.py` passes. Database files live under `data/` and are not committed.
+Apply only to the approved webroot selected by the target:
 
-## Environment
+```bash
+ops/deploy-static.sh --target aiale --profile trimmed --bundle out --apply
+ops/deploy-static.sh --target aiale-dev --profile full --bundle out --apply
+```
 
-| Variable | Default | Description |
-|---|---|---|
-| `SQLITE_PATH` | `data/lims_mirror.db` | SQLite database path (use the indexed copy) |
-| `MYSQL_URL` | - | MySQL connection string; if set, MySQL is used instead of SQLite |
-| `STATIC_EXPORT` | - | `1` switches the build to static `output: export` |
-| `NEXT_PUBLIC_BASE_PATH` | - | Static URL base path: `/annotation/projects/aiale-dev` |
-| `NEXT_PUBLIC_VIEWER_VERSION` | `package.json` version | Static build viewer version override |
-| `NEXT_PUBLIC_DEPLOYMENT_CHANNEL` | `static` | Baked static deployment channel |
-| `NEXT_PUBLIC_DEPLOYMENT_BRANCH` | `static` | Baked static source branch |
-| `NEXT_PUBLIC_GIT_COMMIT` | current git commit | Baked static commit override |
+`--target` and `--profile` are required. `--bundle` defaults to `out`. Without `--apply`, the script remains dry-run even if `--dry-run` is omitted. The script validates the manifest and source identity, creates a timestamped backup of the current webroot, then synchronizes the contents of `out/`, not the `out/` directory itself. It never accepts an arbitrary destination.
 
-## API (server mode)
+### Rollback
 
-- `GET /api/health`: DB driver, path, mtime, latency
-- `GET /api/mirror-info`: table counts + snapshot timestamp of the active mirror
-- `GET /api/mutations[?experiment=TFMN1]`: Mutation Explorer dataset: samples +
-  mutations (one row per unique site, with a `values: { [seq_sample]: value }`
-  map, a `providedIn` list for donor-DNA mutations, and a rich `detail` block) +
-  registries + `warnings[]` + `stats` (capability flags).
-- `GET /api/barcode-counts`: VerA/VerB barcode charts.
-- `GET /api/tables`: list tables.
-- `GET /api/data/[tableName]?page=&pageSize=&sortBy=&sortDirection=&globalSearch=&filterLogic=`:
-  paginated, filterable raw table data.
-- `GET /api/distinct/[tableName]?column=`: distinct values for a column.
-- `GET /api/export/[tableName]`: CSV export.
+Record the printed `backup=` path before deployment. To roll back, stop serving the affected webroot if required by the host, inspect the backup, and restore its contents to the same approved webroot with the host's authorized file operation. Re-run the URL, manifest, and byte-range checks. Do not use a different target or copy a deployed artifact back into `data/`. The retained `.local/releases/<profile>/out/` and manifest identify the release that was handed off.
 
-## License / provenance
+## Local KIND handoff
 
-Released under the [MIT License](LICENSE). Argonne / ModelSEED project. The viewer
-is a presentation layer over the LIMS database (no scientific algorithms inside);
-the repository is cited for provenance in the robotic-experiment paper. See
-[`CITATION.cff`](CITATION.cff) for how to cite it.
+The repository has provisional checkout-independent local tooling only. It can validate, seal, and serve a static bundle. It does not register a KIND package, create a catalog entry, configure a proxy, grant access, or establish external readiness.
+
+The KIND owner must supply the authoritative package identity, exact proxy/root prefix, packaging contract, registration procedure, access requirements, and the decision on whether this data may be redistributed. Build with the exact supplied prefix:
+
+```bash
+ops/static-release.sh --profile full --target kind --root-path /owner/exact/prefix
+python scripts/seal-kind-static.py --bundle out --root-path /owner/exact/prefix \
+  --commit "$(git rev-parse HEAD)" \
+  --viewer-version "$(node -p 'require(\"./package.json\").version')" \
+  --allow-local-lims
+python -m ai_ale_kind_static doctor --bundle out --root-path /owner/exact/prefix
+python -m ai_ale_kind_static serve --bundle out --root-path /owner/exact/prefix \
+  --port 8765 --no-king
+```
+
+`doctor` validates the sealed bundle offline. `serve` serves it on loopback only. Check the root, manifest, and HTTPVFS range in another shell:
+
+```bash
+curl -i http://127.0.0.1:8765/owner/exact/prefix/
+curl -i http://127.0.0.1:8765/owner/exact/prefix/data/manifest.json
+curl -i -H 'Range: bytes=0-99' \
+  http://127.0.0.1:8765/owner/exact/prefix/db/lims.db
+```
+
+The range response must be `206 Partial Content` with the expected `Content-Range`. Use the exact prefix, not a runtime rewrite. If no prefix is supplied, build with `--root-path ''` and serve with the same empty root argument.
+
+## Build-time server compatibility boundary
+
+`npm run dev`, `npm start`, `Dockerfile`, and `docker-compose.yml` are retained for server-mode development or the bounded release build only. They require Node and a local database configuration, do not serve `out/`, do not define the static deployment path, and do not establish KIND readiness. Do not present `npm run dev` as the normal static workflow.
+
+## Troubleshooting and handoff checklist
+
+- Source missing: confirm the profile path or provide `--source`; full refresh requires it.
+- Integrity or hash mismatch: stop and rebuild every generated artifact from one source snapshot.
+- Wrong base path: rebuild with the exact target or KIND prefix. Do not patch exported HTML.
+- Missing manifest or parity failure: inspect `.local/releases/<profile>/server.log`, then rerun the release.
+- HTTPVFS mismatch: rebuild the selected profile; never mix profile directories.
+- KIND prefix failure: obtain the owner-supplied prefix and rebuild. No runtime rewriting is supported.
+- Server API failure after static build: run `npm run build` before `npm start`.
+
+Before handoff, record branch and commit, profile, source path and SHA-256, target and base path, viewer version, snapshot timestamp and table counts, validation output, bundle manifest, URL status, manifest response, and a representative `206` byte-range response. Confirm that no webroot was changed unless the deployment owner explicitly authorized `--apply`. For KIND, attach the owner-supplied identity, prefix, packaging and redistribution decisions, and clearly label external registration as unresolved until the owner confirms it.
+
+For the detailed command reference and maintained operations authority, see [`docs/README.md`](docs/README.md). For contribution checks and code conventions, see [`CONTRIBUTING.md`](CONTRIBUTING.md).

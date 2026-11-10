@@ -1,8 +1,8 @@
 # Contributing
 
-This is the development guide for the AI-ALE LIMS Data Viewer. For what the app is
-and how to use it, see the [`README`](README.md); for documentation ownership and
-static operating boundaries, see [`docs/README.md`](docs/README.md).
+This is the development guide for the AI-ALE LIMS Data Viewer. For static operator,
+maintainer, and deployment handoff procedures, see the [`README`](README.md); for
+the authoritative operations reference, see [`docs/README.md`](docs/README.md).
 
 ## Setup
 
