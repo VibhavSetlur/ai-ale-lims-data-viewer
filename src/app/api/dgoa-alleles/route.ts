@@ -19,7 +19,7 @@ export async function GET() {
     const [measurementSchema, alleleSchema] = await Promise.all([getTableSchema('dgoA_lib_variants'), getTableSchema('dgoA_alleles')]);
     const measurementColumns = new Set(measurementSchema.map(column => column.name));
     const alleleColumns = new Set(alleleSchema.map(column => column.name));
-    const measurementNeed = ['Seqsample', 'Seqorder', 'Transformation_library', 'Count', 'DNAseq'];
+    const measurementNeed = ['Seqsample', 'Seqorder', 'Transformation_library', 'Count', 'DNAseq', 'AAseq'];
     const alleleNeed = ['Allele_DNA_index', 'Allele_AA_index', 'DNAseq_native'];
     if (!measurementNeed.every(column => measurementColumns.has(column)) || !alleleNeed.every(column => alleleColumns.has(column))) {
       return NextResponse.json({ variants: [], measurements: [], warnings: ['dgoA tables do not have the required measurement identity or sequence keys.'], source: { available: false } });

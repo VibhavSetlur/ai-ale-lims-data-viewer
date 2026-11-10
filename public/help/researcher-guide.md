@@ -60,6 +60,8 @@ The Guide, Changelog, and Help buttons live in the left sidebar under **Help & L
 ## 3. Finding the key results
 
 ### dgoA\* amplification (the main finding)
+
+The dgoA Alleles workflow is capability-gated by the selected snapshot. When dgoA assay tables are absent, the tab is intentionally hidden rather than shown as a broken request. Some assay-bearing samples, including full-development dgoA experiments, may have no mutation rows. The viewer keeps those samples discoverable for the dgoA workflow and reports no mutation records explicitly. This is not evidence of zero mutations, and these samples are excluded from mutation denominators.
 1. Open **Copy Number**.
 2. Each line is one lineage; Y = copy number, X = transfer.
 3. Look for lines rising above the **CN = 1x** baseline toward 2-3x (outlier

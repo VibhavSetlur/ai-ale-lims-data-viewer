@@ -4,6 +4,7 @@ set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 PROFILE=""
+SOURCE_OVERRIDE=""
 TARGET=""
 ROOT_PATH=""
 DRY_RUN=0
@@ -12,6 +13,7 @@ PORT="${RELEASE_PORT:-0}"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --profile) PROFILE="${2:?missing profile}"; shift 2 ;;
+    --source) SOURCE_OVERRIDE="${2:?missing source}"; shift 2 ;;
     --target) TARGET="${2:?missing target}"; shift 2 ;;
     --root-path) ROOT_PATH="${2:?missing root path}"; shift 2 ;;
     --channel) CHANNEL="${2:?missing channel}"; shift 2 ;;
@@ -27,6 +29,7 @@ case "$PROFILE" in
   full) SOURCE_DB="data/lims_indexed.db" ;;
   *) echo "ERROR: profile must be trimmed or full" >&2; exit 2 ;;
 esac
+if [[ -n "$SOURCE_OVERRIDE" ]]; then SOURCE_DB="$SOURCE_OVERRIDE"; fi
 case "$TARGET" in
   aiale) ROOT_PATH="${ROOT_PATH:-/annotation/projects/aiale}" ;;
   aiale-dev) ROOT_PATH="${ROOT_PATH:-/annotation/projects/aiale-dev}" ;;
@@ -54,7 +57,9 @@ DATA_DIR="$RELEASE_DIR/data"
 DB_DIR="$RELEASE_DIR/db"
 OUT_DIR="$RELEASE_DIR/out"
 SOURCE_ABS="$(realpath "$SOURCE_DB")"
-SOURCE_SHA256="$(sha256sum "$SOURCE_ABS" | awk '{print $1}')"
+UPSTREAM_SOURCE="$SOURCE_ABS"
+UPSTREAM_SHA256="$(sha256sum "$SOURCE_ABS" | awk '{print $1}')"
+SOURCE_SHA256="$UPSTREAM_SHA256"
 
 if (( DRY_RUN )); then
   python3 ops/validate.py --source "$SOURCE_ABS" --profile "$PROFILE"
@@ -64,7 +69,24 @@ fi
 
 mkdir -p "$DATA_DIR" "$DB_DIR"
 rm -rf "$DATA_DIR"/* "$DB_DIR"/* "$OUT_DIR"
-cp -p "$SOURCE_ABS" "$DATA_DIR/source.db"
+# Capture one SQLite-consistent immutable snapshot. All release consumers use this
+# file so WAL/checkpoint activity cannot split provenance across build stages.
+SNAPSHOT_DB="$DATA_DIR/source.db"
+python3 - "$SOURCE_ABS" "$SNAPSHOT_DB" <<'PY'
+import sqlite3, sys
+source, destination = sys.argv[1:]
+con = sqlite3.connect(f'file:{source}?mode=ro', uri=True)
+out = sqlite3.connect(destination)
+try:
+    con.backup(out)
+    result = out.execute('PRAGMA integrity_check').fetchone()
+    if not result or result[0].lower() != 'ok':
+        raise SystemExit(f'integrity_check failed for snapshot: {result!r}')
+finally:
+    out.close(); con.close()
+PY
+SOURCE_ABS="$(realpath "$SNAPSHOT_DB")"
+SOURCE_SHA256="$(sha256sum "$SOURCE_ABS" | awk '{print $1}')"
 
 # Generated public directories are temporarily linked to this profile. Restore them
 # exactly, including absence, when the operation exits.
@@ -107,7 +129,10 @@ if (( ! READY )); then
 fi
 BASE="http://127.0.0.1:$PORT"
 python3 ops/verify-server-source.py --base "$BASE" --source "$SOURCE_ABS"
-SRC="$SOURCE_ABS" BASE="$BASE" OUT="$DATA_DIR" DBDIR="$DB_DIR" PROFILE="$PROFILE" TARGET="$TARGET" ROOT_PATH="$ROOT_PATH" node scripts/prebake.mjs
+SRC="$SOURCE_ABS" UPSTREAM_SOURCE="$UPSTREAM_SOURCE" UPSTREAM_SHA256="$UPSTREAM_SHA256" BASE="$BASE" OUT="$DATA_DIR" DBDIR="$DB_DIR" PROFILE="$PROFILE" TARGET="$TARGET" ROOT_PATH="$ROOT_PATH" node scripts/prebake.mjs
+# Verify every endpoint-backed artifact against the still-running server before
+# stopping it. This is the release gate, not an optional post-hoc inspection.
+BASE="$BASE" SRC="$SOURCE_ABS" node scripts/verify-static-parity.mjs
 kill "$SERVER_PID" 2>/dev/null || true; wait "$SERVER_PID" 2>/dev/null || true; unset SERVER_PID
 
 # Build the selected target with a truthful branch/channel identity.

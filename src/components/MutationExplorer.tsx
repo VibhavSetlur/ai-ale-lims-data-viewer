@@ -129,6 +129,7 @@ interface MutationDataset {
     cnSampleCount: number;
     curveCount: number;
     hasBarcodes?: boolean;
+    hasDgoA?: boolean;
   };
 }
 
@@ -506,6 +507,7 @@ export default function MutationExplorer() {
       const detail = (e as CustomEvent).detail as { tab?: Tab } | undefined;
       if (detail?.tab && (detail.tab === 'samples' || detail.tab === 'compare' || detail.tab === 'growth' || detail.tab === 'libraryVariants' || detail.tab === 'dgoaAlleles' || detail.tab === 'copynumber')) {
         if (detail.tab === 'libraryVariants' && data?.stats?.hasBarcodes !== true) return;
+         if (detail.tab === 'dgoaAlleles' && data?.stats?.hasDgoA !== true) return;
         setTab(detail.tab);
       }
     };
@@ -536,6 +538,10 @@ export default function MutationExplorer() {
   // we are not stranded ON it (e.g. restored from a prior session) showing a blank pane.
   useEffect(() => {
     if (tab === 'libraryVariants' && data && data.stats && !data.stats.hasBarcodes) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- Restored tab is unavailable in this snapshot.
+      setTab('compare');
+    }
+    if (tab === 'dgoaAlleles' && data && data.stats && !data.stats.hasDgoA) {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- Restored tab is unavailable in this snapshot.
       setTab('compare');
     }
@@ -608,7 +614,9 @@ export default function MutationExplorer() {
               selected.size > 0 ? "bg-[var(--data-grow)] text-white" : "bg-[var(--surface-3)] text-[var(--text-soft)]"
             )}>{selected.size}</span>
           </TabButton>
-          <TabButton active={tab === 'dgoaAlleles'} onClick={() => setTab('dgoaAlleles')} icon={<Dna className="w-3.5 h-3.5" />}>dgoA Alleles</TabButton>
+          {data?.stats?.hasDgoA && (
+            <TabButton active={tab === 'dgoaAlleles'} onClick={() => setTab('dgoaAlleles')} icon={<Dna className="w-3.5 h-3.5" />}>dgoA Alleles</TabButton>
+          )}
            {data?.stats?.hasBarcodes && (
             <TabButton active={tab === 'libraryVariants'} onClick={() => setTab('libraryVariants')} icon={<Sparkles className="w-3.5 h-3.5" />} tour="tab-library-variants">
               Compare Library Variants
@@ -1244,7 +1252,7 @@ function SampleSelectionPanel({
 
       {/* Chip filter rows */}
       {showFilters && (
-        <div className="px-3 py-2 border-b border-slate-200 dark:border-gray-700 bg-slate-50/60 dark:bg-gray-800/60 space-y-1.5">
+        <div className="max-h-48 overflow-y-auto overscroll-contain px-3 py-2 border-b border-slate-200 dark:border-gray-700 bg-slate-50/60 dark:bg-gray-800/60 space-y-1.5" tabIndex={0} aria-label="Sample filters">
           <ChipRow label="Experiment" options={chipOptions.experiment} active={new Set(filters.chips.experiment)}
                    onToggle={v => toggleChip('experiment', v)} onClear={() => clearChip('experiment')} />
           <ChipRow label="Breseq run" options={chipOptions.breseq_registry_id} active={new Set(filters.chips.breseq_registry_id)}

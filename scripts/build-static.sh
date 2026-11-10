@@ -22,7 +22,9 @@ if [ "${1:-}" = "--help" ]; then
   exit 0
 fi
 
-BASE_PATH="${BASE_PATH:-/annotation/projects/aiale-dev}"
+# Preserve an explicitly empty root for local KIND bundles; only an unset value
+# receives the static-dev default.
+BASE_PATH="${BASE_PATH-/annotation/projects/aiale-dev}"
 case "$BASE_PATH" in
   /annotation/projects/aiale|/annotation/projects/aiale-dev|'') ;;
   *)

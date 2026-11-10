@@ -33,8 +33,10 @@ const SOURCE_DB = path.resolve(process.cwd(), process.env.SRC || 'data/lims_inde
 const PROFILE = process.env.PROFILE || 'unspecified';
 const TARGET = process.env.TARGET || 'unspecified';
 const ROOT_PATH = process.env.ROOT_PATH || '';
+const UPSTREAM_SOURCE = process.env.UPSTREAM_SOURCE || SOURCE_DB;
+const UPSTREAM_SHA256 = process.env.UPSTREAM_SHA256 || '';
 
-const EXPERIMENTS = ['TFMN1', 'TFMN2', 'TFMN3', 'TFMN4', 'strain_stocks'];
+// Experiment-specific artifacts are discovered from the selected snapshot at bake time.
 // Optional bounded verification mode: comma-separated artifact keys. The default
 // remains the complete release bake so normal snapshots never silently omit data.
 const requestedTargets = (process.env.PREBAKE_TARGETS || '')
@@ -42,15 +44,7 @@ const requestedTargets = (process.env.PREBAKE_TARGETS || '')
 
 const curatedTargets = [
   { key: 'mutations__all', url: '/api/mutations' },
-  ...EXPERIMENTS.map(e => ({
-    key: `mutations__experiment_${e}`,
-    url: `/api/mutations?experiment=${encodeURIComponent(e)}`,
-  })),
   { key: 'growth-series__all', url: '/api/growth-series' },
-  ...EXPERIMENTS.map(e => ({
-    key: `growth-series__experiment_${e}`,
-    url: `/api/growth-series?experiment=${encodeURIComponent(e)}`,
-  })),
   { key: 'mutations-stats', url: '/api/mutations-stats' },
   { key: 'barcode-counts', url: '/api/barcode-counts' },
   { key: 'library-variants', url: '/api/library-variants' },
@@ -98,7 +92,10 @@ async function main() {
     profile: PROFILE,
     target: TARGET,
     basePath: ROOT_PATH,
-    snapshot: { path: path.relative(process.cwd(), SOURCE_DB), sha256: sourceSha256, bytes: sourceStats.size, mtime: sourceStats.mtime.toISOString() },
+    snapshot: {
+      path: path.relative(process.cwd(), SOURCE_DB), sha256: sourceSha256, bytes: sourceStats.size, mtime: sourceStats.mtime.toISOString(),
+      upstream: { path: UPSTREAM_SOURCE, sha256: UPSTREAM_SHA256 || null },
+    },
     files: {},
   };
   let totalRaw = 0, totalGz = 0;
@@ -109,16 +106,24 @@ async function main() {
   if (!mirrorTarget) throw new Error('mirror-info target is required for static provenance');
   if (!selectedTargets.some(target => target.key === 'mirror-info')) mirrorInfo = await fetchJson(mirrorTarget.url);
 
-  // Only emit experiment-specific artifacts for experiments represented by the
-  // selected snapshot's mutation sample universe. Historical mutation rows can
-  // retain labels for removed experiments; those labels must not become visible
-  // static tabs or artifacts in a trimmed release.
-  let allowedExperiments = null;
-  if (selectedTargets.some(target => target.key === 'mutations__all')) {
-    const allMutations = await fetchJson('/api/mutations');
-    allowedExperiments = new Set(Array.isArray(allMutations?.experiments) ? allMutations.experiments : []);
+  // Discover experiment artifacts from the selected snapshot's assay-bearing
+  // catalog. The all-mutations response is authoritative for Seq_samples plus
+  // positive assay sources, and avoids stale hard-coded experiment names.
+  let allowedExperiments = new Set();
+  const allTarget = selectedTargets.find(target => target.key === 'mutations__all');
+  if (allTarget) {
+    const allMutations = await fetchJson(allTarget.url);
+    allowedExperiments = new Set(Array.isArray(allMutations?.experiments) ? allMutations.experiments.filter(Boolean) : []);
+    for (const experiment of [...allowedExperiments].sort()) {
+      const key = `mutations__experiment_${encodeURIComponent(experiment)}`;
+      selectedTargets.push({ key, url: `/api/mutations?experiment=${encodeURIComponent(experiment)}` });
+      selectedTargets.push({ key: `growth-series__experiment_${encodeURIComponent(experiment)}`, url: `/api/growth-series?experiment=${encodeURIComponent(experiment)}` });
+    }
   }
+  const seenKeys = new Set();
   for (const t of selectedTargets) {
+    if (seenKeys.has(t.key)) continue;
+    seenKeys.add(t.key);
     const experimentMatch = t.key.match(/^(?:mutations|growth-series)__experiment_(.+)$/);
     if (experimentMatch && allowedExperiments && !allowedExperiments.has(experimentMatch[1])) {
       console.log(`skipping ${t.key}: experiment absent from selected snapshot`);

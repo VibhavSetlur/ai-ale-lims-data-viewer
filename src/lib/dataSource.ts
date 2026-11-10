@@ -51,11 +51,11 @@ function apiUrlToKey(apiUrl: string): string | null {
     const exp = params.get('experiment');
     // Custom registry queries can't be pre-baked (would need every combo); static
     // mode uses the auto-registry default, which is the correct per-experiment run.
-    return exp ? `mutations__experiment_${exp}` : 'mutations__all';
+    return exp ? `mutations__experiment_${encodeURIComponent(exp)}` : 'mutations__all';
   }
   if (pathPart === 'growth-series') {
     const exp = params.get('experiment');
-    return exp ? `growth-series__experiment_${exp}` : 'growth-series__all';
+    return exp ? `growth-series__experiment_${encodeURIComponent(exp)}` : 'growth-series__all';
   }
   if (pathPart === 'mutations-stats') return 'mutations-stats';
   if (pathPart === 'barcode-counts') return 'barcode-counts';

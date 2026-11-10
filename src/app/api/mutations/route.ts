@@ -103,6 +103,7 @@ export interface MutationDataset {
     cnSampleCount: number;      // distinct samples with at least one copy-number value
     curveCount: number;         // samples with a numeric OD growth curve (>=2 points)
     hasBarcodes: boolean;       // verAB_barcodes table exists AND has rows (drives Barcode tab visibility)
+    hasDgoA: boolean;           // dgoA measurement/allele tables exist AND have positive rows
   };
 }
 
@@ -321,7 +322,7 @@ function mutationKey(r: MutationRawRow): string {
 // inside the CTE — a sample only appears if it had calls under the selected
 // registry/experiment. Params are appended in (direct experiment?, associated
 // experiment?, registry?, barcode experiment?) order.
-function buildSamplesSql(opts: { experiment: boolean; registry: boolean; barcodeSamples: boolean }): string {
+function buildSamplesSql(opts: { experiment: boolean; registry: boolean; barcodeSamples: boolean; dgoaSamples: boolean }): string {
   const inner: string[] = ['deleted = 0'];
   if (opts.experiment) inner.push(`(
     ("Experiment" IS NOT NULL AND "Experiment" != '' AND "Experiment" = ?)
@@ -353,6 +354,23 @@ function buildSamplesSql(opts: { experiment: boolean; registry: boolean; barcode
         LEFT JOIN Seq_samples ss_filter
           ON ss_filter."Sequencing_sample" = v."Seqsample" AND ss_filter.deleted = 0
         WHERE ${barcodeWhere.join(' AND ')}
+        GROUP BY v."Seqsample"` : '';
+  const dgoaWhere: string[] = ['v.deleted = 0', 'COALESCE(v."Count", 0) > 0'];
+  if (opts.experiment) dgoaWhere.push('ss_filter."Experiment" = ?');
+  const dgoaUnion = opts.dgoaSamples ? `
+        UNION ALL
+        SELECT
+          v."Seqsample" AS seq_sample,
+          NULL AS experiment,
+          MIN(v."Seqorder") AS seqorder,
+          'dgoa' AS source,
+          0 AS has_barcodes,
+          0 AS barcode_read_count,
+          0 AS verab_combinations
+        FROM dgoA_lib_variants v
+        LEFT JOIN Seq_samples ss_filter
+          ON ss_filter."Sequencing_sample" = v."Seqsample" AND ss_filter.deleted = 0
+        WHERE ${dgoaWhere.join(' AND ')}
         GROUP BY v."Seqsample"` : '';
   return `
     SELECT
@@ -396,6 +414,7 @@ function buildSamplesSql(opts: { experiment: boolean; registry: boolean; barcode
         WHERE ${inner.join(' AND ')}
         GROUP BY "Seq_sample"
         ${barcodeUnion}
+        ${dgoaUnion}
       ) sample_sources
       GROUP BY seq_sample
     ) ms
@@ -631,6 +650,13 @@ export async function GET(req: NextRequest) {
     } catch {
       hasBarcodeTable = false;
     }
+    let hasDgoATable = false;
+    try {
+      await runQuery<{ n: number }>('SELECT COUNT(*) AS n FROM dgoA_lib_variants WHERE 1 = 0');
+      hasDgoATable = true;
+    } catch {
+      hasDgoATable = false;
+    }
 
     // First pass: enumerate the breseq registries present for this (experiment-filtered)
     // dataset so we can validate the requested registry and pick a default when
@@ -717,11 +743,13 @@ export async function GET(req: NextRequest) {
     if (experimentFilter) sampleParams.push(experimentFilter, experimentFilter);
     if (scopeSamplesByRegistry) sampleParams.push(selectedRegistry);
     if (hasBarcodeTable && experimentFilter) sampleParams.push(experimentFilter);
+    if (hasDgoATable && experimentFilter) sampleParams.push(experimentFilter);
 
     const sampleSql = buildSamplesSql({
       experiment: !!experimentFilter,
       registry: scopeSamplesByRegistry,
       barcodeSamples: hasBarcodeTable,
+      dgoaSamples: hasDgoATable,
     });
     const mutSql = MUTATIONS_SQL
       + (experimentFilter ? ` AND (${EXPERIMENT_SCOPE_SQL})` : '')
@@ -1044,11 +1072,23 @@ export async function GET(req: NextRequest) {
     } catch {
       hasBarcodes = false; // table absent -> no barcode tab
     }
+    let hasDgoA = false;
+    try {
+      const dgoa = await runQuery<{ n: number }>(
+        "SELECT COUNT(*) AS n FROM dgoA_lib_variants WHERE COALESCE(deleted, 0) = 0 AND COALESCE(Count, 0) > 0"
+      );
+      hasDgoA = (dgoa[0]?.n ?? 0) > 0;
+    } catch {
+      hasDgoA = false; // assay tables absent -> no dgoA tab
+    }
 
     return NextResponse.json({
       samples,
       mutations,
-      experiments: [...new Set(samples.map(sample => sample.experiment).filter(Boolean))],
+      // Experiment catalog is the live Seq_samples assay catalog, not the
+      // mutation-bearing selector population. This keeps assay-only experiments
+      // discoverable without changing mutation rows or denominators.
+      experiments: allExperiments.map(row => row.name).filter(Boolean),
       registries,
       selectedRegistry,
       warnings,
@@ -1061,6 +1101,7 @@ export async function GET(req: NextRequest) {
         cnSampleCount: cnSamplesSeen,
         curveCount: samplesWithCurve,
         hasBarcodes,
+        hasDgoA,
       },
     } satisfies MutationDataset);
   } catch (e) {

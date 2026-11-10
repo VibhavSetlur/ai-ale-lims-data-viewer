@@ -40,7 +40,18 @@ if manifest.get('basePath') != base: raise SystemExit(f"bundle basePath {manifes
 if manifest.get('profile') not in {'trimmed', 'full'}: raise SystemExit('bundle has no valid data profile')
 print(f"bundle: profile={manifest['profile']} target={target} basePath={base} sha256={manifest.get('snapshot', {}).get('sha256')}")
 PY
-python3 ops/validate.py --source "$PWD/data/$([[ "$TARGET" == aiale ]] && echo lims_TFMN1_indexed.db || echo lims_indexed.db)" --release "$PWD/.local/releases/$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["profile"])' "$MANIFEST")" --out "$BUNDLE" --target "$TARGET" --root-path "$EXPECTED_BASE" >/tmp/static-deploy-validate.json
+BUNDLE_PROFILE="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["profile"])' "$MANIFEST")"
+case "$BUNDLE_PROFILE" in
+  trimmed) SOURCE_DB="$PWD/data/lims_TFMN1_indexed.db" ;;
+  full) SOURCE_DB="$PWD/data/lims_indexed.db" ;;
+  *) echo "ERROR: bundle has no valid data profile" >&2; exit 1 ;;
+esac
+RELEASE_DIR="$PWD/.local/releases/$BUNDLE_PROFILE"
+RELEASE_SOURCE="$RELEASE_DIR/data/source.db"
+if [[ -f "$RELEASE_SOURCE" ]]; then SOURCE_DB="$RELEASE_SOURCE"; fi
+VALIDATION_REPORT="/tmp/opencode/static-deploy-validate-${TARGET}-${BUNDLE_PROFILE}.json"
+python3 ops/validate.py --source "$SOURCE_DB" --release "$RELEASE_DIR" --out "$BUNDLE" --target "$TARGET" --root-path "$EXPECTED_BASE" >"$VALIDATION_REPORT"
+printf 'validated bundle: profile=%s source=%s report=%s\n' "$BUNDLE_PROFILE" "$SOURCE_DB" "$VALIDATION_REPORT"
 if (( DRY_RUN || ! APPLY )); then
   echo "dry run only: would rsync bundle contents to $DEST"
   echo "use --apply to perform the deployment"
@@ -48,8 +59,13 @@ if (( DRY_RUN || ! APPLY )); then
   exit 0
 fi
 [[ -d "$DEST" ]] || { echo "ERROR: approved webroot does not exist: $DEST" >&2; exit 1; }
-BACKUP="${DEST}.backup.$(date -u +%Y%m%dT%H%M%SZ)"
-mkdir "$BACKUP"
+STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
+BACKUP="${DEST}.backup.${STAMP}"
+if ! mkdir "$BACKUP" 2>/dev/null; then
+  BACKUP="/scratch/vsetlur/tmp/ai-ale-static-backup-${TARGET}-${STAMP}"
+  mkdir "$BACKUP"
+  echo "webroot parent is not writable; using local rollback backup: $BACKUP" >&2
+fi
 rsync -rlt --delete --omit-dir-times --no-perms --no-owner --no-group "$DEST/" "$BACKUP/"
 rsync -rlt --delete --omit-dir-times --no-perms --no-owner --no-group "$BUNDLE/" "$DEST/"
 find "$DEST" -type f -exec chmod 644 {} +

@@ -19,6 +19,17 @@ const CANDIDATE_TABLES = [
   'Transformation_libraries', 'DNA_constructs', 'Strains',
 ];
 
+async function tableNames(): Promise<string[]> {
+  try {
+    if (getDbType() === 'sqlite') {
+      const rows = await runQuery<{ name: string }>("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'");
+      return rows.map(row => row.name).filter(Boolean).sort();
+    }
+    const rows = await runQuery<{ TABLE_NAME: string }>('SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE()');
+    return rows.map(row => row.TABLE_NAME).filter(Boolean).sort();
+  } catch { return CANDIDATE_TABLES; }
+}
+
 async function safeMaxSynced(table: string): Promise<string | null> {
   try {
     const rows = await runQuery<{ ts: string | null }>(
@@ -57,7 +68,7 @@ export async function GET() {
   }
 
   let latest: string | null = null;
-  for (const t of CANDIDATE_TABLES) {
+  for (const t of await tableNames()) {
     const ts = await safeMaxSynced(t);
     if (ts && (!latest || ts > latest)) latest = ts;
     const cnt = await safeCount(t);

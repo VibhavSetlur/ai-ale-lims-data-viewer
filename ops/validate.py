@@ -119,7 +119,9 @@ def main() -> int:
             expected_tables = info["tables"]
             expected_experiments = set(info.get("experiments", []))
             snapshot_counts = manifest.get("snapshot", {}).get("tableCounts", {})
-            if any(int(snapshot_counts.get(name, -1)) != int(count) for name, count in expected_tables.items() if name in snapshot_counts):
+            if set(snapshot_counts) != set(expected_tables):
+                raise ValueError("manifest table-count inventory does not match selected source schema")
+            if any(int(snapshot_counts[name]) != int(count) for name, count in expected_tables.items()):
                 raise ValueError("manifest table counts do not match selected source")
             tables_payload = json.loads((release / "data" / "tables.json").read_text())
             actual_tables = {str(row.get("name")): int(row.get("rowCount", -1)) for row in tables_payload.get("tables", [])}

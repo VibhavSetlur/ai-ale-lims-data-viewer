@@ -590,19 +590,8 @@ export default function Dashboard({ initialTables, buildInfo }: DashboardProps) 
                   </div>
                 </>
               ) : (
-                <div className="flex-1 overflow-y-auto p-2.5">
-                  <div className="lims-label mb-2 px-1">Sections</div>
-                  <div className="space-y-2 text-[11.5px] text-[var(--text-soft)] leading-relaxed px-1">
-                    <div className="flex gap-2">
-                      <span className="lims-pill lims-pill-mut shrink-0 mt-0.5">SEL</span>
-                      <span><span className="font-medium text-[var(--text)]">Sample Selection</span> — filter and pick samples to compare.</span>
-                    </div>
-                    <div className="flex gap-2">
-                      <span className="lims-pill lims-pill-cn shrink-0 mt-0.5">CMP</span>
-                      <span><span className="font-medium text-[var(--text)]">Comparative View</span> — side-by-side mutation calls and copy-number rows.</span>
-                    </div>
-
-                  </div>
+                <div className="flex-1 overflow-y-auto p-2.5" aria-label="Workspace navigation">
+                  <div className="sr-only">Choose a workspace above.</div>
                 </div>
               )}
 

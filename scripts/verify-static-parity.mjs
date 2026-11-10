@@ -59,11 +59,25 @@ async function main() {
     throw new Error('public/db/lims.db does not reference the configured HTTPVFS database');
   }
 
-  const checks = [
-    ['mutations__all', '/api/mutations'],
-    ['tables', '/api/tables?withCounts=1'],
-    ['mirror-info', '/api/mirror-info'],
-  ];
+  const endpointForKey = (key) => {
+    if (key === 'mutations__all') return '/api/mutations';
+    if (key === 'growth-series__all') return '/api/growth-series';
+    if (key === 'mutations-stats') return '/api/mutations-stats';
+    if (key === 'barcode-counts') return '/api/barcode-counts';
+    if (key === 'library-variants') return '/api/library-variants';
+    if (key === 'dgoa-alleles') return '/api/dgoa-alleles';
+    if (key === 'plate-design-factors') return '/api/plate-design/factors';
+    if (key === 'tables') return '/api/tables?withCounts=1';
+    if (key === 'mirror-info') return '/api/mirror-info';
+    if (key === 'config') return '/api/config';
+    const mutation = key.match(/^mutations__experiment_(.+)$/);
+    if (mutation) return `/api/mutations?experiment=${encodeURIComponent(decodeURIComponent(mutation[1]))}`;
+    const growth = key.match(/^growth-series__experiment_(.+)$/);
+    if (growth) return `/api/growth-series?experiment=${encodeURIComponent(decodeURIComponent(growth[1]))}`;
+    return null;
+  };
+  const checks = Object.keys(manifest.files ?? {}).map(key => [key, endpointForKey(key)]).filter(([, endpoint]) => endpoint);
+  if (checks.length === 0) throw new Error('manifest has no endpoint-backed artifacts');
   for (const [key, endpoint] of checks) {
     const [baked, live] = await Promise.all([json(path.join(DATA_DIR, `${key}.json`)), fetchJson(endpoint)]);
     if (canonicalJson(baked) !== canonicalJson(live)) throw new Error(`${key} differs from live ${endpoint}`);

@@ -216,7 +216,7 @@ const SECTIONS: Section[] = [
       { kind: 'bullets', items: [
         'ALE — adaptive laboratory evolution: serially passaging a population under selection so beneficial mutations accumulate.',
         'Transfer — one serial-passage cycle. The X axis of the copy-number and barcode charts.',
-        'dgoA* — the engineered aldolase locus whose copy-number amplification is the central adaptive signal in this study.',
+        'dgoA* — the engineered aldolase locus whose copy-number amplification is the central adaptive signal in this study. dgoA Alleles is available only when the snapshot contains its assay tables; assay-bearing samples without mutation rows are labeled as having no mutation records, not as mutation-free.',
         'Copy number (CN) — gene dosage, estimated as mean read depth over a region divided by mean whole-genome depth. CN = 1 is the baseline; CN = 2-3 is amplification.',
         'Frequency — the fraction of the population carrying a mutation (0 to 1, shown as 0% to 100%).',
         'Provided mutation — a mutation supplied as donor DNA in the growth condition (outlined amber). Spontaneous — a mutation that arose during evolution (no outline).',

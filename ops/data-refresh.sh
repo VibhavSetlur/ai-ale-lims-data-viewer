@@ -3,24 +3,35 @@
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 PROFILE=""; SOURCE=""
+CANONICAL_TRIMMED_SOURCE="/scratch1/fliu/hub_scratch/synbio/lims_mirror_TFMN1.db"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --profile) PROFILE="${2:?missing profile}"; shift 2 ;;
     --source) SOURCE="${2:?missing source}"; shift 2 ;;
-    -h|--help) echo "Usage: ops/data-refresh.sh --profile trimmed|full --source /path/to/mirror.db"; exit 0 ;;
+    -h|--help) echo "Usage: ops/data-refresh.sh --profile trimmed [--source /path/to/mirror.db]"; echo "       ops/data-refresh.sh --profile full --source /path/to/mirror.db"; exit 0 ;;
     *) echo "ERROR: unknown option: $1" >&2; exit 2 ;;
   esac
 done
 case "$PROFILE" in
-  trimmed) DEST="data/lims_TFMN1_indexed.db" ;;
-  full) DEST="data/lims_indexed.db" ;;
+  trimmed) DEST="data/lims_TFMN1_indexed.db"; [[ -n "$SOURCE" ]] || SOURCE="$CANONICAL_TRIMMED_SOURCE" ;;
+  full) DEST="data/lims_indexed.db"; [[ -n "$SOURCE" ]] || { echo "ERROR: full refresh requires explicit --source" >&2; exit 2; } ;;
   *) echo "ERROR: --profile must be trimmed or full" >&2; exit 2 ;;
 esac
-[[ -n "$SOURCE" && -f "$SOURCE" ]] || { echo "ERROR: --source must name an existing database" >&2; exit 2; }
+[[ -f "$SOURCE" ]] || { echo "ERROR: source database does not exist: $SOURCE" >&2; exit 2; }
 mkdir -p data/archive
 TMP="$DEST.tmp.$$"
 trap 'rm -f "$TMP"' EXIT
-cp --reflink=auto "$SOURCE" "$TMP"
+# SQLite backup() captures a transactionally consistent snapshot, including WAL state.
+python3 - "$SOURCE" "$TMP" <<'PY'
+import sqlite3, sys
+source, destination = sys.argv[1:]
+con = sqlite3.connect(f'file:{source}?mode=ro', uri=True)
+out = sqlite3.connect(destination)
+try:
+    con.backup(out)
+finally:
+    out.close(); con.close()
+PY
 python3 - "$TMP" <<'PY'
 import sqlite3, sys
 p = sys.argv[1]

@@ -40,9 +40,10 @@ def main() -> int:
             raise RuntimeError(f"server database is not healthy SQLite: {db}")
         if int(db.get("size_bytes", -1)) != source_size:
             raise RuntimeError(f"server DB size {db.get('size_bytes')} != source size {source_size}")
+        # mtime is diagnostic only: starting the server or copying the snapshot can
+        # change filesystem timestamp precision by milliseconds. Hash and size are
+        # the immutable identity checks; retain mtime in the response for provenance.
         server_mtime = str(db.get("mtime", ""))
-        if server_mtime[:23] != source_mtime[:23]:
-            raise RuntimeError(f"server DB mtime {server_mtime} != source mtime {source_mtime}")
         config = get_json(args.base, "/api/config")
         configured = Path(str(config.get("sqlitePath", ""))).resolve()
         if configured != args.source.resolve():
